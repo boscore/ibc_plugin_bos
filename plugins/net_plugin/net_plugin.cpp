@@ -1684,7 +1684,7 @@ namespace eosio {
          return;
       }
 
-      if (head <= msg.head_num ) {
+      if (head < msg.head_num ) {
          fc_dlog(logger, "sync check state 3");
          if (!verify_catchup(c, msg.head_num, msg.head_id)) {
             request_message req;
