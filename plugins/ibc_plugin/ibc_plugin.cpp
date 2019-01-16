@@ -70,7 +70,7 @@ namespace eosio { namespace ibc {
    class connection;
    class ibc_chain_contract;
    class ibc_token_contract;
-
+   
    using connection_ptr = std::shared_ptr<connection>;
    using connection_wptr = std::weak_ptr<connection>;
    using socket_ptr = std::shared_ptr<tcp::socket>;
@@ -131,7 +131,7 @@ namespace eosio { namespace ibc {
 
       vector<string>                   supplied_peers;
       vector<chain::public_key_type>   allowed_peers; ///< peer keys allowed to connect
-      std::map<chain::public_key_type, chain::private_key_type> private_keys;
+      std::map<chain::public_key_type, chain::private_key_type> private_keys; 
 
       enum possible_connections : char {
          None = 0,
@@ -152,7 +152,7 @@ namespace eosio { namespace ibc {
       chain::private_key_type                relay_private_key;
       unique_ptr< ibc_chain_contract >       chain_contract;
       unique_ptr< ibc_token_contract >       token_contract;
-
+      
       unique_ptr<boost::asio::steady_timer>  connector_check;
       boost::asio::steady_timer::duration    connector_period;
       int                                    max_cleanup_time_ms = 0;
@@ -278,7 +278,7 @@ namespace eosio { namespace ibc {
    const fc::string logger_name("ibc_plugin_impl");
    fc::logger logger;
    std::string peer_log_format;
-
+      
 #define peer_dlog( PEER, FORMAT, ... ) \
   FC_MULTILINE_MACRO_BEGIN \
    if( logger.is_enabled( fc::log_level::debug ) ) \
@@ -333,7 +333,7 @@ namespace eosio { namespace ibc {
    struct handshake_initializer {
       static void populate( handshake_message& hello );
    };
-
+   
    class connection : public std::enable_shared_from_this<connection> {
    public:
       explicit connection( string endpoint );
@@ -437,7 +437,7 @@ namespace eosio { namespace ibc {
        * encountered unpacking or processing the message.
        */
       bool process_next_message(ibc_plugin_impl& impl, uint32_t message_length);
-
+      
       fc::optional<fc::variant_object> _logger_variant;
       const fc::variant_object& get_logger_variant()  {
          if (!_logger_variant) {
@@ -463,7 +463,7 @@ namespace eosio { namespace ibc {
          return *_logger_variant;
       }
    };
-
+   
    struct msgHandler : public fc::visitor<void> {
       ibc_plugin_impl &impl;
       connection_ptr c;
@@ -574,7 +574,7 @@ namespace eosio { namespace ibc {
       } catch (...){}
       return false;
    }
-
+   
    // ---- transaction constructor and push function ----
    void set_transaction_headers( transaction& trx, uint32_t expiration = default_expiration_delta, uint32_t delay_sec = 0 ) {
       trx.expiration = my_impl->chain_plug->chain().head_block_time() + fc::seconds(expiration);
@@ -659,7 +659,7 @@ namespace eosio { namespace ibc {
       trx.sign( my_impl->relay_private_key, my_impl->chain_plug->chain().get_chain_id() );
       return trx;
    }
-
+   
    void push_action( action actn ) {
       auto trx_opt = generate_signed_transaction_from_action( actn );
       if ( trx_opt.valid() ){
@@ -669,7 +669,7 @@ namespace eosio { namespace ibc {
       }
    }
 
-
+   
    // --------------- ibc_chain_contract ---------------
    class ibc_chain_contract {
    public:
@@ -714,7 +714,7 @@ namespace eosio { namespace ibc {
       }
       return false;
    }
-
+   
    void ibc_chain_contract::get_contract_state(){
       contract_state c_state = none;
       if ( has_contract() ) {
@@ -959,7 +959,7 @@ namespace eosio { namespace ibc {
          elog("memo format error, didn't find charactor \'@\' in memo");
          return optional<memo_info_type>();
       }
-
+      
       string receiver_str = memo.substr( 0, pos );
       trim( receiver_str );
       info.receiver = name( receiver_str );
@@ -988,7 +988,7 @@ namespace eosio { namespace ibc {
          elog("memo format error, chain not provided in memo");
          return optional<memo_info_type>();
       }
-
+      
       return info;
    }
 
@@ -1158,7 +1158,7 @@ namespace eosio { namespace ibc {
       } FC_LOG_AND_DROP()
       return optional<transaction>();
    }
-
+   
    optional<transfer_action_type> ibc_token_contract::get_original_action_params( std::vector<char> packed_trx_receipt, transaction_id_type* trx_id_ptr ){
       try {
          auto trx_opt = get_transaction( packed_trx_receipt );
@@ -1943,7 +1943,9 @@ namespace eosio { namespace ibc {
                                           } else {
                                              ilog( "Peer ${p} closed connection",("p",pname) );
                                           }
-                                          close( conn );
+                                          /* close( conn ); */
+                                          conn->write_queue.clear();
+                                          conn->out_queue.clear();
                                        }
                                     }
                                     catch(const std::exception &ex) {
@@ -2022,7 +2024,7 @@ namespace eosio { namespace ibc {
       brtm.merkle = block->blockroot_merkle;
 
       blockroot_merkle_cache.push_back( brtm );
-      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*24 ){ // one day
+      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*24*7 ){ // one week
          blockroot_merkle_cache.erase( blockroot_merkle_cache.begin() );
       }
 
@@ -2378,7 +2380,7 @@ namespace eosio { namespace ibc {
                ret_msg.headers.push_back( *sbp );
             } else {    // when node restart
                ilog("didn't find block_state of number ${n} in forkdb, calculate it by known blockroot_merkles",("n",check_num));
-
+               
                chain_contract->get_blkrtmkls_tb();
                blockroot_merkle_type walk_point;
 
@@ -3107,16 +3109,20 @@ namespace eosio { namespace ibc {
             auto it = local_origtrxs.project<0>(it_trx_id);
             if ( it != local_origtrxs.end() ){
                ++it;
-               while ( it != local_origtrxs.end() && lwcls.first <= it->block_num && it->block_num <= lib_num ){
-                  orig_trxs_to_push.push_back( *it );
+               while ( it != local_origtrxs.end() ){
+                  if ( lwcls.first <= it->block_num && it->block_num <= lib_num ){
+                     orig_trxs_to_push.push_back( *it );
+                  }
                   ++it;
                }
             } else { // maybe happen when restart ibc_plugin node
                wlog("can not find original transacton infomation form local_origtrxs, restart nodeos?");
                auto it_blk_num = local_origtrxs.get<by_block_num>().lower_bound( cash_opt->orig_trx_block_num + 1 );
                it = local_origtrxs.project<0>(it_blk_num);
-               while ( it != local_origtrxs.end() && lwcls.first <= it->block_num && it->block_num <= lib_num ){
-                  orig_trxs_to_push.push_back( *it );
+               while ( it != local_origtrxs.end() ){
+                  if ( lwcls.first <= it->block_num && it->block_num <= lib_num ){
+                     orig_trxs_to_push.push_back( *it );
+                  }
                   ++it;
                }
             }
@@ -3421,7 +3427,7 @@ namespace eosio { namespace ibc {
          if( c->peer_addr == host ) return c;
       return connection_ptr();
    }
-
+   
    //--------------- handshake_initializer ---------------
    void handshake_initializer::populate( handshake_message &hello) {
       hello.network_version = net_version;
