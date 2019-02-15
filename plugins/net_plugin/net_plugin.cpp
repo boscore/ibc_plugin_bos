@@ -1780,6 +1780,10 @@ namespace eosio {
                set_state(head_catchup);
             }
          }
+
+         if (state == in_sync) {
+            send_handshakes();
+         }
       }
       else if (state == lib_catchup) {
          if( blk_num == sync_known_lib_num ) {
