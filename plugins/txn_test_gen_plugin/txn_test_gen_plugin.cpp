@@ -46,7 +46,7 @@ using namespace eosio::chain;
           try { \
              if (body.empty()) body = "{}"; \
              INVOKE \
-             cb(http_response_code, fc::json::to_string(result)); \
+             cb(http_response_code, fc::variant(result)); \
           } catch (...) { \
              http_plugin::handle_exception(#api_name, #call_name, body, cb); \
           } \
@@ -78,7 +78,7 @@ using namespace eosio::chain;
                http_plugin::handle_exception(#api_name, #call_name, body, cb);\
             }\
          } else {\
-            cb(http_response_code, fc::json::to_string(eosio::detail::txn_test_gen_empty())); \
+            cb(http_response_code, fc::variant(eosio::detail::txn_test_gen_empty())); \
          }\
       };\
       INVOKE \
