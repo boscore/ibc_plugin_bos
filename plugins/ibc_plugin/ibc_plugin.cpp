@@ -37,6 +37,7 @@ namespace fc {
 namespace eosio { namespace ibc {
 
 /* #define PLUGIN_TEST */
+#define BATCH_PBFT
 
    static appbase::abstract_plugin& _ibc_plugin = app().register_plugin<ibc_plugin>();
 
@@ -2690,21 +2691,20 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_block_commits_request_message &msg){
       peer_dlog(c, "received lwc_block_commits_request_message [${num}]",("num",msg.block_num));
+      #ifdef BATCH_PBFT
 
 
 
-
-
+      #endif
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_block_commits_data_message &msg){
       peer_dlog(c, "received lwc_block_commits_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
+      #ifdef BATCH_PBFT
 
 
 
-
-
-
+      #endif
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_request_message &msg ) {
