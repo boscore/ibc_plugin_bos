@@ -2691,9 +2691,88 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_block_commits_request_message &msg){
       peer_dlog(c, "received lwc_block_commits_request_message [${num}]",("num",msg.block_num));
+
       #ifdef BATCH_PBFT
+      uint32_t lib_block_num = chain_plug->chain().last_irreversible_block_num();
+      if ( msg.block_num > lib_block_num ){ return; }
 
+      auto& block_id = chain_plug->chain().get_block_id_for_num( msg.block_num );
+      auto& bps = chain_plug->pbft_ctrl().pbft_db.get_pbft_state_by_id( block_id );
 
+      lwc_block_commits_data_message ret_msg;
+
+      if ( bps != pbft_state() ){
+
+         // ret_msg.headers
+         uint32_t end_block_num = msg.block_num ;
+         for( auto& commit : bps.commits ){
+            end_block_num = std::max( end_block_num, commit.block_num );
+         }
+         for( uint32_t num = msg.block_num; num <= end_block_num; ++num ){
+            auto sbp = chain_plug->chain().fetch_block_by_number( num );
+            if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", start_num)); return; }
+            ret_msg.headers.push_back( *sbp );
+         }
+
+         // ret_msg.blockroot_merkle
+         ret_msg.blockroot_merkle = get_blockroot_merkle_by_num( msg.block_num );
+         if ( ret_msg.blockroot_merkle._node_count == 0 ){
+            elog("get blockroot_merkle of block ${n} failed", ("n", start_num));
+            return;
+         }
+
+         ret_msg.proof_data = fc::raw::pack( bps.commits );
+         ret_msg.proof_type = N(commit)
+
+         c->enqueue( ret_msg );
+         return;
+      }
+
+      /* bps == pbft_state() */
+      vector<char>   content;
+      uint32_t       check_num;
+      for( int i = 0; i < 101; ++i ){
+         check_num = msg.block_num + i;
+         signed_block_ptr sbp = chain_plug->chain().fetch_block_by_number( check_num );
+         for ( auto& ext : sbp->block_extensions ){
+            if ( ext.first == 0x1 && ext.second.size()>0 ){
+               content = ext.second;
+               break;
+            }
+         }
+         if ( !content.empty() ){
+            break;
+         }
+      }
+      if( content.empty() ){
+         elog("didn't get pbft_state of block ${n}", ("n",msg.block_num));
+         return;
+      }
+
+      vector<pbft_checkpoint> commits = fc::raw::unpack<vector<pbft_checkpoint>>( content );
+
+      // ret_msg.headers
+      uint32_t end_block_num = check_num ;
+      for( auto& commit : commits ){
+         end_block_num = std::max( end_block_num, commit.block_num );
+      }
+      for( uint32_t num = check_num; num <= end_block_num; ++num ){
+         auto sbp = chain_plug->chain().fetch_block_by_number( num );
+         if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", start_num)); return; }
+         ret_msg.headers.push_back( *sbp );
+      }
+
+      // ret_msg.blockroot_merkle
+      ret_msg.blockroot_merkle = get_blockroot_merkle_by_num( check_num );
+      if ( ret_msg.blockroot_merkle._node_count == 0 ){
+         elog("get blockroot_merkle of block ${n} failed", ("n", start_num));
+         return;
+      }
+
+      ret_msg.proof_data = fc::raw::pack( commits );
+      ret_msg.proof_type = N(checkpoint)
+
+      c->enqueue( ret_msg );
 
       #endif
    }
@@ -2702,7 +2781,16 @@ namespace eosio { namespace ibc {
       peer_dlog(c, "received lwc_block_commits_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
       #ifdef BATCH_PBFT
 
+      auto p = chain_contract->get_sections_tb_reverse_nth_section();
+      if ( !p.valid() ){
+         elog("can not get section info from ibc.chain contract");
+         return;
+      }
+      section_type ls = *p;
 
+      if ( msg.headers.front().block_num() > ls.last ){
+         chain_contract->pushblkcmits( msg );
+      }
 
       #endif
    }

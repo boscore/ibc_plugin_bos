@@ -180,7 +180,7 @@ namespace eosio {
          std::vector<signed_block_header>    headers;
          incremental_merkle                  blockroot_merkle;
          std::vector<char>                   proof_data;
-         name                                proof_type; // pbft_commits or pbft_checkpoints
+         name                                proof_type; // (commit)pbft_commits or (checkpoint)pbft_checkpoints
       };
 
       struct ibc_trx_rich_info {    // used by local multi_index and ibc message
