@@ -184,13 +184,14 @@ namespace eosio {
 
             if (pending_commit_local && !pbft_db.pending_pbft_lib()) {
                 pbft_db.send_pbft_checkpoint();
-                m->transit_to_committed_state(this);
+                m->transit_to_committed_state(this, false);
             }
         }
 
 
         void psm_prepared_state::send_commit(psm_machine *m, pbft_database &pbft_db) {
             auto commits = pbft_db.send_and_add_pbft_commit(m->get_commits_cache(), m->get_current_view());
+            ilog("new version is ${nv}, upgrading is ${u}", ("nv", pbft_db.ctrl.is_upgraded())("u", pbft_db.ctrl.under_upgrade()));
 
             if (!commits.empty()) {
                 m->set_commits_cache(commits);
@@ -203,8 +204,9 @@ namespace eosio {
 
             if (pending_commit_local && !pbft_db.pending_pbft_lib()) {
                 pbft_db.send_pbft_checkpoint();
-                m->transit_to_committed_state(this);
+                m->transit_to_committed_state(this, false);
             }
+            ilog("new version is ${nv}, upgrading is ${u}", ("nv", pbft_db.ctrl.is_upgraded())("u", pbft_db.ctrl.under_upgrade()));
         }
 
         void psm_prepared_state::on_view_change(psm_machine *m, pbft_view_change &e, pbft_database &pbft_db) {
@@ -259,7 +261,10 @@ namespace eosio {
         }
 
         void psm_committed_state::send_prepare(psm_machine *m, pbft_database &pbft_db) {
+            ilog("new version is ${nv}, upgrading is ${u}", ("nv", pbft_db.ctrl.is_upgraded())("u", pbft_db.ctrl.under_upgrade()));
+
             auto prepares = pbft_db.send_and_add_pbft_prepare(m->get_prepares_cache(), m->get_current_view());
+            ilog("new version is ${nv}, upgrading is ${u}", ("nv", pbft_db.ctrl.is_upgraded())("u", pbft_db.ctrl.under_upgrade()));
 
             if (!prepares.empty()) {
                 m->set_prepares_cache(prepares);
@@ -267,6 +272,7 @@ namespace eosio {
 
             //if prepare >= 2f+1, transit to prepared
             if (pbft_db.should_prepared()) m->transit_to_prepared_state(this);
+            ilog("new version is ${nv}, upgrading is ${u}", ("nv", pbft_db.ctrl.is_upgraded())("u", pbft_db.ctrl.under_upgrade()));
         }
 
         void psm_committed_state::on_commit(psm_machine *m, pbft_commit &e, pbft_database &pbft_db) {
@@ -338,7 +344,7 @@ namespace eosio {
             //skip from view change state if my lib is higher than my view change state height.
             auto vc = m->get_view_changes_cache();
             if (!vc.empty() && pbft_db.should_stop_view_change(vc.front())) {
-                m->transit_to_committed_state(this);
+                m->transit_to_committed_state(this, false);
                 return;
             }
 
@@ -371,7 +377,7 @@ namespace eosio {
             //skip from view change state if my lib is higher than my view change state height.
             auto vc = m->get_view_changes_cache();
             if (!vc.empty() && pbft_db.should_stop_view_change(vc.front())) {
-                m->transit_to_committed_state(this);
+                m->transit_to_committed_state(this, false);
                 return;
             }
 
@@ -412,11 +418,13 @@ namespace eosio {
         }
 
         template<typename T>
-        void psm_machine::transit_to_committed_state(T const & s) {
+        void psm_machine::transit_to_committed_state(T const & s, bool to_new_view) {
 
-            auto nv = pbft_db.get_committed_view();
-            if (nv > this->get_current_view()) this->set_current_view(nv);
-            this->set_target_view(this->get_current_view() + 1);
+            if (!to_new_view) {
+                auto nv = pbft_db.get_committed_view();
+                if (nv > this->get_current_view()) this->set_current_view(nv);
+                this->set_target_view(this->get_current_view() + 1);
+            }
 
             auto prepares = this->pbft_db.send_and_add_pbft_prepare(vector<pbft_prepare>{}, this->get_current_view());
             set_prepares_cache(prepares);
@@ -492,8 +500,7 @@ namespace eosio {
                 }
             }
 
-            this->set_current(new psm_committed_state);
-            delete s;
+            transit_to_committed_state(s, true);
         }
 
         void psm_machine::send_pbft_view_change() {

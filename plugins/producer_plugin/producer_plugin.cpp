@@ -301,7 +301,8 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
 
          chain::controller& chain = chain_plug->chain();
 
-         /* de-dupe here... no point in aborting block if we already know the block */
+
+          /* de-dupe here... no point in aborting block if we already know the block */
          auto existing = chain.fetch_block_by_id( id );
          if( existing ) { return; }
 
@@ -341,11 +342,25 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
          }
 
 
+
          if( fc::time_point::now() - block->timestamp < fc::minutes(5) || (block->block_num() % 1000 == 0) ) {
-            ilog("Received block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, lscb: ${lscb}, latency: ${latency} ms]",
-                 ("p",block->producer)("id",fc::variant(block->id()).as_string().substr(8,16))
-                 ("n",block_header::num_from_id(block->id()))("t",block->timestamp)
-                 ("count",block->transactions.size())("lib",chain.last_irreversible_block_num())("lscb", chain.last_stable_checkpoint_block_num())("latency", (fc::time_point::now() - block->timestamp).count()/1000 ) );
+            if (chain.is_upgraded()) {
+                ilog("Received block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, lscb: ${lscb}, latency: ${latency} ms]",
+                        ("p", block->producer)("id", fc::variant(block->id()).as_string().substr(8, 16))
+                        ("n", block_header::num_from_id(block->id()))("t", block->timestamp)
+                        ("count", block->transactions.size())("lib", chain.last_irreversible_block_num())
+                        ("lscb", chain.last_stable_checkpoint_block_num())
+                        ("latency", (fc::time_point::now() - block->timestamp).count() / 1000));
+            } else {
+                ilog("Received block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, conf: ${confs}, latency: ${latency} ms]",
+                        ("p",block->producer)("id",fc::variant(block->id()).as_string().substr(8,16))
+                        ("n",block_header::num_from_id(block->id()))("t",block->timestamp)
+                        ("count",block->transactions.size())("lib",chain.last_irreversible_block_num())
+                        ("confs", block->confirmed)("latency", (fc::time_point::now() - block->timestamp).count()/1000 ) );
+                if (chain.under_upgrade()) {
+                   wlog("upgrading...");
+                }
+            }
          }
       }
 
@@ -1091,7 +1106,11 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
       _pending_block_mode = pending_block_mode::speculating;
    }
 
-   if (_pending_block_mode == pending_block_mode::producing) {
+   auto new_version = chain.is_upgraded();
+   ilog("producer plugin before abort_block: new version is ${nv}, upgrading is ${u}", ("nv", chain.is_upgraded())("u", chain.under_upgrade()));
+
+
+    if (_pending_block_mode == pending_block_mode::producing && !new_version) {
       // determine if our watermark excludes us from producing at this point
       if (currrent_watermark_itr != _producer_watermarks.end()) {
          if (currrent_watermark_itr->second >= hbs->block_num + 1) {
@@ -1113,7 +1132,7 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
    try {
       uint16_t blocks_to_confirm = 0;
 
-      if (_pending_block_mode == pending_block_mode::producing) {
+      if (_pending_block_mode == pending_block_mode::producing && !new_version) {
          // determine how many blocks this producer can confirm
          // 1) if it is not a producer from this node, assume no confirmations (we will discard this block anyway)
          // 2) if it is a producer on this node that has never produced, the conservative approach is to assume no
@@ -1134,6 +1153,7 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
       }
 
       chain.abort_block();
+      ilog("producer plugin after abort_block: new version is ${nv}, upgrading is ${u}", ("nv", chain.is_upgraded())("u", chain.under_upgrade()));
       chain.start_block(block_time, blocks_to_confirm, signature_provider);
    } FC_LOG_AND_DROP();
 

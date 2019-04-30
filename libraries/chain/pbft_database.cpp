@@ -7,9 +7,10 @@ namespace eosio {
     namespace chain {
 
         pbft_database::pbft_database(controller &ctrl) :
-                ctrl(ctrl),
-                view_state_index(pbft_view_state_multi_index_type{}) {
+                ctrl(ctrl) {
             checkpoint_index = pbft_checkpoint_state_multi_index_type{};
+            view_state_index = pbft_view_state_multi_index_type{};
+            prepare_watermarks = vector<block_num_type>{};
             pbft_db_dir = ctrl.state_dir();
             checkpoints_dir = ctrl.blocks_dir();
 
@@ -33,7 +34,18 @@ namespace eosio {
                     fc::raw::unpack(ds, s);
                     set(std::make_shared<pbft_state>(move(s)));
                 }
+
+                unsigned_int watermarks_size;
+                fc::raw::unpack(ds, watermarks_size);
+                for (uint32_t i = 0, n = watermarks_size.value; i < n; ++i) {
+                    block_num_type h;
+                    fc::raw::unpack(ds, h);
+                    prepare_watermarks.emplace_back(h);
+                }
+                sort(prepare_watermarks.begin(), prepare_watermarks.end());
+
                 ilog("pbft index size: ${s}", ("s", pbft_state_index.size()));
+                ilog("pbft prepare watermarks size: ${p}", ("p", prepare_watermarks.size()));
             } else {
                 pbft_state_index = pbft_state_multi_index_type{};
             }
@@ -70,10 +82,8 @@ namespace eosio {
             uint32_t num_records_in_checkpoint_db = checkpoint_index.size();
             fc::raw::pack(c_out, unsigned_int{num_records_in_checkpoint_db});
 
-            if (!checkpoint_index.empty()) {
-                for (const auto &s: checkpoint_index) {
-                    fc::raw::pack(c_out, *s);
-                }
+            for (const auto &s: checkpoint_index) {
+                fc::raw::pack(c_out, *s);
             }
 
             fc::path pbft_db_dat = pbft_db_dir / config::pbftdb_filename;
@@ -82,13 +92,21 @@ namespace eosio {
             uint32_t num_records_in_db = pbft_state_index.size();
             fc::raw::pack(out, unsigned_int{num_records_in_db});
 
-            if (!pbft_state_index.empty()) {
-                for (const auto &s : pbft_state_index) {
-                    fc::raw::pack(out, *s);
-                }
+            for (const auto &s : pbft_state_index) {
+                fc::raw::pack(out, *s);
             }
+
+
+            uint32_t watermarks_size = prepare_watermarks.size();
+            fc::raw::pack(out, unsigned_int{watermarks_size});
+
+            for (const auto &n: prepare_watermarks) {
+                fc::raw::pack(out, n);
+            }
+
             pbft_state_index.clear();
             checkpoint_index.clear();
+            prepare_watermarks.clear();
         }
 
         pbft_database::~pbft_database() {
@@ -192,21 +210,18 @@ namespace eosio {
                 }
                 return new_pv;
             } else {
-                uint32_t high_water_mark_block_num = head_block_num;
-                auto next_proposed_schedule_block_num = ctrl.get_global_properties().proposed_schedule_block_num;
-                auto promoted_proposed_schedule_block_num = ctrl.last_promoted_proposed_schedule_block_num();
+
+                auto current_watermark = get_current_pbft_watermark();
                 auto lib = ctrl.last_irreversible_block_num();
 
-                if (next_proposed_schedule_block_num && *next_proposed_schedule_block_num > lib) {
-                    high_water_mark_block_num = std::min(head_block_num, *next_proposed_schedule_block_num);
-                }
+                uint32_t high_water_mark_block_num = head_block_num;
 
-                if (promoted_proposed_schedule_block_num && promoted_proposed_schedule_block_num > lib) {
-                    high_water_mark_block_num = std::min(high_water_mark_block_num,
-                                                         promoted_proposed_schedule_block_num);
+                if ( current_watermark > 0 ) {
+                    high_water_mark_block_num = std::min(head_block_num, current_watermark);
                 }
 
                 if (high_water_mark_block_num <= lib) return vector<pbft_prepare>{};
+
                 block_id_type high_water_mark_block_id = ctrl.get_block_id_for_num(high_water_mark_block_num);
                 for (auto const &sp : ctrl.my_signature_providers()) {
                     auto uuid = boost::uuids::to_string(uuid_generator());
@@ -229,6 +244,9 @@ namespace eosio {
             if (itr == by_prepare_and_num_index.end()) return false;
 
             pbft_state_ptr psp = *itr;
+            auto current_watermark = get_current_pbft_watermark();
+
+            if (psp->block_num > current_watermark && current_watermark > 0) return false;
 
             if (psp->should_prepared && (psp->block_num > ctrl.last_irreversible_block_num())) {
                 ctrl.set_pbft_prepared((*itr)->block_id);
@@ -349,6 +367,10 @@ namespace eosio {
             auto itr = by_commit_and_num_index.begin();
             if (itr == by_commit_and_num_index.end()) return false;
             pbft_state_ptr psp = *itr;
+
+            auto current_watermark = get_current_pbft_watermark();
+
+            if (psp->block_num > current_watermark && current_watermark > 0) return false;
 
             return (psp->should_committed && (psp->block_num > ctrl.last_irreversible_block_num()));
         }
@@ -596,7 +618,7 @@ namespace eosio {
 
                     for (const auto &pre: prepares) {
                         if (prepare_count.find(pre.view) == prepare_count.end()) prepare_count[pre.view] = 0;
-                        prepare_msg[pre.view].push_back(pre);
+                        prepare_msg[pre.view].emplace_back(pre);
                     }
 
                     for (auto const &sp: as) {
@@ -647,9 +669,9 @@ namespace eosio {
             if (certificate.block_num <= ctrl.last_stable_checkpoint_block_num()) return true;
 
             auto valid = true;
-            valid &= certificate.is_signature_valid();
+            valid = valid && certificate.is_signature_valid();
             for (auto const &p : certificate.prepares) {
-                valid &= is_valid_prepare(p);
+                valid = valid && is_valid_prepare(p);
                 if (!valid) return false;
             }
 
@@ -694,7 +716,7 @@ namespace eosio {
                     if (p.block_num <= lscb) {
                         ++non_fork_bp_count;
                     } else {
-                        prepare_infos.push_back(block_info{p.block_id, p.block_num});
+                        prepare_infos.emplace_back(block_info{p.block_id, p.block_num});
                     }
                 }
 
@@ -882,24 +904,25 @@ namespace eosio {
 
         pbft_stable_checkpoint pbft_database::fetch_stable_checkpoint_from_blk_extn(const signed_block_ptr &b) {
             try {
-                auto &ext = b->block_extensions;
+                if (b) {
+                    auto &ext = b->block_extensions;
 
-                for (auto it = ext.begin(); it != ext.end();) {
-                    if (it->first == static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint))
-                    {
-                        auto scp_v = it->second;
-                        fc::datastream<char *> ds_decode(scp_v.data(), scp_v.size());
+                    for (auto it = ext.begin(); it != ext.end();) {
+                        if (it->first == static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint)) {
+                            auto scp_v = it->second;
+                            fc::datastream<char *> ds_decode(scp_v.data(), scp_v.size());
 
-                        pbft_stable_checkpoint scp_decode;
-                        fc::raw::unpack(ds_decode, scp_decode);
+                            pbft_stable_checkpoint scp_decode;
+                            fc::raw::unpack(ds_decode, scp_decode);
 
-                        if (is_valid_stable_checkpoint(scp_decode)) {
-                            return scp_decode;
+                            if (is_valid_stable_checkpoint(scp_decode)) {
+                                return scp_decode;
+                            } else {
+                                it = ext.erase(it);
+                            }
                         } else {
-                            it = ext.erase(it);
+                            it++;
                         }
-                    } else {
-                        it++;
                     }
                 }
             } catch(...) {
@@ -936,6 +959,7 @@ namespace eosio {
 
         block_info pbft_database::cal_pending_stable_checkpoint() const {
 
+            //TODO: maybe use watermarks instead?
             auto lscb_num = ctrl.last_stable_checkpoint_block_num();
             auto lscb_id = ctrl.last_stable_checkpoint_block_id();
             auto lscb_info = block_info{lscb_id, lscb_num};
@@ -946,17 +970,26 @@ namespace eosio {
 
             while (itr != by_blk_num.end()) {
                 if ((*itr)->is_stable && ctrl.fetch_block_state_by_id((*itr)->block_id)) {
-                    auto lib = ctrl.fetch_block_state_by_number(ctrl.last_irreversible_block_num());
+                    auto lscb = ctrl.fetch_block_state_by_number(ctrl.last_stable_checkpoint_block_num());
 
                     auto head_checkpoint_schedule = ctrl.fetch_block_state_by_id(
                             (*itr)->block_id)->active_schedule;
 
-                    auto current_schedule = lib_active_producers();
-                    auto new_schedule = lib_active_producers();
+                    producer_schedule_type current_schedule;
+                    producer_schedule_type new_schedule;
 
-                    if (lib) {
-                        current_schedule = lib->active_schedule;
-                        new_schedule = lib->pending_schedule;
+                    if (lscb_num == 0) {
+                        const auto& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
+                        if (ucb == 0) return lscb_info;
+                        auto bs = ctrl.fetch_block_state_by_number(ucb);
+                        if (!bs) return lscb_info;
+                        current_schedule = bs->active_schedule;
+                        new_schedule = bs->pending_schedule;
+                    } else if (lscb) {
+                        current_schedule = lscb->active_schedule;
+                        new_schedule = lscb->pending_schedule;
+                    } else {
+                        return lscb_info;
                     }
 
                     if ((*itr)->is_stable
@@ -983,20 +1016,12 @@ namespace eosio {
 
             block_num_type my_latest_checkpoint = 0;
 
-            const auto& upo = ctrl.get_upgrade_properties();
             auto checkpoint = [&](const block_num_type &in) {
-              auto is_desired_checkpoint_num = in % 100 == 1
-                      || in == ctrl.last_proposed_schedule_block_num()
-                      || in == ctrl.last_promoted_proposed_schedule_block_num();
-              if (upo.upgrade_complete_block_num) is_desired_checkpoint_num = is_desired_checkpoint_num && in > upo.upgrade_complete_block_num;
-              return is_desired_checkpoint_num;
+                const auto& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
+                if (ucb == 0) return false;
+                return in >= ucb
+                && (in % 100 == 1 || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end());
             };
-
-//            auto checkpoint = [&](const block_num_type &in) {
-//                return in % 100 == 1
-//                       || in == ctrl.last_proposed_schedule_block_num()
-//                       || in == ctrl.last_promoted_proposed_schedule_block_num();
-//            };
 
             for (auto i = psp->block_num;
                  i > std::max(ctrl.last_stable_checkpoint_block_num(), static_cast<uint32_t>(1)); --i) {
@@ -1011,9 +1036,7 @@ namespace eosio {
                         bool contains_mine = false;
                         for (auto const &my_sp : ctrl.my_signature_providers()) {
                             auto p_itr = find_if(checkpoints.begin(), checkpoints.end(),
-                                                 [&](const pbft_checkpoint &ext) {
-                                                     return ext.public_key == my_sp.first;
-                                                 });
+                                    [&](const pbft_checkpoint &ext) { return ext.public_key == my_sp.first; });
                             if (p_itr != checkpoints.end()) contains_mine = true;
                         }
                         if (!contains_mine) {
@@ -1024,6 +1047,7 @@ namespace eosio {
             }
 
             if (!pending_checkpoint_block_num.empty()) {
+                std::sort(pending_checkpoint_block_num.begin(), pending_checkpoint_block_num.begin());
                 for (auto h: pending_checkpoint_block_num) {
                     for (auto const &my_sp : ctrl.my_signature_providers()) {
                         auto uuid = boost::uuids::to_string(uuid_generator());
@@ -1162,16 +1186,32 @@ namespace eosio {
         }
 
         bool pbft_database::is_valid_stable_checkpoint(const pbft_stable_checkpoint &scp) {
-            if (scp.block_num <= ctrl.last_stable_checkpoint_block_num()) return true;
+            if (scp.block_num <= ctrl.last_stable_checkpoint_block_num())
+                // the stable checkpoint is way behind lib, no way getting the block state,
+                // it will not be applied nor saved, thus considered safe.
+                return true;
 
             auto valid = true;
             for (const auto &c: scp.checkpoints) {
-                valid &= is_valid_checkpoint(c)
+                valid = valid && is_valid_checkpoint(c)
                          && c.block_id == scp.block_id
                          && c.block_num == scp.block_num;
                 if (!valid) return false;
             }
             //TODO: check if (2/3 + 1) met
+            auto bs = ctrl.fetch_block_state_by_number(scp.block_num);
+            if (bs) {
+                auto as = bs->active_schedule;
+                auto cp_count = 0;
+                for (auto const &sp: as.producers) {
+                    for (auto const &v: scp.checkpoints) {
+                        if (sp.block_signing_key == v.public_key) cp_count += 1;
+                    }
+                }
+                valid = valid && cp_count >= as.producers.size() * 2 / 3 + 1;
+            } else {
+                return false;
+            }
             return valid;
         }
 
@@ -1232,6 +1272,43 @@ namespace eosio {
 
         chain_id_type pbft_database::chain_id() {
             return ctrl.get_chain_id();
+        }
+
+        block_num_type pbft_database::get_current_pbft_watermark() {
+            auto unique_merge = [&](vector<block_num_type> &v1, vector<block_num_type> &v2)
+            {
+                std::sort(v1.begin(), v1.end());
+                v1.reserve(v1.size() + v2.size());
+                v1.insert(v1.end(), v2.begin(), v2.end());
+
+                sort( v1.begin(), v1.end() );
+                v1.erase( unique( v1.begin(), v1.end() ), v1.end() );
+            };
+
+            auto lib = ctrl.last_irreversible_block_num();
+            auto lscb = ctrl.last_stable_checkpoint_block_num();
+
+            auto proposed_schedule_blocks = ctrl.proposed_schedule_block_nums();
+            auto promoted_schedule_blocks = ctrl.promoted_schedule_block_nums();
+            unique_merge(prepare_watermarks, proposed_schedule_blocks);
+            unique_merge(prepare_watermarks, promoted_schedule_blocks);
+
+
+            for ( auto itr = prepare_watermarks.begin(); itr != prepare_watermarks.end();) {
+                if ((*itr) <= lscb) {
+                    itr = prepare_watermarks.erase(itr);
+                } else {
+                    ++itr;
+                }
+            }
+            std::sort(prepare_watermarks.begin(), prepare_watermarks.end());
+
+
+            if (prepare_watermarks.empty()) return 0;
+
+            auto cw = *std::upper_bound(prepare_watermarks.begin(), prepare_watermarks.end(), lib);
+
+            if (cw > lib) return cw; else return 0;
         }
 
         void pbft_database::set(pbft_state_ptr s) {

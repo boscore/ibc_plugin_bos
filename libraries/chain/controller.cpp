@@ -125,8 +125,8 @@ struct controller_impl {
    optional<pending_state>        pending;
    optional<block_id_type>        pending_pbft_lib;
    optional<block_id_type>        pending_pbft_checkpoint;
-   optional<block_num_type>       last_proposed_schedule_block_num;
-   optional<block_num_type>       last_promoted_proposed_schedule_block_num;
+   vector<block_num_type>         proposed_schedule_blocks;
+   vector<block_num_type>         promoted_schedule_blocks;
    block_state_ptr                pbft_prepared;
    block_state_ptr                my_prepare;
    block_state_ptr                head;
@@ -135,6 +135,7 @@ struct controller_impl {
    resource_limits_manager        resource_limits;
    authorization_manager          authorization;
    controller::config             conf;
+   controller::config             multisig_blacklists;///<  multisig blacklists in memory
    chain_id_type                  chain_id;
    bool                           replaying= false;
    optional<fc::time_point>       replay_head_time;
@@ -417,9 +418,7 @@ struct controller_impl {
       }
 
       //*bos begin*
-      sync_name_list(list_type::actor_blacklist_type,true);
-      sync_name_list(list_type::contract_blacklist_type,true);
-      sync_name_list(list_type::resource_greylist_type,true);
+      merge_msig_blacklist_into_conf();
       //*bos end*
    }
 
@@ -442,14 +441,7 @@ struct controller_impl {
 
    void clear_all_undo() {
       // Rewind the database to the last irreversible block
-      db.with_write_lock([&] {
-         db.undo_all();
-         /*
-         FC_ASSERT(db.revision() == self.head_block_num(),
-                   "Chainbase revision does not match head block num",
-                   ("rev", db.revision())("head_block", self.head_block_num()));
-                   */
-      });
+      db.undo_all();
    }
 
    void add_contract_tables_to_snapshot( const snapshot_writer_ptr& snapshot ) const {
@@ -516,6 +508,10 @@ struct controller_impl {
          section.add_row(conf.genesis, db);
       });
 
+      snapshot->write_section<batch_pbft_snapshot_migration>([this]( auto &section ){
+         section.add_row(batch_pbft_snapshot_migration{}, db);
+      });
+
       snapshot->write_section<block_state>([this]( auto &section ){
          section.template add_row<block_header_state>(*fork_db.head(), db);
       });
@@ -548,18 +544,33 @@ struct controller_impl {
          header.validate();
       });
 
+      bool migrated = snapshot->has_section<batch_pbft_snapshot_migration>();
+      if(migrated) {
+          snapshot->read_section<block_state>([this](auto &section) {
+            block_header_state head_header_state;
+            section.read_row(head_header_state, db);
 
-      snapshot->read_section<block_state>([this]( auto &section ){
-         block_header_state head_header_state;
-         section.read_row(head_header_state, db);
+            auto head_state = std::make_shared<block_state>(head_header_state);
+            fork_db.set(head_state);
+            fork_db.set_validity(head_state, true);
+            fork_db.mark_in_current_chain(head_state, true);
+            head = head_state;
+            snapshot_head_block = head->block_num;
+          });
+      }else{
+          snapshot->read_section<block_state>([this](snapshot_reader::section_reader &section) {
+            block_header_state head_header_state;
+            section.read_pbft_migrate_row(head_header_state, db);
 
-         auto head_state = std::make_shared<block_state>(head_header_state);
-         fork_db.set(head_state);
-         fork_db.set_validity(head_state, true);
-         fork_db.mark_in_current_chain(head_state, true);
-         head = head_state;
-         snapshot_head_block = head->block_num;
-      });
+            auto head_state = std::make_shared<block_state>(head_header_state);
+            fork_db.set(head_state);
+            fork_db.set_validity(head_state, true);
+            fork_db.mark_in_current_chain(head_state, true);
+            head = head_state;
+            snapshot_head_block = head->block_num;
+          });
+
+      }
 
       controller_index_set::walk_indices([this, &snapshot]( auto utils ){
          using value_t = typename decltype(utils)::index_t::value_type;
@@ -569,14 +580,16 @@ struct controller_impl {
             return;
          }
 
-         snapshot->read_section<value_t>([this]( auto& section ) {
-            bool more = !section.empty();
-            while(more) {
-               decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
-                  more = section.read_row(row, db);
-               });
-            }
-         });
+         if(snapshot->has_section<value_t>()){
+             snapshot->read_section<value_t>([this]( auto& section ) {
+               bool more = !section.empty();
+               while(more) {
+                   decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
+                     more = section.read_row(row, db);
+                   });
+               }
+             });
+         }
       });
 
       read_contract_tables_from_snapshot(snapshot);
@@ -678,8 +691,14 @@ struct controller_impl {
 
       // *bos end*
 
+      //if not upo found, generate a new one.
+      try {
+          db.get<upgrade_property_object>();
+      } catch( const boost::exception& e) {
+          wlog("no upo found, generating...");
+          db.create<upgrade_property_object>([](auto&){});
+      }
 
-      db.create<upgrade_property_object>([](auto&){});
 
       authorization.initialize_database();
       resource_limits.initialize_database();
@@ -707,103 +726,185 @@ struct controller_impl {
    }
 
    // "bos begin"
+   //  contract   wasm interface api  set_name_list  function
+   //  insert action      db_list U msig_list -> msig_list    db_list U conf_list -> conf_list
+   //                     name_list U msig_list -> msig_list   name_list U conf_list -> conf_list    msig_list->db_list
+   //  remove action      db_list U msig_list -> msig_list    db_list U conf_list -> conf_list
+   //                     msig_list-name_list  -> msig_list    conf_list - name_list  -> conf_list   msig_list->db_list
+   //  producer  api  set_whitelist_blacklist
+   //                     blacklst ->  conf.xxx_blacklist     conf_list U msig_list  -> conf_list
+   //                 remove_grey_list
+   //                     check   if remove acount in msig_list  then  assert fail  could not remove account in msig blacklist
    void set_name_list(list_type list, list_action_type action, std::vector<account_name> name_list)
    {
-       int64_t lst = static_cast<int64_t>(list);
-
-      EOS_ASSERT(list >= list_type::actor_blacklist_type && list < list_type::list_type_count, transaction_exception, "unknown list type : ${l}, action: ${n}", ("l", static_cast<int64_t>(list))("n", static_cast<int64_t>(action)));
-      vector<flat_set<account_name> *> lists = {&conf.actor_blacklist, &conf.contract_blacklist, &conf.resource_greylist};
-      EOS_ASSERT(lists.size() == static_cast<int64_t>(list_type::list_type_count) - 1, transaction_exception, " list size wrong : ${l}, action: ${n}", ("l", static_cast<int64_t>(list))("n", static_cast<int64_t>(action)));
-
-      flat_set<account_name> &lo = *lists[lst - 1];
-
-      if (action == list_action_type::insert_type)
-      {
-         lo.insert(name_list.begin(), name_list.end());
-      }
-      else if (action == list_action_type::remove_type)
-      {
-         flat_set<account_name> name_set(name_list.begin(), name_list.end());
-
-         flat_set<account_name> results;
-         results.reserve(lo.size());
-         set_difference(lo.begin(), lo.end(),
-                        name_set.begin(), name_set.end(),
-                        std::inserter(results,results.begin()));
-
-         lo = results;
-      }
-
-      sync_name_list(list);
-   }
-
-   void sync_list_and_db(list_type list, global_property2_object &gprops2,bool isMerge=false)
-   {
-      int64_t lst = static_cast<int64_t>(list);
-      EOS_ASSERT( list >= list_type::actor_blacklist_type && list < list_type::list_type_count, transaction_exception, "unknown list type : ${l}, ismerge: ${n}", ("l", static_cast<int64_t>(list))("n", isMerge));
-      vector<shared_vector<account_name> *> lists = {&gprops2.cfg.actor_blacklist, &gprops2.cfg.contract_blacklist, &gprops2.cfg.resource_greylist};
-      vector<flat_set<account_name> *> conflists = {&conf.actor_blacklist, &conf.contract_blacklist, &conf.resource_greylist};
-      EOS_ASSERT(lists.size() == static_cast<int64_t>(list_type::list_type_count) - 1, transaction_exception, " list size wrong : ${l}, ismerge: ${n}", ("l", static_cast<int64_t>(list))("n", isMerge));
-      shared_vector<account_name> &lo = *lists[lst - 1];
-      flat_set<account_name> &clo = *conflists[lst - 1];
-
-      if (isMerge)
-      {
-         //initialize,  merge elements and deduplication between list and db.result save to  list
-         for (auto &a : lo)
-         {
-            clo.insert(a);
+      //set list from set_name_list action in system contract
+      EOS_ASSERT(action >= list_action_type::insert_type && action < list_action_type::list_action_type_count, transaction_exception, "unknown action: ${action}", ("action", static_cast<int64_t>(action)));
+      int64_t blacklist_type = static_cast<int64_t>(list);
+      const auto &gp2o = db.get<global_property2_object>();
+      auto update_blacklists = [&](const shared_vector<account_name> &db_blacklist, flat_set<account_name> &conf_blacklist, flat_set<account_name> &msig_blacklist){
+         for (auto &a : db_blacklist){
+            conf_blacklist.insert(a);
+            msig_blacklist.insert(a);
          }
-      }
 
-      //clear list from db and save merge result to db  object
-      lo.clear();
-      for (auto &a : clo)
-      {
-         lo.push_back(a);
+         auto update_blacklist = [&](auto &blacklist) {
+            if (action == list_action_type::insert_type){
+               blacklist.insert(name_list.begin(), name_list.end());
+            }
+            else if (action == list_action_type::remove_type){
+               flat_set<account_name> name_set(name_list.begin(), name_list.end());
+               flat_set<account_name> results;
+               results.reserve(blacklist.size());
+               set_difference(blacklist.begin(), blacklist.end(),
+                              name_set.begin(), name_set.end(),
+                              std::inserter(results, results.begin()));
+
+               blacklist = results;
+            }
+         };
+
+         update_blacklist(conf_blacklist);
+         update_blacklist(msig_blacklist);
+
+         auto insert_blacklists = [&](auto &gp2) {
+            auto insert_blacklist = [&](shared_vector<account_name> &blacklist) {
+               blacklist.clear();
+
+               for (auto &a : msig_blacklist){
+                  blacklist.push_back(a);
+               }
+            };
+
+            switch (list){
+            case list_type::actor_blacklist_type:
+               insert_blacklist(gp2.cfg.actor_blacklist);
+               break;
+            case list_type::contract_blacklist_type:
+               insert_blacklist(gp2.cfg.contract_blacklist);
+               break;
+            case list_type::resource_greylist_type:
+               insert_blacklist(gp2.cfg.resource_greylist);
+               break;
+            default:
+               EOS_ASSERT(false, transaction_exception,
+                          "unknown list type : ${blklsttype}", ("blklsttype", blacklist_type));
+            }
+         };
+
+         db.modify(gp2o, [&](auto &gp2) {
+            insert_blacklists(gp2);
+         });
+      };
+
+      switch (list){
+      case list_type::actor_blacklist_type:
+         update_blacklists(gp2o.cfg.actor_blacklist, conf.actor_blacklist, multisig_blacklists.actor_blacklist);
+         break;
+      case list_type::contract_blacklist_type:
+         update_blacklists(gp2o.cfg.contract_blacklist, conf.contract_blacklist, multisig_blacklists.contract_blacklist);
+         break;
+      case list_type::resource_greylist_type:
+         update_blacklists(gp2o.cfg.resource_greylist, conf.resource_greylist, multisig_blacklists.resource_greylist);
+         break;
+      default:
+         EOS_ASSERT(false, transaction_exception,
+                    "unknown list type : ${blklsttype}", ("blklsttype", blacklist_type));
       }
    }
 
-   void sync_name_list(list_type list,bool isMerge=false)
+   void check_msig_blacklist(list_type blacklist_type,account_name account)
+    {
+       auto check_blacklist = [&](const flat_set<account_name>& msig_blacklist){
+            EOS_ASSERT(msig_blacklist.find(account) == msig_blacklist.end(), transaction_exception,
+            " do not remove account in multisig blacklist , account: ${account}", ("account", account));
+         };
+
+       switch (blacklist_type)
+       {
+       case list_type::actor_blacklist_type:
+          check_blacklist(multisig_blacklists.actor_blacklist);
+          break;
+       case list_type::contract_blacklist_type:
+          check_blacklist(multisig_blacklists.contract_blacklist);
+          break;
+       case list_type::resource_greylist_type:
+          check_blacklist(multisig_blacklists.resource_greylist);
+          break;
+       default:
+          EOS_ASSERT(false, transaction_exception,
+                     "unknown list type : ${blklsttype}, account: ${account}", ("blklsttype",static_cast<uint64_t>(blacklist_type))("account", account));
+       }
+   }
+
+   void merge_msig_blacklist_into_conf()
    {
-      try
-      {
-         const auto &gpo2 = db.get<global_property2_object>();
-         db.modify(gpo2, [&](auto &gprops2) {
-            sync_list_and_db(list, gprops2, isMerge);
-         });
+      try{
+         auto merge_blacklist = [&](const shared_vector<account_name>& msig_blacklist_in_db,flat_set<account_name>& conf_blacklist){
+
+         for (auto& a : msig_blacklist_in_db)
+         {
+            conf_blacklist.insert(a);
+         }
+         };
+
+         const auto &gp2o = db.get<global_property2_object>();
+         merge_blacklist(gp2o.cfg.actor_blacklist,conf.actor_blacklist);
+         merge_blacklist(gp2o.cfg.contract_blacklist,conf.contract_blacklist);
+         merge_blacklist(gp2o.cfg.resource_greylist,conf.resource_greylist);
       }
       catch (...)
       {
-         wlog("plugin initialize  sync list ignore before initialize database");
+         wlog("when plugin initialize,execute merge multsig blacklist to ignore exception before create global property2 object");
+      }
+   }
+   // "bos end"
+
+   optional<block_num_type> upgrade_target_block() {
+      try {
+          const auto&  upo = db.get<upgrade_property_object>();
+          if (upo.upgrade_target_block_num > 0) {
+              return upo.upgrade_target_block_num;
+          } else {
+              return optional<block_num_type>{};
+          }
+      } catch( const boost::exception& e) {
+         wlog("no upo found, generating...");
+         db.create<upgrade_property_object>([](auto&){});
+         return optional<block_num_type>{};
       }
    }
 
-   // "bos end"
+   optional<block_num_type> upgrade_complete_block() {
+      try {
+         const auto&  upo = db.get<upgrade_property_object>();
+         if (upo.upgrade_complete_block_num > 0) {
+            return upo.upgrade_complete_block_num;
+         } else {
+            return optional<block_num_type>{};
+         }
+      } catch( const boost::exception& e) {
+         wlog("no upo found, generating...");
+         db.create<upgrade_property_object>([](auto&){});
+         return optional<block_num_type>{};
+      }
+   }
 
    bool is_new_version() {
-       try {
-           const auto& upo = db.get<upgrade_property_object>().upgrade_target_block_num;
-//           dlog("upgrade target block num: ${n}", ("n", upo));
-           return  head->dpos_irreversible_blocknum >= upo && upo > 0;
-       } catch( const boost::exception& e) {
-           wlog("no upo found, regenerating...");
-           db.create<upgrade_property_object>([](auto&){});
-           return false;
-       }
+      auto ucb = upgrade_complete_block();
+      block_num_type tmp = 0;
+      if(ucb) tmp = *ucb;
+      ilog("in is_new_version : ucb is ${ucb}, head is ${head}",("ucb",tmp)("head",head->block_num));
+      if (ucb) return head->block_num > *ucb;
+      return false;
    }
 
    bool is_upgrading() {
-       try {
-           const auto& upo = db.get<upgrade_property_object>();
-           const auto upo_upgrade_target_block_num = upo.upgrade_target_block_num;
-           return upo_upgrade_target_block_num > 0
-                  &&(head->block_num + 1 >= upo_upgrade_target_block_num)
-                  && std::max(head->dpos_irreversible_blocknum, head->bft_irreversible_blocknum) <= upo_upgrade_target_block_num + 12;
-       } catch( const boost::exception& e) {
-           db.create<upgrade_property_object>([](auto&){});
-           return false;
-       }
+      auto utb = upgrade_target_block();
+      auto ucb = upgrade_complete_block();
+      auto is_upgrading = false;
+      if (utb) is_upgrading = head->block_num >= *utb;
+      if (ucb) is_upgrading = is_upgrading && head->block_num <= *ucb;
+      return is_upgrading;
    }
 
    /**
@@ -817,6 +918,9 @@ struct controller_impl {
       });
 
       try {
+         if (upgrade_target_block()) {
+             ilog("new version is ${nv}, upgrading is ${u}", ("nv", is_new_version())("u", is_upgrading()));
+         }
          set_pbft_lib();
          set_pbft_lscb();
          if (add_to_fork_db) {
@@ -824,22 +928,8 @@ struct controller_impl {
 
             auto new_version = is_new_version();
 
-            auto new_bsp = fork_db.add(pending->_pending_block_state, true);
+            auto new_bsp = fork_db.add(pending->_pending_block_state, true, new_version);
             emit(self.accepted_block_header, pending->_pending_block_state);
-
-            if (new_version) {
-                if (pbft_prepared) {
-                    fork_db.mark_pbft_prepared_fork(pbft_prepared);
-                } else if (head) {
-                    fork_db.mark_pbft_prepared_fork(head);
-                }
-
-                if (my_prepare) {
-                    fork_db.mark_pbft_my_prepare_fork(my_prepare);
-                } else if (head) {
-                    fork_db.mark_pbft_my_prepare_fork(head);
-                }
-            }
 
             head = fork_db.head();
             EOS_ASSERT(new_bsp == head, fork_database_exception, "committed block did not become the new head in fork database");
@@ -862,6 +952,9 @@ struct controller_impl {
 
       // push the state for pending.
       pending->push();
+      if (upgrade_target_block()) {
+          ilog("new version is ${nv}, upgrading is ${u}", ("nv", is_new_version())("u", is_upgrading()));
+      }
    }
 
    // The returned scoped_exit should not exceed the lifetime of the pending which existed when make_block_restore_point was called.
@@ -1152,6 +1245,9 @@ struct controller_impl {
       transaction_trace_ptr trace;
       try {
          auto start = fc::time_point::now();
+         const bool check_auth = !self.skip_auth_check() && !trx->implicit;
+         // call recover keys so that trx->sig_cpu_usage is set correctly
+         const flat_set<public_key_type>& recovered_keys = check_auth ? trx->recover_keys( chain_id ) : flat_set<public_key_type>();
          if( !explicit_billed_cpu_time ) {
             fc::microseconds already_consumed_time( EOS_PERCENT(trx->sig_cpu_usage.count(), conf.sig_cpu_bill_pct) );
 
@@ -1183,15 +1279,13 @@ struct controller_impl {
             }
             trx_context.delay = fc::seconds(trn.delay_sec);
 
-            if( !self.skip_auth_check() && !trx->implicit ) {
+            if( check_auth ) {
                authorization.check_authorization(
                        trn.actions,
-                       trx->recover_keys( chain_id ),
+                       recovered_keys,
                        {},
                        trx_context.delay,
-                       [](){}
-                       /*std::bind(&transaction_context::add_cpu_usage_and_check_time, &trx_context,
-                                 std::placeholders::_1)*/,
+                       [&trx_context](){ trx_context.checktime(); },
                        false
                );
             }
@@ -1257,6 +1351,9 @@ struct controller_impl {
    void start_block( block_timestamp_type when, uint16_t confirm_block_count, controller::block_status s,
                      const optional<block_id_type>& producer_block_id , std::function<signature_type(digest_type)> signer = nullptr)
    {
+      if (upgrade_target_block()) {
+          ilog("new version is ${nv}, upgrading is ${u}", ("nv", is_new_version())("u", is_upgrading()));
+      }
       EOS_ASSERT( !pending, block_validate_exception, "pending block already exists" );
 
       auto guard_pending = fc::make_scoped_exit([this](){
@@ -1272,23 +1369,32 @@ struct controller_impl {
          pending.emplace(maybe_session());
       }
 
+      auto utb = upgrade_target_block();
+      auto ucb = upgrade_complete_block();
+      if (utb && !ucb) {
+         if (head->dpos_irreversible_blocknum >= *utb) {
+            const auto& upo = db.get<upgrade_property_object>();
+            db.modify( upo, [&]( auto& up ) {
+               up.upgrade_complete_block_num = head->block_num;
+            });
+            wlog("setting upgrade complete block num to ${b}", ("b", head->block_num));
+         }
+      }
+
       auto new_version = is_new_version();
       auto upgrading = is_upgrading();
 
-      try {
-          const auto& upo = db.get<upgrade_property_object>();
-          const auto upo_upgrade_target_block_num = upo.upgrade_target_block_num;
 
-          if (upgrading) {
-              ilog("SYSTEM IS UPGRADING, no producer schedule changes will happen until fully upgraded.");
-              if (head->dpos_irreversible_blocknum >= upo_upgrade_target_block_num) {
-                  db.modify( upo, [&]( auto& up ) { up.upgrade_complete_block_num.emplace(head->block_num); });
-              }
-          }
-      } catch( const boost::exception& e) {
-          db.create<upgrade_property_object>([](auto&){});
+      uint32_t utb_num = 0;
+      if (upgrade_target_block()) utb_num = *upgrade_target_block();
+
+      uint32_t ucb_num = 0;
+      if (upgrade_complete_block()) ucb_num = *upgrade_complete_block();
+
+      if (utb && head->bft_irreversible_blocknum < utb_num + 100) {
+         ilog("head block num is ${h}, new version is ${nv}, upgrading is ${u}, target block is ${utb}, complete block is ${ucb}",
+              ("h", head->block_num)("nv", new_version)("u", upgrading)("utb", utb_num)("ucb", ucb_num));
       }
-
 
       pending->_block_status = s;
       pending->_producer_block_id = producer_block_id;
@@ -1305,57 +1411,66 @@ struct controller_impl {
       if ( read_mode == db_read_mode::SPECULATIVE || pending->_block_status != controller::block_status::incomplete ) {
 
          const auto& gpo = db.get<global_property_object>();
-         if (new_version) {
-              if (gpo.proposed_schedule_block_num) {
-                  last_proposed_schedule_block_num.reset();
-                  last_proposed_schedule_block_num.emplace(*gpo.proposed_schedule_block_num);
-              }
+
+         auto lib_num = std::max(pending->_pending_block_state->dpos_irreversible_blocknum, pending->_pending_block_state->bft_irreversible_blocknum);
+         auto lscb_num = pending->_pending_block_state->pbft_stable_checkpoint_blocknum;
+
+         if (new_version && gpo.proposed_schedule_block_num) {
+             proposed_schedule_blocks.emplace_back(*gpo.proposed_schedule_block_num);
+             for ( auto itr = proposed_schedule_blocks.begin(); itr != proposed_schedule_blocks.end();) {
+                 if ((*itr) < lscb_num) {
+                     itr = proposed_schedule_blocks.erase(itr);
+                 } else {
+                     ++itr;
+                 }
+             }
          }
 
-          bool should_promote_pending_schedule = false;
+         bool should_promote_pending_schedule = false;
 
-         if(new_version && (gpo.proposed_schedule_block_num.valid() && pending->_pending_block_state->bft_irreversible_blocknum > *gpo.proposed_schedule_block_num)){
-             db.modify( gpo, [&]( auto& gp ) {
-               gp.proposed_schedule_block_num = optional<block_num_type>();
-               gp.proposed_schedule.clear();
-             });
-         } else{
-             should_promote_pending_schedule = gpo.proposed_schedule_block_num.valid()  // if there is a proposed schedule that was proposed in a block ...
-                     && pending->_pending_block_state->pending_schedule.producers.size() == 0 // ... and there is room for a new pending schedule ...
-                     && !was_pending_promoted; // ... and not just because it was promoted to active at the start of this block, then:
-         }
+         should_promote_pending_schedule = gpo.proposed_schedule_block_num.valid()  // if there is a proposed schedule that was proposed in a block ...
+                 && pending->_pending_block_state->pending_schedule.producers.size() == 0 // ... and there is room for a new pending schedule ...
+                 && !was_pending_promoted; // ... and not just because it was promoted to active at the start of this block, then:
 
          if (new_version) {
-             should_promote_pending_schedule = should_promote_pending_schedule && (pending->_pending_block_state->block_num  > *gpo.proposed_schedule_block_num);
+             should_promote_pending_schedule = should_promote_pending_schedule
+                     && pending->_pending_block_state->block_num  > *gpo.proposed_schedule_block_num;
          } else {
-             should_promote_pending_schedule = should_promote_pending_schedule && ( *gpo.proposed_schedule_block_num <= pending->_pending_block_state->dpos_irreversible_blocknum );
+             should_promote_pending_schedule = should_promote_pending_schedule
+                     && ( *gpo.proposed_schedule_block_num <= pending->_pending_block_state->dpos_irreversible_blocknum );
          }
+
+         if ( upgrading && !replaying) wlog("system is upgrading, no producer schedule promotion will happen until fully upgraded.");
 
          if ( should_promote_pending_schedule )
-            {
-               if (!upgrading) {
-                   // Promote proposed schedule to pending schedule.
-                   if (!replaying) {
-                       ilog("bft_irreversible_blocknum ${a}", ("a", pending->_pending_block_state->bft_irreversible_blocknum) );
-                       ilog("dpos_irreversible_blocknum ${a}", ("a", pending->_pending_block_state->dpos_irreversible_blocknum) );
-                       ilog("promoting proposed schedule (set in block ${proposed_num}) to pending; current block: ${n} lib: ${lib} schedule: ${schedule} ",
-                            ("proposed_num", *gpo.proposed_schedule_block_num)("n",
-                                                                               pending->_pending_block_state->block_num)
-                                    ("lib", std::max(pending->_pending_block_state->bft_irreversible_blocknum,
-                                                     pending->_pending_block_state->dpos_irreversible_blocknum))
-                                    ("schedule", static_cast<producer_schedule_type>(gpo.proposed_schedule)));
+         {
+             if (!upgrading) {
+                 // Promote proposed schedule to pending schedule.
+                 if (!replaying) {
+                     ilog("promoting proposed schedule (set in block ${proposed_num}) to pending; current block: ${n} lib: ${lib} schedule: ${schedule} ",
+                             ("proposed_num", *gpo.proposed_schedule_block_num)("n", pending->_pending_block_state->block_num)
+                             ("lib", lib_num)
+                             ("schedule", static_cast<producer_schedule_type>(gpo.proposed_schedule)));
 
-                   }
-                   pending->_pending_block_state->set_new_producers(gpo.proposed_schedule);
-               }
-               db.modify( gpo, [&]( auto& gp ) {
-                     gp.proposed_schedule_block_num = optional<block_num_type>();
-                     gp.proposed_schedule.clear();
-                  });
+                 }
+                 pending->_pending_block_state->set_new_producers(gpo.proposed_schedule);
 
-               last_promoted_proposed_schedule_block_num.reset();
-               last_promoted_proposed_schedule_block_num.emplace(pending->_pending_block_state->block_num);
-            }
+                 if (new_version) {
+                     promoted_schedule_blocks.emplace_back(pending->_pending_block_state->block_num);
+                     for ( auto itr = promoted_schedule_blocks.begin(); itr != promoted_schedule_blocks.end();) {
+                         if ((*itr) < lscb_num) {
+                             itr = promoted_schedule_blocks.erase(itr);
+                         } else {
+                             ++itr;
+                         }
+                     }
+                 }
+             }
+             db.modify( gpo, [&]( auto& gp ) {
+                 gp.proposed_schedule_block_num = optional<block_num_type>();
+                 gp.proposed_schedule.clear();
+             });
+         }
 
          try {
             auto onbtrx = std::make_shared<transaction_metadata>( get_on_block_transaction() );
@@ -1379,6 +1494,9 @@ struct controller_impl {
       }
 
       guard_pending.cancel();
+      if (upgrade_target_block()) {
+          ilog("new version is ${nv}, upgrading is ${u}", ("nv", is_new_version())("u", is_upgrading()));
+      }
    } // start_block
 
 
@@ -1394,6 +1512,9 @@ struct controller_impl {
    void apply_block( const signed_block_ptr& b, controller::block_status s ) { try {
       try {
 //         EOS_ASSERT( b->block_extensions.size() == 0, block_validate_exception, "no supported extensions" );
+         if (upgrade_target_block()) {
+             ilog("new version is ${nv}, upgrading is ${u}", ("nv", is_new_version())("u", is_upgrading()));
+         }
          auto producer_block_id = b->id();
          start_block( b->timestamp, b->confirmed, s , producer_block_id);
 
@@ -1457,6 +1578,11 @@ struct controller_impl {
 
          finalize_block();
 
+         if (producer_block_id != pending->_pending_block_state->header.id()) {
+             ilog("producer block: ${b}", ("b", (*b)));
+             ilog("pending block: ${p}", ("p", (*(pending->_pending_block_state))));
+         }
+
          // this implicitly asserts that all header fields (less the signature) are identical
          EOS_ASSERT(producer_block_id == pending->_pending_block_state->header.id(),
                    block_validate_exception, "Block ID does not match",
@@ -1478,6 +1604,9 @@ struct controller_impl {
          edump((e.to_detail_string()));
          abort_block();
          throw;
+      }
+      if (upgrade_target_block()) {
+          ilog("new version is ${nv}, upgrading is ${u}", ("nv", is_new_version())("u", is_upgrading()));
       }
    } FC_CAPTURE_AND_RETHROW() } /// apply_block
 
@@ -1502,6 +1631,9 @@ struct controller_impl {
    }
 
    void push_block( std::future<block_state_ptr>& block_state_future ) {
+      if (upgrade_target_block()) {
+          ilog("new version is ${nv}, upgrading is ${u}", ("nv", is_new_version())("u", is_upgrading()));
+      }
       controller::block_status s = controller::block_status::complete;
       EOS_ASSERT(!pending, block_validate_exception, "it is not valid to push a block when there is a pending block");
       auto reset_prod_light_validation = fc::make_scoped_exit([old_value=trusted_producer_light_validation, this]() {
@@ -1512,7 +1644,8 @@ struct controller_impl {
          auto& b = new_header_state->block;
          emit( self.pre_accepted_block, b );
 
-         fork_db.add( new_header_state, false);
+         auto new_version = is_new_version();
+         fork_db.add( new_header_state, false, new_version);
 
          if (conf.trusted_producers.count(b->producer)) {
             trusted_producer_light_validation = true;
@@ -1526,7 +1659,9 @@ struct controller_impl {
          }
 
          set_pbft_lscb();
-
+         if (upgrade_target_block()) {
+             ilog("new version is ${nv}, upgrading is ${u}", ("nv", is_new_version())("u", is_upgrading()));
+         }
       } FC_LOG_AND_RETHROW( )
    }
 
@@ -1553,8 +1688,8 @@ struct controller_impl {
             maybe_switch_forks( s );
          }
 
-//         // apply stable checkpoint when there is one
-//         // TODO:// verify required one more time?
+         // apply stable checkpoint when there is one
+         // TODO: verify required one more time?
          for (const auto &extn: b->block_extensions) {
             if (extn.first == static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint)) {
                pbft_commit_local(b->id());
@@ -1613,23 +1748,6 @@ struct controller_impl {
    }
 
    void maybe_switch_forks( controller::block_status s ) {
-
-      auto new_version = is_new_version();
-
-      if (new_version) {
-          if (pbft_prepared) {
-              fork_db.mark_pbft_prepared_fork(pbft_prepared);
-          } else if (head) {
-              fork_db.mark_pbft_prepared_fork(head);
-          }
-
-          if (my_prepare) {
-              fork_db.mark_pbft_my_prepare_fork(my_prepare);
-          } else if (head) {
-              fork_db.mark_pbft_my_prepare_fork(head);
-          }
-      }
-
       auto new_head = fork_db.head();
 
       if( new_head->header.previous == head->id ) {
@@ -2099,6 +2217,7 @@ void controller::abort_block() {
 
 boost::asio::thread_pool& controller::get_thread_pool() {
    return my->thread_pool;
+
 }
 
 std::future<block_state_ptr> controller::create_block_state_future( const signed_block_ptr& b ) {
@@ -2124,10 +2243,6 @@ bool controller::pending_pbft_lib() {
 void controller::set_pbft_latest_checkpoint( const block_id_type& id ) {
    my->set_pbft_latest_checkpoint(id);
 }
-
-//void controller::set_pbft_prepared_block_id(optional<block_id_type> bid){
-//    my->pbft_prepared_block_id = bid;
-//}
 
 transaction_trace_ptr controller::push_transaction( const transaction_metadata_ptr& trx, fc::time_point deadline, uint32_t billed_cpu_time_us ) {
    validate_db_available_size();
@@ -2166,21 +2281,15 @@ void controller::set_actor_whitelist( const flat_set<account_name>& new_actor_wh
 }
 void controller::set_actor_blacklist( const flat_set<account_name>& new_actor_blacklist ) {
    my->conf.actor_blacklist = new_actor_blacklist;
-
-   // *bos begin*
-   my->sync_name_list(list_type::actor_blacklist_type);
-   // *bos end*
+   my->merge_msig_blacklist_into_conf(); ///bos  merge multisig blacklist into conf after api reset blacklist
 }
 void controller::set_contract_whitelist( const flat_set<account_name>& new_contract_whitelist ) {
    my->conf.contract_whitelist = new_contract_whitelist;
 }
 void controller::set_contract_blacklist( const flat_set<account_name>& new_contract_blacklist ) {
+
    my->conf.contract_blacklist = new_contract_blacklist;
-
-   // *bos begin*
-  my->sync_name_list(list_type::contract_blacklist_type);
-   // *bos end*
-
+   my->merge_msig_blacklist_into_conf(); ///bos   merge multisig blacklist into conf after api reset blacklist
 }
 void controller::set_action_blacklist( const flat_set< pair<account_name, action_name> >& new_action_blacklist ) {
    for (auto& act: new_action_blacklist) {
@@ -2277,18 +2386,12 @@ block_id_type controller::last_stable_checkpoint_block_id() const {
 }
 
 
-uint32_t controller::last_proposed_schedule_block_num() const {
-   if (my->last_proposed_schedule_block_num) {
-      return *my->last_proposed_schedule_block_num;
-   }
-   return block_num_type{};
+vector<uint32_t> controller::proposed_schedule_block_nums() const {
+    return my->proposed_schedule_blocks;
 }
 
-uint32_t controller::last_promoted_proposed_schedule_block_num() const {
-    if (my->last_promoted_proposed_schedule_block_num) {
-        return *my->last_promoted_proposed_schedule_block_num;
-    }
-    return block_num_type{};
+vector<uint32_t> controller::promoted_schedule_block_nums() const {
+    return my->promoted_schedule_blocks;
 }
 
 bool controller::is_replaying() const {
@@ -2476,8 +2579,6 @@ void controller::set_pbft_prepared(const block_id_type& id) const {
       my->pbft_prepared = bs;
       my->fork_db.mark_pbft_prepared_fork(bs);
    }
-//   dlog( "fork_db head ${h}", ("h", fork_db().head()->id));
-//   dlog( "prepared block id ${b}", ("b", id));
 }
 
 void controller::set_pbft_my_prepare(const block_id_type& id) const {
@@ -2487,8 +2588,6 @@ void controller::set_pbft_my_prepare(const block_id_type& id) const {
       my->my_prepare = bs;
       my->fork_db.mark_pbft_my_prepare_fork(bs);
    }
-//   dlog( "fork_db head ${h}", ("h", fork_db().head()->id));
-//   dlog( "my prepare block id ${b}", ("b", id));
 }
 
 block_id_type controller::get_pbft_my_prepare() const {
@@ -2497,8 +2596,8 @@ block_id_type controller::get_pbft_my_prepare() const {
 }
 
 void controller::reset_pbft_my_prepare() const {
-   if (my->my_prepare) my->fork_db.remove_pbft_my_prepare_fork(my->my_prepare->id);
-   my->my_prepare.reset();
+   my->fork_db.remove_pbft_my_prepare_fork();
+   if (my->my_prepare) my->my_prepare.reset();
 }
 
 db_read_mode controller::get_read_mode()const {
@@ -2626,19 +2725,11 @@ void controller::set_subjective_cpu_leeway(fc::microseconds leeway) {
 
 void controller::add_resource_greylist(const account_name &name) {
    my->conf.resource_greylist.insert(name);
-
-   // *bos begin*
-   my->sync_name_list(list_type::resource_greylist_type);
-   // *bos end*
 }
 
 void controller::remove_resource_greylist(const account_name &name) {
-
+   my->check_msig_blacklist(list_type::resource_greylist_type, name);///bos
    my->conf.resource_greylist.erase(name);
-
-   // *bos begin*
-   my->sync_name_list(list_type::resource_greylist_type);
-   // *bos end*
 }
 
 bool controller::is_resource_greylisted(const account_name &name) const {
@@ -2656,11 +2747,6 @@ const global_property2_object& controller::get_global_properties2()const {
 
 void controller::set_name_list(int64_t list, int64_t action, std::vector<account_name> name_list)
 {
-   //redundant sync
-   my->sync_name_list(list_type::actor_blacklist_type, true);
-   my->sync_name_list(list_type::contract_blacklist_type, true);
-   my->sync_name_list(list_type::resource_greylist_type, true);
-
    my->set_name_list(static_cast<list_type>(list), static_cast<list_action_type>(action), name_list);
 }
 // *bos end*
@@ -2681,4 +2767,16 @@ bool controller::is_upgraded() const {
 bool controller::under_upgrade() const {
     return my->is_upgrading();
 }
+
+void controller::set_upo(uint32_t target_block_num) {
+    try {
+        const auto& upo = my->db.get<upgrade_property_object>();
+        my->db.modify( upo, [&]( auto& up ) { up.upgrade_target_block_num = (block_num_type)target_block_num;});
+    } catch( const boost::exception& e) {
+        my->db.create<upgrade_property_object>([&](auto& up){
+          up.upgrade_target_block_num = (block_num_type)target_block_num;
+        });
+    }
+}
+
 } } /// eosio::chain
