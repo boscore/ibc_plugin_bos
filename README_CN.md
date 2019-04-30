@@ -1,6 +1,6 @@
 # BOSCore - 更可用的链，为DApp而生。
 
-## BOSCore Version: v2.0.3
+## BOSCore Version: v3.0.0
 ### Basic EOSIO Version: v1.6.4 (support REX)
 
 # 背景
@@ -28,16 +28,6 @@ BOS链的代码完全由社区贡献并维护，每个生态参与者都可以�
 ## 开始
 1. 源码直接编译: `bash ./eosio_build.sh -s BOS`
 2. Docker方式部署，参看 [Docker](./Docker/README.md)
-
-## BOSCore 开发流程 
-BOSCore 鼓励社区开发者参与代码贡献，社区成员应当遵循以下工作流：
-![BOSCore Workflow](./images/bos-workflow.png)
-
-注意:
-1. 只有待发布的 Feature Branch 或者Bug修复才应该向 Develop Branch 提交
-2. 向 Develop Branch 提交 PR 之前需要现在本地执行 rebase 操作
-3. EOSIO 主网版本作为一个 Feature Branch 来对待
-4. 紧急问题修复采用 hotfixes 模式 
 
 ## BOSCore 开发流程 
 BOSCore 鼓励社区开发者参与代码贡献，社区成员应当遵循以下工作流：

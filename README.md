@@ -1,6 +1,6 @@
 # BOSCore - Born for DApps. Born for Usability.
 
-## BOSCore Version: v2.0.3
+## BOSCore Version: v3.0.0
 ### Basic EOSIO Version: v1.6.4 (support REX)
 
 # Background
@@ -28,16 +28,6 @@ As BOS continues to develop, developer rewards will be appropriately adjusted to
 ## Start
 1. Build from code : `bash ./eosio_build.sh -s BOS`
 2. Docker Style，check [Docker](./Docker/README.md)
-
-## BOSCore Workflow
-BOSCore encourage community developer actively participate in contributing the code, members should follow the workflow below.
-![BOSCore Workflow](./images/bos-workflow.png)
-
-Attention: 
-1. Only allow Feature Branch or bug fix to submit PR to Develop Branch.
-2. Rebase is required before submitting PR to Develop Branch.
-3. Treat update of eosio/eos code as new feature.
-4. Emergent issues must repaired by adopting hotfixes mode.
 
 ## BOSCore Workflow
 BOSCore encourage community developer actively participate in contributing the code, members should follow the workflow below.
