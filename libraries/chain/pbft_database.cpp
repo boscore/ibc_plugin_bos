@@ -931,13 +931,13 @@ namespace eosio {
             return pbft_stable_checkpoint{};
         }
 
-        pbft_state pbft_database::get_pbft_state_by_id(const block_id_type &block_id){
+        const pbft_state_ptr& pbft_database::get_pbft_state_by_id(const block_id_type &block_id){
             auto &by_block_id_index = pbft_state_index.get<by_block_id>();
             auto itr = by_block_id_index.find(block_id);
             if (itr != by_block_id_index.end()) {
                 return *itr;
             }
-            return pbft_state();
+            return std::move(pbft_state_ptr());
         }
 
         pbft_stable_checkpoint pbft_database::get_stable_checkpoint_by_id(const block_id_type &block_id) {
