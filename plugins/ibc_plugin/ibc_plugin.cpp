@@ -2710,7 +2710,7 @@ namespace eosio { namespace ibc {
          }
          for( uint32_t num = msg.block_num; num <= end_block_num; ++num ){
             auto sbp = chain_plug->chain().fetch_block_by_number( num );
-            if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", msg.block_num)); return; }
+            if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", num)); return; }
             ret_msg.headers.push_back( *sbp );
          }
 
@@ -2733,6 +2733,7 @@ namespace eosio { namespace ibc {
       uint32_t       check_num;
       for( int i = 0; i < 101; ++i ){
          check_num = msg.block_num + i;
+         if ( check_num > lib_block_num ){ break;}
          signed_block_ptr sbp = chain_plug->chain().fetch_block_by_number( check_num );
          for ( auto& ext : sbp->block_extensions ){
             if ( ext.first == 0x1 && ext.second.size()>0 ){
