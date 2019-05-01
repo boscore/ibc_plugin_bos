@@ -1664,10 +1664,10 @@ struct controller_impl {
       if ((!pending || pending->_block_status != controller::block_status::incomplete) && pending_pbft_lib ) {
          fork_db.set_bft_irreversible(*pending_pbft_lib);
          pending_pbft_lib.reset();
-      }
 
-      if (read_mode != db_read_mode::IRREVERSIBLE) {
-          maybe_switch_forks(controller::block_status::complete);
+         if (read_mode != db_read_mode::IRREVERSIBLE) {
+            maybe_switch_forks(controller::block_status::complete);
+         }
       }
    }
 
@@ -1698,7 +1698,7 @@ struct controller_impl {
    void maybe_switch_forks( controller::block_status s ) {
       auto new_head = fork_db.head();
 
-      if( new_head->header.previous == head->id ) {
+      if( new_head->header.previous == head->id && !pending) {
          try {
             apply_block( new_head->block, s );
             fork_db.mark_in_current_chain( new_head, true );
@@ -2520,21 +2520,23 @@ chain_id_type controller::get_chain_id()const {
    return my->chain_id;
 }
 
-void controller::set_pbft_prepared(const block_id_type& id) const {
+void controller::set_pbft_prepared(const block_id_type& id) {
    my->pbft_prepared.reset();
    auto bs = fetch_block_state_by_id(id);
    if (bs) {
       my->pbft_prepared = bs;
       my->fork_db.mark_pbft_prepared_fork(bs);
+      maybe_switch_forks();
    }
 }
 
-void controller::set_pbft_my_prepare(const block_id_type& id) const {
+void controller::set_pbft_my_prepare(const block_id_type& id) {
    my->my_prepare.reset();
    auto bs = fetch_block_state_by_id(id);
    if (bs) {
       my->my_prepare = bs;
       my->fork_db.mark_pbft_my_prepare_fork(bs);
+      maybe_switch_forks();
    }
 }
 
@@ -2543,8 +2545,9 @@ block_id_type controller::get_pbft_my_prepare() const {
    return block_id_type{};
 }
 
-void controller::reset_pbft_my_prepare() const {
+void controller::reset_pbft_my_prepare() {
    my->fork_db.remove_pbft_my_prepare_fork();
+   maybe_switch_forks();
    if (my->my_prepare) my->my_prepare.reset();
 }
 
@@ -2709,6 +2712,12 @@ bool controller::is_upgraded() const {
 
 bool controller::under_upgrade() const {
     return my->is_upgrading();
+}
+
+void controller::maybe_switch_forks() {
+   if (my->read_mode != db_read_mode::IRREVERSIBLE) {
+      my->maybe_switch_forks(controller::block_status::complete);
+   }
 }
 
 // this will be used in unit_test only, should not be called anywhere else.

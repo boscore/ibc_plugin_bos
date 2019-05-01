@@ -597,8 +597,9 @@ namespace eosio {
             bool should_stop_view_change(const pbft_view_change &vc);
 
             block_num_type get_current_pbft_watermark();
-            controller                                  &ctrl;
+
         private:
+            controller                                  &ctrl;
             pbft_state_multi_index_type                 pbft_state_index;
             pbft_view_state_multi_index_type            view_state_index;
             pbft_checkpoint_state_multi_index_type      checkpoint_index;
