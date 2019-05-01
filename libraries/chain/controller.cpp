@@ -1664,10 +1664,10 @@ struct controller_impl {
       if ((!pending || pending->_block_status != controller::block_status::incomplete) && pending_pbft_lib ) {
          fork_db.set_bft_irreversible(*pending_pbft_lib);
          pending_pbft_lib.reset();
+      }
 
-         if (read_mode != db_read_mode::IRREVERSIBLE) {
-            maybe_switch_forks(controller::block_status::complete);
-         }
+      if (read_mode != db_read_mode::IRREVERSIBLE) {
+          maybe_switch_forks(controller::block_status::complete);
       }
    }
 
