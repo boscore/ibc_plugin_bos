@@ -351,6 +351,9 @@ struct controller_impl {
 
    void init(std::function<bool()> shutdown, const snapshot_reader_ptr& snapshot) {
 
+      //do upgrade migration if necessary;
+      migrate_upgrade();
+
       bool report_integrity_hash = !!snapshot;
       if (snapshot) {
          EOS_ASSERT( !head, fork_database_exception, "" );
@@ -380,9 +383,6 @@ struct controller_impl {
             report_integrity_hash = true;
          }
       }
-
-      //do upgrade migration if necessary;
-      migrate_upgrade();
 
       if( shutdown() ) return;
 

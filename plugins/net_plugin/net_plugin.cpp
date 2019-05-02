@@ -3098,7 +3098,7 @@ namespace eosio {
        if (!pcc.pbft_db.is_valid_new_view(msg)) return;
 
        forward_pbft_msg(c, msg);
-       fc_dlog( logger, "received new view: ${n}, from ${v}", ("n", msg)("v", msg.public_key));
+       fc_ilog( logger, "received new view: ${n}, from ${v}", ("n", msg)("v", msg.public_key));
 
        pbft_incoming_new_view_channel.publish(msg);
     }
@@ -3114,7 +3114,7 @@ namespace eosio {
        if (!pcc.pbft_db.is_valid_checkpoint(msg)) return;
 
        forward_pbft_msg(c, msg);
-       fc_dlog( logger, "received checkpoint at ${n}, from ${v}", ("n", msg.block_num)("v", msg.public_key));
+       fc_ilog( logger, "received checkpoint at ${n}, from ${v}", ("n", msg.block_num)("v", msg.public_key));
 
        pbft_incoming_checkpoint_channel.publish(msg);
     }
