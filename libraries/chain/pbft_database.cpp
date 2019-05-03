@@ -945,11 +945,11 @@ namespace eosio {
 
             EOS_ASSERT(nv.view_changed.view == nv.view, pbft_exception, "target view not match");
 
-            vector<public_key_type> lib_producers;
+            vector<public_key_type> lscb_producers;
             for (const auto& pk: lscb_active_producers().producers) {
-                lib_producers.emplace_back(pk.block_signing_key);
+                lscb_producers.emplace_back(pk.block_signing_key);
             }
-            auto schedule_threshold = lib_producers.size() * 2 / 3 + 1;
+            auto schedule_threshold = lscb_producers.size() * 2 / 3 + 1;
 
             vector<public_key_type> view_change_producers;
 
@@ -962,9 +962,9 @@ namespace eosio {
 
             vector<public_key_type> intersection;
 
-            std::sort(lib_producers.begin(),lib_producers.end());
+            std::sort(lscb_producers.begin(),lscb_producers.end());
             std::sort(view_change_producers.begin(),view_change_producers.end());
-            std::set_intersection(lib_producers.begin(),lib_producers.end(),
+            std::set_intersection(lscb_producers.begin(),lscb_producers.end(),
                                   view_change_producers.begin(),view_change_producers.end(),
                                   back_inserter(intersection));
 

@@ -184,10 +184,6 @@ void push_blocks( tester& from, tester& to ) {
     while( to.control->fork_db_head_block_num() < from.control->fork_db_head_block_num() ) {
         auto fb = from.control->fetch_block_by_number( to.control->fork_db_head_block_num()+1 );
         to.push_block( fb );
-//        if(fb->block_num()>60) {
-//            BOOST_CHECK_EQUAL(from.control.get()->fetch_block_state_by_id(fb->id())->id,
-//                    to.control.get()->fetch_block_state_by_id(fb->id())->id);
-//        }
     }
 }
 
@@ -249,18 +245,18 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
 
     short_prepared_fork.create_accounts({N(shortname)});
     long_non_prepared_fork.create_accounts({N(longname)});
-    short_prepared_fork.produce_blocks(36);
+    short_prepared_fork.produce_blocks(6);
     push_blocks(short_prepared_fork, new_view_generator);
-    long_non_prepared_fork.produce_blocks(72);
+    long_non_prepared_fork.produce_blocks(10);
 
 
     pbft_new_view_generator.maybe_pbft_commit();
     new_view_generator.produce_blocks(3);
     push_blocks(new_view_generator, short_prepared_fork);
 
-    BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 166);
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 166);
-    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 199);
+    BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 136);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 136);
+    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(),  137);
     BOOST_CHECK_EQUAL(ctrl_new_view_generator.last_irreversible_block_num(), 101);
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 101);
     BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.last_irreversible_block_num(), 101);
@@ -270,7 +266,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_send_pbft_msg(), true);
     pbft_new_view_generator.maybe_pbft_prepare();
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_prepared(), true);
-    BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 166);
+    BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 136);
     for(int i = 0; i<pbft_new_view_generator.config.view_change_timeout; i++){
         pbft_new_view_generator.maybe_pbft_view_change();
     }
@@ -281,27 +277,34 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
             vcc,
             new_view);
 
-//    nv_msg.committed = {};
-//    auto pubk = nv_msg.public_key;
-//    auto sig = msp[pubk](nv_msg.digest());
-//    nv_msg.producer_signature = sig;
-
-
     //merge short fork and long fork, make sure current head is long fork
-    for(int i=1;i<=72;i++){
+    for(int i=1;i<=10;i++){
         auto tmp = ctrl_long_non_prepared_fork.fetch_block_by_number(127+i);
         short_prepared_fork.push_block(tmp);
     }
-    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 199);
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 199);
+    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 137);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 137);
 
 
     ctrl_short_prepared_fork.reset_pbft_prepared();
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 199);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 137);
 
+    //can switch fork after apply prepare certificate in new view
     pbft_short_prepared_fork.state_machine.on_new_view(nv_msg);
 
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 166);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 136);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 101);
+
+
+    //can switch fork after set lib
+    ctrl_short_prepared_fork.set_pbft_prepared(ctrl_short_prepared_fork.last_irreversible_block_id());
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 137);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 101);
+
+    pbft_short_prepared_fork.maybe_pbft_commit();
+    short_prepared_fork.produce_blocks(2);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 138);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 136);
 }
 
 

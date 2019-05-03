@@ -903,13 +903,12 @@ struct controller_impl {
    void commit_block( bool add_to_fork_db ) {
       auto reset_pending_on_exit = fc::make_scoped_exit([this]{
          pending.reset();
-         set_pbft_lib();
-         set_pbft_lscb();
+
       });
 
       try {
-         set_pbft_lib();
-         set_pbft_lscb();
+
+
          if (add_to_fork_db) {
             pending->_pending_block_state->validated = true;
 
@@ -1337,6 +1336,9 @@ struct controller_impl {
    {
       EOS_ASSERT( !pending, block_validate_exception, "pending block already exists" );
 
+      set_pbft_lib();
+      set_pbft_lscb();
+
       auto guard_pending = fc::make_scoped_exit([this](){
          pending.reset();
       });
@@ -1661,11 +1663,13 @@ struct controller_impl {
 
    void set_pbft_lib() {
 
-      if ((!pending || pending->_block_status != controller::block_status::incomplete) && pending_pbft_lib ) {
+      if (!is_new_version()) return;
+
+      if ( pending_pbft_lib ) {
          fork_db.set_bft_irreversible(*pending_pbft_lib);
          pending_pbft_lib.reset();
 
-         if (read_mode != db_read_mode::IRREVERSIBLE) {
+         if (!pending && read_mode != db_read_mode::IRREVERSIBLE) {
             maybe_switch_forks(controller::block_status::complete);
          }
       }
@@ -1677,7 +1681,10 @@ struct controller_impl {
    }
 
    void set_pbft_lscb() {
-       if ((!pending || pending->_block_status != controller::block_status::incomplete) && pending_pbft_checkpoint ) {
+
+       if (!is_new_version()) return;
+
+       if ( pending_pbft_checkpoint ) {
 
            auto checkpoint_block_state = fork_db.get_block(*pending_pbft_checkpoint);
            if (checkpoint_block_state) {
@@ -1698,7 +1705,7 @@ struct controller_impl {
    void maybe_switch_forks( controller::block_status s ) {
       auto new_head = fork_db.head();
 
-      if( new_head->header.previous == head->id && !pending) {
+      if( new_head->header.previous == head->id ) {
          try {
             apply_block( new_head->block, s );
             fork_db.mark_in_current_chain( new_head, true );
@@ -2721,7 +2728,7 @@ bool controller::under_upgrade() const {
 }
 
 void controller::maybe_switch_forks() {
-   if (my->read_mode != db_read_mode::IRREVERSIBLE) {
+   if (!pending_block_state() && my->read_mode != db_read_mode::IRREVERSIBLE) {
       my->maybe_switch_forks(controller::block_status::complete);
    }
 }

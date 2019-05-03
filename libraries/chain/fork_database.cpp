@@ -547,6 +547,7 @@ namespace eosio { namespace chain {
        while( queue.size() ) {
            queue = update( queue );
        }
+       my->head = *my->index.get<by_lib_block_num>().begin();
    }
 
    void fork_database::set_latest_checkpoint( block_id_type id) {
