@@ -68,7 +68,7 @@ namespace eosio {
 
             const uint32_t &get_current_view() const;
 
-            void set_current_view(const uint32_t &current_view);
+            void set_current_view(const uint32_t &cv);
 
             const vector<pbft_prepared_certificate> &get_prepared_certificate() const;
 

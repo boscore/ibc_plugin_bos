@@ -97,7 +97,7 @@ BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade) {
     auto msp = make_signature_provider();
     ctrl.set_my_signature_providers(msp);
 
-    auto is_upgraded = ctrl.is_upgraded();
+    auto is_upgraded = ctrl.is_pbft_enabled();
 
     BOOST_CHECK_EQUAL(is_upgraded, false);
 
@@ -108,7 +108,7 @@ BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade) {
     BOOST_CHECK_EQUAL(ctrl.last_irreversible_block_num(), 151);
     BOOST_CHECK_EQUAL(ctrl.head_block_num(), 152);
 
-    is_upgraded = ctrl.is_upgraded();
+    is_upgraded = ctrl.is_pbft_enabled();
     BOOST_CHECK_EQUAL(is_upgraded, true);
 
     tester.produce_blocks(10);
@@ -142,7 +142,7 @@ BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade_with_four_producers) {
     auto msp = make_signature_provider();
     ctrl.set_my_signature_providers(msp);
 
-    auto is_upgraded = ctrl.is_upgraded();
+    auto is_upgraded = ctrl.is_pbft_enabled();
 
     BOOST_CHECK_EQUAL(is_upgraded, false);
 
@@ -161,10 +161,10 @@ BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade_with_four_producers) {
     BOOST_CHECK_EQUAL(ctrl.last_irreversible_block_num(), 108);
     BOOST_CHECK_EQUAL(ctrl.head_block_num(), 156);
 
-    is_upgraded = ctrl.is_upgraded();
+    is_upgraded = ctrl.is_pbft_enabled();
     BOOST_CHECK_EQUAL(is_upgraded, false);
     tester.produce_blocks(12);
-    is_upgraded = ctrl.is_upgraded();
+    is_upgraded = ctrl.is_pbft_enabled();
     BOOST_CHECK_EQUAL(is_upgraded, true);
     BOOST_CHECK_EQUAL(ctrl.last_irreversible_block_num(), 120);
     BOOST_CHECK_EQUAL(ctrl.head_block_num(), 168);
@@ -234,9 +234,9 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     pbft_new_view_generator.maybe_pbft_commit();
     new_view_generator.produce_blocks(1);
 
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.is_upgraded(), true);
-    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.is_upgraded(), true);
-    BOOST_CHECK_EQUAL(ctrl_new_view_generator.is_upgraded(), true);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.is_pbft_enabled(), true);
+    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.is_pbft_enabled(), true);
+    BOOST_CHECK_EQUAL(ctrl_new_view_generator.is_pbft_enabled(), true);
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 127);
     BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 127);
     BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.fetch_block_by_number(100)->id(), ctrl_short_prepared_fork.fetch_block_by_number(100)->id());

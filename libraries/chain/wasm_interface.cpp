@@ -198,11 +198,11 @@ class privileged_api : public context_aware_api {
          uint32_t target_num;
          fc::raw::unpack(ds, target_num);
 
-         EOS_ASSERT( context.control.head_block_num() < target_num - 100, wasm_execution_error, "upgrade target block is too close");
+         EOS_ASSERT( context.control.head_block_num() < target_num - 100, wasm_execution_error, "target block invalid");
 
-         EOS_ASSERT( !context.control.is_upgraded(), wasm_execution_error, "the system has already upgraded to the new version");
+         EOS_ASSERT( !context.control.is_pbft_enabled(), wasm_execution_error, "pbft is already enabled");
 
-         EOS_ASSERT( !context.control.under_upgrade(), wasm_execution_error, "the system is currently under upgrade");
+         EOS_ASSERT( !context.control.under_maintenance(), wasm_execution_error, "the system is under maintenance");
 
          context.db.modify( context.control.get_upgrade_properties(),
                  [&]( auto& uprops ) {

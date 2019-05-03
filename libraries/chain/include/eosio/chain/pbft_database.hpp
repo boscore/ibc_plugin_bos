@@ -262,6 +262,10 @@ namespace eosio {
                 return !(*this == rhs);
             }
 
+            bool operator<(const pbft_committed_certificate &rhs) const {
+                return block_num < rhs.block_num;
+            }
+
             digest_type digest() const {
                 digest_type::encoder enc;
                 fc::raw::pack(enc, block_id);
@@ -667,6 +671,12 @@ namespace eosio {
             vector<vector<block_info>> fetch_fork_from(vector<block_info> block_infos);
 
             vector<block_info> fetch_first_fork_from(vector<block_info> &bi);
+
+            bool is_valid_longest_fork(
+                    const block_info &bi,
+                    vector<block_info> block_infos,
+                    unsigned long threshold,
+                    unsigned long non_fork_bp_count);
 
             producer_schedule_type lscb_active_producers() const;
 

@@ -510,7 +510,9 @@ namespace eosio {
             }
 
             if (!new_view.committed.empty()) {
-                for (auto cp :new_view.committed) {
+                auto committed_certs = new_view.committed;
+                std::sort(committed_certs.begin(), committed_certs.end());
+                for (auto cp :committed_certs) {
                     for (auto c: cp.commits) {
                         try {
                             pbft_db.add_pbft_commit(c);
@@ -597,8 +599,8 @@ namespace eosio {
             return this->current_view;
         }
 
-        void psm_machine::set_current_view(const uint32_t &current_view) {
-            this->current_view = current_view;
+        void psm_machine::set_current_view(const uint32_t &cv) {
+            this->current_view = cv;
         }
 
         const vector<pbft_prepared_certificate> &psm_machine::get_prepared_certificate() const {

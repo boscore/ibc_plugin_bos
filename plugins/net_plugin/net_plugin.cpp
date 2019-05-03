@@ -1668,7 +1668,7 @@ namespace eosio {
 
       uint32_t head = cc.fork_db_head_block_num();
       block_id_type head_id = cc.fork_db_head_block_id();
-      auto upgraded = cc.is_upgraded();
+      auto upgraded = cc.is_pbft_enabled();
       if (peer_lib > lscb_num && upgraded) {
          //there might be a better way to sync checkpoints, yet we do not want to modify the existing handshake msg.
          fc_dlog(logger, "request sync checkpoints");
