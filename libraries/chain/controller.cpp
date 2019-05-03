@@ -353,8 +353,6 @@ struct controller_impl {
 
    void init(std::function<bool()> shutdown, const snapshot_reader_ptr& snapshot) {
 
-      //do upgrade migration if necessary;
-      migrate_upgrade();
 
       bool report_integrity_hash = !!snapshot;
       if (snapshot) {
@@ -362,6 +360,9 @@ struct controller_impl {
          snapshot->validate();
 
          read_from_snapshot( snapshot );
+
+          //do upgrade migration if necessary;
+          migrate_upgrade(); //compatiable for snapshot integrity test
 
          auto end = blog.read_head();
          if( !end ) {
@@ -373,6 +374,8 @@ struct controller_impl {
                         "Block log is provided with snapshot but does not contain the head block from the snapshot" );
          }
       } else {
+          //do upgrade migration if necessary;
+          migrate_upgrade();  //compatiable for snapshot integrity test
          if( !head ) {
             initialize_fork_db(); // set head to genesis state
          }
