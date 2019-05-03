@@ -293,6 +293,7 @@ namespace eosio { namespace chain {
          void set_pbft_my_prepare(const block_id_type& id);
          block_id_type get_pbft_my_prepare()const;
          void reset_pbft_my_prepare();
+         void reset_pbft_prepared();
          void maybe_switch_forks();
 
          signal<void(const signed_block_ptr&)>         pre_accepted_block;

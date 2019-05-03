@@ -2551,6 +2551,12 @@ void controller::reset_pbft_my_prepare() {
    if (my->my_prepare) my->my_prepare.reset();
 }
 
+void controller::reset_pbft_prepared() {
+    my->fork_db.remove_pbft_prepared_fork();
+    maybe_switch_forks();
+    if (my->pbft_prepared) my->pbft_prepared.reset();
+}
+
 db_read_mode controller::get_read_mode()const {
    return my->read_mode;
 }

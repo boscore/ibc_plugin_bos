@@ -803,7 +803,7 @@ namespace eosio {
                 //validate prepare
                 auto lscb = ctrl.last_stable_checkpoint_block_num();
                 auto non_fork_bp_count = 0;
-                vector<block_info> prepare_infos(certificate.prepares.size());
+                vector<block_info> prepare_infos;
                 for (auto const &p : certificate.prepares) {
                     //only search in fork db
                     if (p.block_num <= lscb) {
@@ -885,7 +885,7 @@ namespace eosio {
                 //validate commit
                 auto lscb = ctrl.last_stable_checkpoint_block_num();
                 auto non_fork_bp_count = 0;
-                vector<block_info> commit_infos(certificate.commits.size());
+                vector<block_info> commit_infos;
                 for (auto const &p : certificate.commits) {
                     //only search in fork db
                     if (p.block_num <= lscb) {

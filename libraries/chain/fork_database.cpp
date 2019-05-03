@@ -442,6 +442,38 @@ namespace eosio { namespace chain {
        my->head = *my->index.get<by_lib_block_num>().begin();
    }
 
+    void fork_database::remove_pbft_prepared_fork()  {
+        auto oldest = *my->index.get<by_block_num>().begin();
+    
+        auto& by_id_idx = my->index.get<by_block_id>();
+        auto itr = by_id_idx.find( oldest->id );
+        by_id_idx.modify( itr, [&]( auto& bsp ) { bsp->pbft_prepared = false; });
+    
+        auto update = [&]( const vector<block_id_type>& in ) {
+          vector<block_id_type> updated;
+    
+          for( const auto& i : in ) {
+              auto& pidx = my->index.get<by_prev>();
+              auto pitr  = pidx.lower_bound( i );
+              auto epitr = pidx.upper_bound( i );
+              while( pitr != epitr ) {
+                  pidx.modify( pitr, [&]( auto& bsp ) {
+                    bsp->pbft_prepared = false;
+                    updated.push_back( bsp->id );
+                  });
+                  ++pitr;
+              }
+          }
+          return updated;
+        };
+    
+        vector<block_id_type> queue{ oldest->id };
+        while(!queue.empty()) {
+            queue = update( queue );
+        }
+        my->head = *my->index.get<by_lib_block_num>().begin();
+    }
+
    block_state_ptr   fork_database::get_block_in_current_chain_by_num( uint32_t n )const {
       const auto& numidx = my->index.get<by_block_num>();
       auto nitr = numidx.lower_bound( n );

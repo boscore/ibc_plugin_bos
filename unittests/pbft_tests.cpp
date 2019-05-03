@@ -192,9 +192,7 @@ void push_blocks( tester& from, tester& to ) {
 }
 
 BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_on_short_fork) {
-    tester base_fork, short_prepared_fork, long_non_prepared_fork, new_view_generator;
-    controller &ctrl_base_fork = *base_fork.control.get();
-    pbft_controller pbft_ctrl{ctrl_base_fork};
+    tester short_prepared_fork, long_non_prepared_fork, new_view_generator;
     controller &ctrl_short_prepared_fork = *short_prepared_fork.control.get();
     pbft_controller pbft_short_prepared_fork{ctrl_short_prepared_fork};
     controller &ctrl_long_non_prepared_fork = *long_non_prepared_fork.control.get();
@@ -203,75 +201,48 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     pbft_controller pbft_new_view_generator{ctrl_new_view_generator};
 
     auto msp = make_signature_provider();
-    ctrl_base_fork.set_my_signature_providers(msp);
     ctrl_short_prepared_fork.set_my_signature_providers(msp);
     ctrl_long_non_prepared_fork.set_my_signature_providers(msp);
     ctrl_new_view_generator.set_my_signature_providers(msp);
 
-    ctrl_base_fork.set_upo(48);
     ctrl_short_prepared_fork.set_upo(48);
     ctrl_long_non_prepared_fork.set_upo(48);
     ctrl_new_view_generator.set_upo(48);
 
-    base_fork.create_accounts( {N(alice),N(bob),N(carol),N(deny)} );
-    base_fork.set_producers({N(alice),N(bob),N(carol),N(deny)});
-    base_fork.produce_blocks(95);
-
     long_non_prepared_fork.create_accounts( {N(alice),N(bob),N(carol),N(deny)} );
     long_non_prepared_fork.set_producers({N(alice),N(bob),N(carol),N(deny)});
-    long_non_prepared_fork.produce_blocks(95);
+    long_non_prepared_fork.produce_blocks(100);
 
     short_prepared_fork.create_accounts( {N(alice),N(bob),N(carol),N(deny)} );
     short_prepared_fork.set_producers({N(alice),N(bob),N(carol),N(deny)});
-    short_prepared_fork.produce_blocks(95);
+    short_prepared_fork.produce_blocks(100);
 
     new_view_generator.create_accounts( {N(alice),N(bob),N(carol),N(deny)} );
     new_view_generator.set_producers({N(alice),N(bob),N(carol),N(deny)});
-    new_view_generator.produce_blocks(95);
-
-    auto is_upgraded = ctrl_base_fork.is_upgraded();
-    BOOST_CHECK_EQUAL(ctrl_base_fork.active_producers().producers.front().producer_name, N(alice));
-    BOOST_CHECK_EQUAL(is_upgraded, true);
-    BOOST_CHECK_EQUAL(ctrl_base_fork.last_irreversible_block_num(), 48);
-    BOOST_CHECK_EQUAL(ctrl_base_fork.head_block_num(), 96);
-    
-    pbft_ctrl.maybe_pbft_prepare();
-    pbft_ctrl.maybe_pbft_commit();
-    base_fork.produce_blocks(4);
+    new_view_generator.produce_blocks(100);
 
     pbft_long_non_prepared_fork.maybe_pbft_prepare();
     pbft_long_non_prepared_fork.maybe_pbft_commit();
-    long_non_prepared_fork.produce_blocks(4);
+    long_non_prepared_fork.produce_blocks(1);
+    pbft_long_non_prepared_fork.maybe_pbft_commit();
+    long_non_prepared_fork.produce_blocks(25);
 
     pbft_short_prepared_fork.maybe_pbft_prepare();
     pbft_short_prepared_fork.maybe_pbft_commit();
-    short_prepared_fork.produce_blocks(4);
+    short_prepared_fork.produce_blocks(1);
+    pbft_short_prepared_fork.maybe_pbft_commit();
+    short_prepared_fork.produce_blocks(25);
 
 
     pbft_new_view_generator.maybe_pbft_prepare();
     pbft_new_view_generator.maybe_pbft_commit();
-    new_view_generator.produce_blocks(4);
+    new_view_generator.produce_blocks(1);
 
-    BOOST_CHECK_EQUAL(ctrl_base_fork.last_irreversible_block_num(), 96);
-    BOOST_CHECK_EQUAL(ctrl_base_fork.head_block_num(), 100);
-
-//    push_blocks(base_fork, long_non_prepared_fork);
-//    push_blocks(base_fork, short_prepared_fork);
-//    push_blocks(base_fork, new_view_generator);
-
-//    pbft_short_prepared_fork.maybe_pbft_prepare();
-//    pbft_short_prepared_fork.maybe_pbft_commit();
-//    pbft_long_non_prepared_fork.maybe_pbft_prepare();
-//    pbft_long_non_prepared_fork.maybe_pbft_commit();
-//    pbft_new_view_generator.maybe_pbft_prepare();
-//    pbft_new_view_generator.maybe_pbft_commit();
-
-    BOOST_CHECK_EQUAL(ctrl_base_fork.is_upgraded(), true);
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.is_upgraded(), true);
     BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.is_upgraded(), true);
     BOOST_CHECK_EQUAL(ctrl_new_view_generator.is_upgraded(), true);
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 100);
-    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 100);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 127);
+    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 127);
     BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.fetch_block_by_number(100)->id(), ctrl_short_prepared_fork.fetch_block_by_number(100)->id());
 
 
@@ -283,21 +254,23 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     long_non_prepared_fork.produce_blocks(72);
 
 
+    pbft_new_view_generator.maybe_pbft_commit();
+    new_view_generator.produce_blocks(3);
+    push_blocks(new_view_generator, short_prepared_fork);
 
-    BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 136);
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 136);
-    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 172);
-    BOOST_CHECK_EQUAL(ctrl_new_view_generator.last_irreversible_block_num(), 96);
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 96);
-    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.last_irreversible_block_num(), 96);
+    BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 166);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 166);
+    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 199);
+    BOOST_CHECK_EQUAL(ctrl_new_view_generator.last_irreversible_block_num(), 101);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 101);
+    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.last_irreversible_block_num(), 101);
 
     //generate new view with short fork prepare certificate
-    pbft_new_view_generator.state_machine.set_current(new psm_committed_state);
     pbft_new_view_generator.state_machine.set_prepares_cache({});
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_send_pbft_msg(), true);
     pbft_new_view_generator.maybe_pbft_prepare();
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_prepared(), true);
-    BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 136);
+    BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 166);
     for(int i = 0; i<pbft_new_view_generator.config.view_change_timeout; i++){
         pbft_new_view_generator.maybe_pbft_view_change();
     }
@@ -308,20 +281,27 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
             vcc,
             new_view);
 
+//    nv_msg.committed = {};
+//    auto pubk = nv_msg.public_key;
+//    auto sig = msp[pubk](nv_msg.digest());
+//    nv_msg.producer_signature = sig;
+
 
     //merge short fork and long fork, make sure current head is long fork
     for(int i=1;i<=72;i++){
-        auto tmp = ctrl_long_non_prepared_fork.fetch_block_by_number(100+i);
+        auto tmp = ctrl_long_non_prepared_fork.fetch_block_by_number(127+i);
         short_prepared_fork.push_block(tmp);
-//        auto tmp = ctrl_short_prepared_fork.fetch_block_by_number(100+i);
-//        long_non_prepared_fork.push_block(tmp);
     }
-    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 172);
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 172);
+    BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.head_block_num(), 199);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 199);
+
+
+    ctrl_short_prepared_fork.reset_pbft_prepared();
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 199);
 
     pbft_short_prepared_fork.state_machine.on_new_view(nv_msg);
 
-    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 136);
+    BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 166);
 }
 
 
