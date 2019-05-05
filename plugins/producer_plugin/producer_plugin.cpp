@@ -225,7 +225,7 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
          new_block_header.timestamp = new_block_header.timestamp.next();
          new_block_header.previous = bsp->id;
 
-         auto new_version = chain.is_upgraded();
+         auto new_version = chain.is_pbft_enabled();
 
          auto new_bs = bsp->generate_next(new_block_header.timestamp, new_version);
 
@@ -344,7 +344,7 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
 
 
          if( fc::time_point::now() - block->timestamp < fc::minutes(5) || (block->block_num() % 1000 == 0) ) {
-            if (chain.is_upgraded()) {
+            if (chain.is_pbft_enabled()) {
                 ilog("Received block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, lscb: ${lscb}, latency: ${latency} ms]",
                         ("p", block->producer)("id", fc::variant(block->id()).as_string().substr(8, 16))
                         ("n", block_header::num_from_id(block->id()))("t", block->timestamp)
@@ -1104,7 +1104,7 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
       _pending_block_mode = pending_block_mode::speculating;
    }
 
-   auto new_version = chain.is_upgraded();
+   auto new_version = chain.is_pbft_enabled();
 
     if (_pending_block_mode == pending_block_mode::producing && !new_version) {
       // determine if our watermark excludes us from producing at this point

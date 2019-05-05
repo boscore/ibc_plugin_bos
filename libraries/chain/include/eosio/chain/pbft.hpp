@@ -14,6 +14,7 @@ namespace eosio {
             vector<pbft_commit> commits_cache;
             vector<pbft_view_change> view_changes_cache;
             vector<pbft_prepared_certificate> prepared_certificate;
+            vector<vector<pbft_committed_certificate>> committed_certificate;
             vector<pbft_view_changed_certificate> view_changed_certificate;
         };
 
@@ -67,11 +68,15 @@ namespace eosio {
 
             const uint32_t &get_current_view() const;
 
-            void set_current_view(const uint32_t &current_view);
+            void set_current_view(const uint32_t &cv);
 
             const vector<pbft_prepared_certificate> &get_prepared_certificate() const;
 
             void set_prepared_certificate(const vector<pbft_prepared_certificate> &prepared_certificate);
+
+            const vector<vector<pbft_committed_certificate>> &get_committed_certificate() const;
+
+            void set_committed_certificate(const vector<vector<pbft_committed_certificate>> &pbft_committed_certificate_vector);
 
             const vector<pbft_view_changed_certificate> &get_view_changed_certificate() const;
 

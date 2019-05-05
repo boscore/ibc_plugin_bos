@@ -133,9 +133,9 @@ namespace eosio {
         // only trigger pbft related logic if I am in sync and replayed.
 
         auto& chain = app().get_plugin<chain_plugin>().chain();
-        auto new_version = chain.is_upgraded();
+        auto enabled = chain.is_pbft_enabled();
 
-        if (new_version && !upgraded) {
+        if (enabled && !upgraded) {
             wlog( "\n"
                   "******** BATCH-PBFT ENABLED ********\n"
                   "*                                  *\n"
@@ -149,6 +149,6 @@ namespace eosio {
             upgraded = true;
         }
 
-        return (new_version && (!is_syncing() && !is_replaying()));
+        return enabled && !is_syncing() && !is_replaying();
     }
 }

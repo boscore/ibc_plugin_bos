@@ -80,6 +80,8 @@ namespace eosio { namespace chain {
 
          void remove_pbft_my_prepare_fork();
 
+         void remove_pbft_prepared_fork();
+
    private:
          unique_ptr<fork_database_impl> my;
    };
