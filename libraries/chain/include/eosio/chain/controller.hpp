@@ -289,10 +289,12 @@ namespace eosio { namespace chain {
          producer_schedule_type initial_schedule()const;
          bool is_replaying()const;
 
-         void set_pbft_prepared(const block_id_type& id)const;
-         void set_pbft_my_prepare(const block_id_type& id)const;
+         void set_pbft_prepared(const block_id_type& id);
+         void set_pbft_my_prepare(const block_id_type& id);
          block_id_type get_pbft_my_prepare()const;
-         void reset_pbft_my_prepare()const;
+         void reset_pbft_my_prepare();
+         void reset_pbft_prepared();
+         void maybe_switch_forks();
 
          signal<void(const signed_block_ptr&)>         pre_accepted_block;
          signal<void(const block_state_ptr&)>          accepted_block_header;
@@ -304,8 +306,8 @@ namespace eosio { namespace chain {
          signal<void(const int&)>                      bad_alloc;
 
          const upgrade_property_object&        get_upgrade_properties()const;
-         bool is_upgraded()const;
-         bool under_upgrade()const;
+         bool is_pbft_enabled()const;
+         bool under_maintenance()const;
          void set_upo(uint32_t target_block_num);
 
          /*

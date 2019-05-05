@@ -509,6 +509,20 @@ namespace eosio {
                 }
             }
 
+            if (!new_view.committed.empty()) {
+                auto committed_certs = new_view.committed;
+                std::sort(committed_certs.begin(), committed_certs.end());
+                for (auto cp :committed_certs) {
+                    for (auto c: cp.commits) {
+                        try {
+                            pbft_db.add_pbft_commit(c);
+                        } catch (...) {
+                            wlog( "commit insertion failure: ${cp}", ("cp", cp));
+                        }
+                    }
+                }
+            }
+
             if (!new_view.prepared.prepares.empty()) {
                 for (auto p: new_view.prepared.prepares) {
                     try {
@@ -531,6 +545,7 @@ namespace eosio {
             if (this->get_target_view_retries() == 0) {
                 this->set_view_changes_cache(vector<pbft_view_change>{});
                 this->set_prepared_certificate(pbft_db.generate_prepared_certificate());
+                this->set_committed_certificate(pbft_db.generate_committed_certificate());
             }
 
             EOS_ASSERT((this->get_target_view() > this->get_current_view()), pbft_exception,
@@ -547,6 +562,7 @@ namespace eosio {
             auto view_changes = pbft_db.send_and_add_pbft_view_change(
                     this->get_view_changes_cache(),
                     this->get_prepared_certificate(),
+                    this->get_committed_certificate(),
                     this->get_current_view(),
                     this->get_target_view());
 
@@ -583,8 +599,8 @@ namespace eosio {
             return this->current_view;
         }
 
-        void psm_machine::set_current_view(const uint32_t &current_view) {
-            this->current_view = current_view;
+        void psm_machine::set_current_view(const uint32_t &cv) {
+            this->current_view = cv;
         }
 
         const vector<pbft_prepared_certificate> &psm_machine::get_prepared_certificate() const {
@@ -593,6 +609,14 @@ namespace eosio {
 
         void psm_machine::set_prepared_certificate(const vector<pbft_prepared_certificate> &prepared_certificate) {
             this->cache.prepared_certificate = prepared_certificate;
+        }
+
+        const vector<vector<pbft_committed_certificate>> &psm_machine::get_committed_certificate() const {
+            return this->cache.committed_certificate;
+        }
+
+        void psm_machine::set_committed_certificate(const vector<vector<pbft_committed_certificate>> &pbft_committed_certificate_vector) {
+            this->cache.committed_certificate = pbft_committed_certificate_vector;
         }
 
         const vector<pbft_view_changed_certificate> &psm_machine::get_view_changed_certificate() const {
