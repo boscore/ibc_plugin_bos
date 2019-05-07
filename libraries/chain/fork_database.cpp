@@ -78,10 +78,20 @@ namespace eosio { namespace chain {
                  vector<char> tmp = data;
                  tmp.insert(tmp.begin(), {0,0,0,0});
                  fc::datastream<const char*> tmp_ds(tmp.data(), tmp.size());
-                 block_state s;
-                 fc::raw::unpack( tmp_ds, s );
-                 //prepend 4bytes for pbft_stable_checkpoint_blocknum and append 2 bytes for pbft_prepared and pbft_my_prepare
-                 auto tmp_data_length = tmp_ds.tellp() - 6;
+                 block_header_state h;
+                 fc::raw::unpack( tmp_ds, h );
+                 signed_block_ptr b;
+                 fc::raw::unpack( tmp_ds, b );
+                 bool validated;
+                 fc::raw::unpack( tmp_ds, validated );
+                 bool in_current_chain;
+                 fc::raw::unpack( tmp_ds, in_current_chain );
+                 block_state s{h};
+                 s.block = b;
+                 s.validated = validated;
+                 s.in_current_chain = in_current_chain;
+                 //prepend 4bytes for pbft_stable_checkpoint_blocknum
+                 auto tmp_data_length = tmp_ds.tellp() - 4;
                  data.erase(data.begin(),data.begin()+tmp_data_length);
                  s.pbft_prepared = false;
                  s.pbft_my_prepare = false;
