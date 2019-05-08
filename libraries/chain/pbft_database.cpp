@@ -1173,7 +1173,7 @@ namespace eosio {
                 const auto& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
                 if (!ctrl.is_pbft_enabled()) return false;
                 return in >= ucb
-                && (in % 100 == 1 || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end());
+                && (in == ucb + 1 || in % 100 == 1 || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end());
             };
 
             for (auto i = psp->block_num;

@@ -389,6 +389,8 @@ struct controller_impl {
          }
       }
 
+      update_pbft_status();
+
       if( shutdown() ) return;
 
       const auto& ubi = reversible_blocks.get_index<reversible_block_index,by_num>();
@@ -430,11 +432,38 @@ struct controller_impl {
        //generate upo.
        try {
            db.get<upgrade_property_object>();
+           if (pbft_enabled) wlog("pbft enabled");
        } catch( const boost::exception& e) {
            wlog("no upo found, generating...");
            db.create<upgrade_property_object>([](auto&){});
        }
+   }
 
+   void update_pbft_status() {
+       auto utb = optional<block_num_type>{};
+       auto&  upo = db.get<upgrade_property_object>();
+       if (upo.upgrade_target_block_num > 0) utb = upo.upgrade_target_block_num;
+
+       auto ucb = optional<block_num_type>{};
+       if (upo.upgrade_complete_block_num > 0) ucb = upo.upgrade_complete_block_num;
+
+
+       if (utb && !ucb && head->dpos_irreversible_blocknum >= *utb) {
+           db.modify( upo, [&]( auto& up ) {
+               up.upgrade_complete_block_num = head->block_num;
+           });
+           if (!replaying) wlog("pbft will be working after the block ${b}", ("b", head->block_num));
+       }
+
+       if ( !pbft_enabled && utb && head->block_num >= *utb) {
+           if (!pbft_upgrading) pbft_upgrading = true;
+
+           // new version starts from the next block of ucb, this is to avoid inconsistency after pre calculation inside schedule loop.
+           if (ucb && head->block_num > *ucb) {
+               if (pbft_upgrading) pbft_upgrading = false;
+               pbft_enabled = true;
+           }
+       }
    }
 
    ~controller_impl() {
@@ -1338,30 +1367,7 @@ struct controller_impl {
          pending.emplace(maybe_session());
       }
 
-      auto utb = optional<block_num_type>{};
-      auto&  upo = db.get<upgrade_property_object>();
-      if (upo.upgrade_target_block_num > 0) utb = upo.upgrade_target_block_num;
-
-      auto ucb = optional<block_num_type>{};
-      if (upo.upgrade_complete_block_num > 0) ucb = upo.upgrade_complete_block_num;
-
-
-      if (utb && !ucb && head->dpos_irreversible_blocknum >= *utb) {
-            db.modify( upo, [&]( auto& up ) {
-               up.upgrade_complete_block_num = head->block_num;
-            });
-            if (!replaying) wlog("pbft will be working after the block ${b}", ("b", head->block_num));
-      }
-
-      if ( !pbft_enabled && utb && head->block_num >= *utb) {
-          if (!pbft_upgrading) pbft_upgrading = true;
-
-          // new version starts from the next block of ucb, this is to avoid inconsistency after pre calculation inside schedule loop.
-          if (ucb && head->block_num > *ucb) {
-              if (pbft_upgrading) pbft_upgrading = false;
-              pbft_enabled = true;
-          }
-      }
+      update_pbft_status();
 
       pending->_block_status = s;
       pending->_producer_block_id = producer_block_id;
@@ -2329,7 +2335,7 @@ block_id_type controller::last_stable_checkpoint_block_id() const {
 
     if( block_header::num_from_id(tapos_block_summary.block_id) == lscb_num )
         return tapos_block_summary.block_id;
-
+    if (lscb_num == 0) return block_id_type{};
     return fetch_block_by_number(lscb_num)->id();
 }
 
