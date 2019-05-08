@@ -67,7 +67,7 @@ namespace eosio { namespace chain {
          bool is_version_1 = version_label != "version";
          if(is_version_1){
              /*start upgrade migration and this is a hack and ineffecient, but lucky we only need to do it once */
-
+             wlog("doing LIB upgrade migration");
              auto start = ds.pos();
              unsigned_int size; fc::raw::unpack( ds, size );
              auto skipped_size_pos = ds.pos();
@@ -75,6 +75,7 @@ namespace eosio { namespace chain {
              vector<char> data(content.begin()+(skipped_size_pos - start), content.end());
 
              for( uint32_t i = 0, n = size.value; i < n; ++i ) {
+                 wlog("processing block state in fork database ${i} of ${size}", ("i",i+1)("size",n));
                  vector<char> tmp = data;
                  tmp.insert(tmp.begin(), {0,0,0,0});
                  fc::datastream<const char*> tmp_ds(tmp.data(), tmp.size());
