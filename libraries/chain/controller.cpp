@@ -2335,8 +2335,10 @@ block_id_type controller::last_stable_checkpoint_block_id() const {
 
     if( block_header::num_from_id(tapos_block_summary.block_id) == lscb_num )
         return tapos_block_summary.block_id;
-    if (lscb_num == 0) return block_id_type{};
-    return fetch_block_by_number(lscb_num)->id();
+
+    auto b = fetch_block_by_number(lscb_num);
+    if (b) return b->id();
+    return block_id_type{};
 }
 
 
