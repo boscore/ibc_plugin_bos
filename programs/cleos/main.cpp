@@ -3545,7 +3545,9 @@ int main( int argc, char** argv ) {
       enum class approval_status {
          unapproved,
          approved,
-         invalidated
+         invalidated,
+         opposed,
+         abstained
       };
 
       std::map<permission_level, std::pair<fc::time_point, approval_status>>                               all_approvals;
@@ -3647,6 +3649,46 @@ int main( int argc, char** argv ) {
                }
             }
          }
+
+         //get opposed and obstained
+         fc::variants rows5;
+         try {
+            const auto& result5 = call(get_table_func, fc::mutable_variant_object("json", true)
+                                       ("code", "eosio.msig")
+                                       ("scope", proposer)
+                                       ("table", "opposes")
+                                       ("table_key", "")
+                                       ("lower_bound", name(proposal_name).value)
+                                       ("upper_bound", name(proposal_name).value + 1)
+                                       // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
+                                       // Change to name(proposal_name).value when cleos no longer needs to support nodeos versions older than 1.5.0
+                                       ("limit", 1)
+                                 );
+            rows5 = result5.get_object()["rows"].get_array();
+         } catch( ... ) {
+         }
+		 if( !rows5.empty() && rows5[0].get_object()["proposal_name"] == proposal_name ) {
+             const auto& oppo_object = rows5[0].get_object();
+
+             for( const auto& opa : oppo_object["opposed_approvals"].get_array() ) {
+                permission_level pl = opa.as<permission_level>();
+                for( auto& a : all_approvals ) {
+                   if( a.first == pl ) {
+                      a.second.second = approval_status::opposed;
+                   }
+                }
+            }
+
+            for( const auto& aba : oppo_object["abstained_approvals"].get_array() ) {
+               auto pl = aba.as<permission_level>();
+               for( auto& a : all_approvals ) {
+                  if( a.first == pl ) {
+                     a.second.second = approval_status::abstained;
+                  }
+               }
+            }
+         }
+
       }
 
       auto trx_hex = proposal_object["packed_transaction"].as_string();
@@ -3699,6 +3741,16 @@ int main( int argc, char** argv ) {
                   approval_obj["invalidation_time"] = provided_approvers[approval.first.actor].first;
                }
                break;
+               case approval_status::opposed:
+               {
+                  approval_obj["status"] = "opposed";
+               }
+			   break;
+               case approval_status::abstained:
+               {
+                  approval_obj["status"] = "abstained";
+               }
+			   break;
             }
 
             approvals.push_back( std::move(approval_obj) );
@@ -3747,6 +3799,40 @@ int main( int argc, char** argv ) {
    unapprove->add_option("proposal_name", proposal_name, localized("proposal name (string)"))->required();
    unapprove->add_option("permissions", perm, localized("The JSON string of filename defining approving permissions"))->required();
    unapprove->set_callback([&] { approve_or_unapprove("unapprove"); });
+
+   // multisig oppose
+   auto oppose = msig->add_subcommand("oppose", localized("Oppose proposed transaction"));
+   add_standard_transaction_options(oppose, "proposer@active");
+   oppose->add_option("proposer", proposer, localized("proposer name (string)"))->required();
+   oppose->add_option("proposal_name", proposal_name, localized("proposal name (string)"))->required();
+   oppose->add_option("permissions", perm, localized("The JSON string of filename defining opposing permissions"))->required();
+   oppose->add_option("proposal_hash", proposal_hash, localized("Hash of proposed transaction (i.e. transaction ID) to optionally enforce as a condition of the approval"));
+   oppose->set_callback([&] { approve_or_unapprove("oppose"); });
+
+   // multisig unoppose
+   auto unoppose = msig->add_subcommand("unoppose", localized("Unoppose proposed transaction"));
+   add_standard_transaction_options(unoppose, "proposer@active");
+   unoppose->add_option("proposer", proposer, localized("proposer name (string)"))->required();
+   unoppose->add_option("proposal_name", proposal_name, localized("proposal name (string)"))->required();
+   unoppose->add_option("permissions", perm, localized("The JSON string of filename defining unopposing permissions"))->required();
+   unoppose->set_callback([&] { approve_or_unapprove("unoppose"); });
+
+   // multisig abstain
+   auto abstain = msig->add_subcommand("abstain", localized("Abstain proposed transaction"));
+   add_standard_transaction_options(abstain, "proposer@active");
+   abstain->add_option("proposer", proposer, localized("proposer name (string)"))->required();
+   abstain->add_option("proposal_name", proposal_name, localized("proposal name (string)"))->required();
+   abstain->add_option("permissions", perm, localized("The JSON string of filename defining abstaining permissions"))->required();
+   abstain->add_option("proposal_hash", proposal_hash, localized("Hash of proposed transaction (i.e. transaction ID) to optionally enforce as a condition of the approval"));
+   abstain->set_callback([&] { approve_or_unapprove("abstain"); });
+
+   // multisig unabstain
+   auto unabstain = msig->add_subcommand("unabstain", localized("Unabstain proposed transaction"));
+   add_standard_transaction_options(unabstain, "proposer@active");
+   unabstain->add_option("proposer", proposer, localized("proposer name (string)"))->required();
+   unabstain->add_option("proposal_name", proposal_name, localized("proposal name (string)"))->required();
+   unabstain->add_option("permissions", perm, localized("The JSON string of filename defining unabstaining permissions"))->required();
+   unabstain->set_callback([&] { approve_or_unapprove("unabstain"); });
 
    // multisig invalidate
    string invalidator;
