@@ -361,12 +361,14 @@ struct controller_impl {
 
          read_from_snapshot( snapshot );
 
-          //do upgrade migration if necessary;
-          migrate_upgrade(); //compatiable for snapshot integrity test
+         //do upgrade migration if necessary;
+         migrate_upgrade(); //compatiable for snapshot integrity test
 
          auto end = blog.read_head();
          if( !end ) {
-            blog.reset( conf.genesis, signed_block_ptr(), head->block_num + 1 );
+            auto reset_block_num = head->block_num + 1;
+            if (pbft_enabled) reset_block_num = head->pbft_stable_checkpoint_blocknum;
+            blog.reset( conf.genesis, signed_block_ptr(), reset_block_num );
          } else if( end->block_num() > head->block_num ) {
             replay( shutdown );
          } else {
@@ -374,8 +376,8 @@ struct controller_impl {
                         "Block log is provided with snapshot but does not contain the head block from the snapshot" );
          }
       } else {
-          //do upgrade migration if necessary;
-          migrate_upgrade();  //compatiable for snapshot integrity test
+         //do upgrade migration if necessary;
+         migrate_upgrade();  //compatiable for snapshot integrity test
          if( !head ) {
             initialize_fork_db(); // set head to genesis state
          }
@@ -388,9 +390,7 @@ struct controller_impl {
             report_integrity_hash = true;
          }
       }
-
-      update_pbft_status();
-
+      
       if( shutdown() ) return;
 
       const auto& ubi = reversible_blocks.get_index<reversible_block_index,by_num>();
@@ -437,6 +437,7 @@ struct controller_impl {
            wlog("no upo found, generating...");
            db.create<upgrade_property_object>([](auto&){});
        }
+       update_pbft_status();
    }
 
    void update_pbft_status() {
@@ -556,9 +557,21 @@ struct controller_impl {
          section.add_row(batch_pbft_snapshot_migration{}, db);
       });
 
-      snapshot->write_section<block_state>([this]( auto &section ){
-         section.template add_row<block_header_state>(*fork_db.head(), db);
-      });
+      if (pbft_enabled) {
+          snapshot->write_section<batch_pbft_enabled>([this]( auto &section ) {
+              section.add_row(batch_pbft_enabled{}, db);
+          });
+          snapshot->write_section<branch_type>([this](auto &section) {
+              auto bid = fork_db.get_block_in_current_chain_by_num(fork_db.head()->pbft_stable_checkpoint_blocknum)->id;
+              EOS_ASSERT(bid != block_id_type{}, snapshot_exception, "cannot find lscb block");
+              auto bss = fork_db.fetch_branch_from(fork_db.head()->id, bid).first;
+              section.template add_row<branch_type>(bss, db);
+          });
+      } else {
+          snapshot->write_section<block_state>([this]( auto &section ){
+              section.template add_row<block_header_state>(*fork_db.head(), db);
+          });
+      }
 
       controller_index_set::walk_indices([this, &snapshot]( auto utils ){
          using value_t = typename decltype(utils)::index_t::value_type;
@@ -589,19 +602,42 @@ struct controller_impl {
       });
 
       bool migrated = snapshot->has_section<batch_pbft_snapshot_migration>();
-      if(migrated) {
-          snapshot->read_section<block_state>([this](auto &section) {
-            block_header_state head_header_state;
-            section.read_row(head_header_state, db);
+      if (migrated) {
+          auto upgraded = snapshot->has_section<batch_pbft_enabled>();
+          if (upgraded) {
+              snapshot->read_section<branch_type>([this](auto &section) {
+                  branch_type bss;
+                  section.template read_row<branch_type>(bss, db);
+                  EOS_ASSERT(!bss.empty(), snapshot_exception, "no last stable checkpoint block in the snapshot");
 
-            auto head_state = std::make_shared<block_state>(head_header_state);
-            fork_db.set(head_state);
-            fork_db.set_validity(head_state, true);
-            fork_db.mark_in_current_chain(head_state, true);
-            head = head_state;
-            snapshot_head_block = head->block_num;
-          });
-      }else{
+                  wlog("${n} reversible blocks found in the snapshot", ("n", bss.size()));
+
+                  for (auto i = bss.rbegin(); i != bss.rend(); ++i ) {
+                      if (i == bss.rbegin()) {
+                          fork_db.set(*i);
+                          snapshot_head_block = (*i)->block_num;
+                      } else {
+                          fork_db.add((*i), true, true);
+                      }
+                      fork_db.set_validity((*i), true);
+                      fork_db.mark_in_current_chain((*i), true);
+                  }
+                  head = fork_db.head();
+              });
+          } else {
+              snapshot->read_section<block_state>([this](auto &section) {
+                  block_header_state head_header_state;
+                  section.read_row(head_header_state, db);
+
+                  auto head_state = std::make_shared<block_state>(head_header_state);
+                  fork_db.set(head_state);
+                  fork_db.set_validity(head_state, true);
+                  fork_db.mark_in_current_chain(head_state, true);
+                  head = head_state;
+                  snapshot_head_block = head->block_num;
+              });
+          }
+      } else {
           snapshot->read_section<block_state>([this](snapshot_reader::section_reader &section) {
             block_header_state head_header_state;
             section.read_pbft_migrate_row(head_header_state, db);
@@ -1622,6 +1658,9 @@ struct controller_impl {
 
       EOS_ASSERT(!pending, block_validate_exception, "it is not valid to push a block when there is a pending block");
 
+      set_pbft_lib();
+      set_pbft_lscb();
+
       try {
          EOS_ASSERT( b, block_validate_exception, "trying to push empty block" );
          EOS_ASSERT( (s == controller::block_status::irreversible || s == controller::block_status::validated),
@@ -1642,9 +1681,7 @@ struct controller_impl {
          for (const auto &extn: b->block_extensions) {
             if (extn.first == static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint)) {
                pbft_commit_local(b->id());
-               set_pbft_lib();
                set_pbft_latest_checkpoint(b->id());
-               set_pbft_lscb();
                break;
             }
          }
