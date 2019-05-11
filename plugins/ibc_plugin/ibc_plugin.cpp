@@ -2696,38 +2696,48 @@ namespace eosio { namespace ibc {
       uint32_t lib_block_num = chain_plug->chain().last_irreversible_block_num();
       if ( msg.block_num > lib_block_num ){ return; }
 
+      ilog("---1---");
       const auto& block_id = chain_plug->chain().get_block_id_for_num( msg.block_num );
       const auto& bps_ptr = chain_plug->pbft_ctrl().pbft_db.get_pbft_state_by_id( block_id );
-
+      ilog("---2---");
       lwc_block_commits_data_message ret_msg;
 
-      if ( bps_ptr != pbft_state_ptr() ){
-
+      if ( ! bps_ptr ){
+         ilog("---3---");
          // ret_msg.headers
          uint32_t end_block_num = msg.block_num ;
+
+
+
+//         idump(( bps_ptr->commits));
          for( auto& commit : bps_ptr->commits ){
+            idump((commit));
+            ilog("---3---");
             end_block_num = std::max( end_block_num, commit.block_num );
          }
          for( uint32_t num = msg.block_num; num <= end_block_num; ++num ){
+            ilog("---4-1--");
             auto sbp = chain_plug->chain().fetch_block_by_number( num );
+            ilog("---4--2-");
             if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", num)); return; }
+            ilog("---4-3--");
             ret_msg.headers.push_back( *sbp );
          }
-
+         ilog("---4---");
          // ret_msg.blockroot_merkle
          ret_msg.blockroot_merkle = get_blockroot_merkle_by_num( msg.block_num );
          if ( ret_msg.blockroot_merkle._node_count == 0 ){
             elog("get blockroot_merkle of block ${n} failed", ("n", msg.block_num));
             return;
          }
-
+         ilog("---5---");
          ret_msg.proof_data = fc::raw::pack( bps_ptr->commits );
          ret_msg.proof_type = N(commit);
 
          c->enqueue( ret_msg );
          return;
       }
-
+      ilog("---6---");
       /* bps_ptr == nullptr */
       vector<char>   content;
       uint32_t       check_num;
@@ -2749,7 +2759,7 @@ namespace eosio { namespace ibc {
          elog("didn't get pbft_state of block ${n}", ("n",msg.block_num));
          return;
       }
-
+      ilog("---7---");
       vector<pbft_checkpoint> commits = fc::raw::unpack<vector<pbft_checkpoint>>( content );
 
       // ret_msg.headers
@@ -2762,14 +2772,14 @@ namespace eosio { namespace ibc {
          if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", num)); return; }
          ret_msg.headers.push_back( *sbp );
       }
-
+      ilog("---8---");
       // ret_msg.blockroot_merkle
       ret_msg.blockroot_merkle = get_blockroot_merkle_by_num( check_num );
       if ( ret_msg.blockroot_merkle._node_count == 0 ){
          elog("get blockroot_merkle of block ${n} failed", ("n", check_num));
          return;
       }
-
+      ilog("---9---");
       ret_msg.proof_data = fc::raw::pack( commits );
       ret_msg.proof_type = N(checkpoint);
 

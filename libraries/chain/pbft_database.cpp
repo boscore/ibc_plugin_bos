@@ -935,9 +935,11 @@ namespace eosio {
             auto &by_block_id_index = pbft_state_index.get<by_block_id>();
             auto itr = by_block_id_index.find(block_id);
             if (itr != by_block_id_index.end()) {
+               ilog("--==1==--");
                 return *itr;
             }
-            return std::move(pbft_state_ptr());
+           ilog("--==2==--");
+            return std::move(static_cast<pbft_state_ptr>(nullptr));
         }
 
         pbft_stable_checkpoint pbft_database::get_stable_checkpoint_by_id(const block_id_type &block_id) {
