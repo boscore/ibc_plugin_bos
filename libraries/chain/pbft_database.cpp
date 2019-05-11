@@ -1173,7 +1173,7 @@ namespace eosio {
                 const auto& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
                 if (!ctrl.is_pbft_enabled()) return false;
                 return in >= ucb
-                && (in % 100 == 1 || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end());
+                && (in == ucb + 1 || in % 100 == 1 || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end());
             };
 
             for (auto i = psp->block_num;
@@ -1413,14 +1413,19 @@ namespace eosio {
         }
 
         producer_schedule_type pbft_database::lscb_active_producers() const {
-            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
-            if (lscb_num == 0) return ctrl.initial_schedule();
+            auto num = ctrl.last_stable_checkpoint_block_num();
 
-            auto lscb_state = ctrl.fetch_block_state_by_number(lscb_num);
-            if (!lscb_state) return ctrl.initial_schedule();
+            if (num == 0) {
+                const auto &ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
+                if (ucb == 0) return ctrl.initial_schedule();
+                num = ucb;
+            }
 
-            if (lscb_state->pending_schedule.producers.empty()) return lscb_state->active_schedule;
-            return lscb_state->pending_schedule;
+            auto bs = ctrl.fetch_block_state_by_number(num);
+            if (!bs) return ctrl.initial_schedule();
+
+            if (bs->pending_schedule.producers.empty()) return bs->active_schedule;
+            return bs->pending_schedule;
         }
 
         chain_id_type pbft_database::chain_id() {

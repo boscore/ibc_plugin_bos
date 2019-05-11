@@ -1607,10 +1607,18 @@ void producer_plugin_impl::produce_block() {
    block_state_ptr new_bs = chain.head_block_state();
    _producer_watermarks[new_bs->header.producer] = chain.head_block_num();
 
-   ilog("Produced block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, lscb: ${lscb}]",
-        ("p",new_bs->header.producer)("id",fc::variant(new_bs->id).as_string().substr(0,16))
-        ("n",new_bs->block_num)("t",new_bs->header.timestamp)
-        ("count",new_bs->block->transactions.size())("lib",chain.last_irreversible_block_num())("lscb", chain.last_stable_checkpoint_block_num()));
+   if (chain.is_pbft_enabled()) {
+      ilog("Produced block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, lscb: ${lscb}]",
+           ("p", new_bs->header.producer)("id", fc::variant(new_bs->id).as_string().substr(0, 16))
+                   ("n", new_bs->block_num)("t", new_bs->header.timestamp)
+                   ("count", new_bs->block->transactions.size())
+                   ("lib", chain.last_irreversible_block_num())("lscb", chain.last_stable_checkpoint_block_num()));
+   } else {
+      ilog("Produced block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, confirmed: ${confs}]",
+           ("p",new_bs->header.producer)("id",fc::variant(new_bs->id).as_string().substr(0,16))
+                   ("n",new_bs->block_num)("t",new_bs->header.timestamp)
+                   ("count",new_bs->block->transactions.size())("lib",chain.last_irreversible_block_num())("confs", new_bs->header.confirmed));
+   }
 }
 
 } // namespace eosio

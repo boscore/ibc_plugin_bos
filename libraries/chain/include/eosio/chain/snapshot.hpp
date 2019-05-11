@@ -232,9 +232,9 @@ namespace eosio { namespace chain {
                      std::ostringstream sstream;
                      sstream << in.rdbuf();
                      std::string str(sstream.str());
-                     //prepend uint32_t 0
+                     //append uint32_t 0
                      std::vector<char> tmp(str.begin(), str.end());
-                     tmp.insert(tmp.begin(), {0,0,0,0});
+                     tmp.insert(tmp.end(), {0,0,0,0});
                      fc::datastream<const char*> tmp_ds(tmp.data(), tmp.size());
                      fc::raw::unpack(tmp_ds, data);
                      auto original_data_length = tmp_ds.tellp() - 4;
