@@ -67,29 +67,43 @@ namespace eosio { namespace chain {
          bool is_version_1 = version_label != "version";
          if(is_version_1){
              /*start upgrade migration and this is a hack and ineffecient, but lucky we only need to do it once */
-
+             wlog("doing LIB upgrade migration");
              auto start = ds.pos();
              unsigned_int size; fc::raw::unpack( ds, size );
              auto skipped_size_pos = ds.pos();
 
              vector<char> data(content.begin()+(skipped_size_pos - start), content.end());
 
+             data.insert(data.end(),{0,0,0,0});//append 4 bytes for the very last block state, avoid underflow in case
+             fc::datastream<const char*> tmp_ds(data.data(), data.size());
+
              for( uint32_t i = 0, n = size.value; i < n; ++i ) {
-                 vector<char> tmp = data;
-                 tmp.insert(tmp.begin(), {0,0,0,0});
-                 fc::datastream<const char*> tmp_ds(tmp.data(), tmp.size());
-                 block_state s;
-                 fc::raw::unpack( tmp_ds, s );
-                 //prepend 4bytes for pbft_stable_checkpoint_blocknum and append 2 bytes for pbft_prepared and pbft_my_prepare
-                 auto tmp_data_length = tmp_ds.tellp() - 6;
-                 data.erase(data.begin(),data.begin()+tmp_data_length);
+                 wlog("processing block state in fork database ${i} of ${size}", ("i",i+1)("size",n));
+                 block_header_state h;
+                 fc::raw::unpack( tmp_ds, h );
+                 h.pbft_stable_checkpoint_blocknum = 0;
+
+                 //move pos backward 4 bytes for pbft_stable_checkpoint_blocknum
+                 auto tmp_accumulated_data_length = tmp_ds.tellp() - 4;
+                 tmp_ds.seekp(tmp_accumulated_data_length);
+
+                 signed_block_ptr b;
+                 fc::raw::unpack( tmp_ds, b );
+                 bool validated;
+                 fc::raw::unpack( tmp_ds, validated );
+                 bool in_current_chain;
+                 fc::raw::unpack( tmp_ds, in_current_chain );
+                 block_state s{h};
+                 s.block = b;
+                 s.validated = validated;
+                 s.in_current_chain = in_current_chain;
+
                  s.pbft_prepared = false;
                  s.pbft_my_prepare = false;
                  set( std::make_shared<block_state>( move( s ) ) );
              }
-             fc::datastream<const char*> head_id_stream(data.data(), data.size());
              block_id_type head_id;
-             fc::raw::unpack( head_id_stream, head_id );
+             fc::raw::unpack( tmp_ds, head_id );
 
              my->head = get_block( head_id );
              /*end upgrade migration*/

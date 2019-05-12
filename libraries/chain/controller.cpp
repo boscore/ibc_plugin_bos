@@ -361,12 +361,14 @@ struct controller_impl {
 
          read_from_snapshot( snapshot );
 
-          //do upgrade migration if necessary;
-          migrate_upgrade(); //compatiable for snapshot integrity test
+         //do upgrade migration if necessary;
+         migrate_upgrade(); //compatiable for snapshot integrity test
 
          auto end = blog.read_head();
          if( !end ) {
-            blog.reset( conf.genesis, signed_block_ptr(), head->block_num + 1 );
+            auto reset_block_num = head->block_num + 1;
+            if (pbft_enabled) reset_block_num = head->pbft_stable_checkpoint_blocknum;
+            blog.reset( conf.genesis, signed_block_ptr(), reset_block_num );
          } else if( end->block_num() > head->block_num ) {
             replay( shutdown );
          } else {
@@ -374,8 +376,8 @@ struct controller_impl {
                         "Block log is provided with snapshot but does not contain the head block from the snapshot" );
          }
       } else {
-          //do upgrade migration if necessary;
-          migrate_upgrade();  //compatiable for snapshot integrity test
+         //do upgrade migration if necessary;
+         migrate_upgrade();  //compatiable for snapshot integrity test
          if( !head ) {
             initialize_fork_db(); // set head to genesis state
          }
@@ -388,7 +390,7 @@ struct controller_impl {
             report_integrity_hash = true;
          }
       }
-
+      
       if( shutdown() ) return;
 
       const auto& ubi = reversible_blocks.get_index<reversible_block_index,by_num>();
@@ -430,11 +432,39 @@ struct controller_impl {
        //generate upo.
        try {
            db.get<upgrade_property_object>();
+           if (pbft_enabled) wlog("pbft enabled");
        } catch( const boost::exception& e) {
            wlog("no upo found, generating...");
            db.create<upgrade_property_object>([](auto&){});
        }
+       update_pbft_status();
+   }
 
+   void update_pbft_status() {
+       auto utb = optional<block_num_type>{};
+       auto&  upo = db.get<upgrade_property_object>();
+       if (upo.upgrade_target_block_num > 0) utb = upo.upgrade_target_block_num;
+
+       auto ucb = optional<block_num_type>{};
+       if (upo.upgrade_complete_block_num > 0) ucb = upo.upgrade_complete_block_num;
+
+
+       if (utb && !ucb && head->dpos_irreversible_blocknum >= *utb) {
+           db.modify( upo, [&]( auto& up ) {
+               up.upgrade_complete_block_num = head->block_num;
+           });
+           if (!replaying) wlog("pbft will be working after the block ${b}", ("b", head->block_num));
+       }
+
+       if ( !pbft_enabled && utb && head->block_num >= *utb) {
+           if (!pbft_upgrading) pbft_upgrading = true;
+
+           // new version starts from the next block of ucb, this is to avoid inconsistency after pre calculation inside schedule loop.
+           if (ucb && head->block_num > *ucb) {
+               if (pbft_upgrading) pbft_upgrading = false;
+               pbft_enabled = true;
+           }
+       }
    }
 
    ~controller_impl() {
@@ -527,9 +557,21 @@ struct controller_impl {
          section.add_row(batch_pbft_snapshot_migration{}, db);
       });
 
-      snapshot->write_section<block_state>([this]( auto &section ){
-         section.template add_row<block_header_state>(*fork_db.head(), db);
-      });
+      if (pbft_enabled) {
+          snapshot->write_section<batch_pbft_enabled>([this]( auto &section ) {
+              section.add_row(batch_pbft_enabled{}, db);
+          });
+          snapshot->write_section<branch_type>([this](auto &section) {
+              auto bid = fork_db.get_block_in_current_chain_by_num(fork_db.head()->pbft_stable_checkpoint_blocknum)->id;
+              EOS_ASSERT(bid != block_id_type{}, snapshot_exception, "cannot find lscb block");
+              auto bss = fork_db.fetch_branch_from(fork_db.head()->id, bid).first;
+              section.template add_row<branch_type>(bss, db);
+          });
+      } else {
+          snapshot->write_section<block_state>([this]( auto &section ){
+              section.template add_row<block_header_state>(*fork_db.head(), db);
+          });
+      }
 
       controller_index_set::walk_indices([this, &snapshot]( auto utils ){
          using value_t = typename decltype(utils)::index_t::value_type;
@@ -560,19 +602,42 @@ struct controller_impl {
       });
 
       bool migrated = snapshot->has_section<batch_pbft_snapshot_migration>();
-      if(migrated) {
-          snapshot->read_section<block_state>([this](auto &section) {
-            block_header_state head_header_state;
-            section.read_row(head_header_state, db);
+      if (migrated) {
+          auto upgraded = snapshot->has_section<batch_pbft_enabled>();
+          if (upgraded) {
+              snapshot->read_section<branch_type>([this](auto &section) {
+                  branch_type bss;
+                  section.template read_row<branch_type>(bss, db);
+                  EOS_ASSERT(!bss.empty(), snapshot_exception, "no last stable checkpoint block in the snapshot");
 
-            auto head_state = std::make_shared<block_state>(head_header_state);
-            fork_db.set(head_state);
-            fork_db.set_validity(head_state, true);
-            fork_db.mark_in_current_chain(head_state, true);
-            head = head_state;
-            snapshot_head_block = head->block_num;
-          });
-      }else{
+                  wlog("${n} reversible blocks found in the snapshot", ("n", bss.size()));
+
+                  for (auto i = bss.rbegin(); i != bss.rend(); ++i ) {
+                      if (i == bss.rbegin()) {
+                          fork_db.set(*i);
+                          snapshot_head_block = (*i)->block_num;
+                      } else {
+                          fork_db.add((*i), true, true);
+                      }
+                      fork_db.set_validity((*i), true);
+                      fork_db.mark_in_current_chain((*i), true);
+                  }
+                  head = fork_db.head();
+              });
+          } else {
+              snapshot->read_section<block_state>([this](auto &section) {
+                  block_header_state head_header_state;
+                  section.read_row(head_header_state, db);
+
+                  auto head_state = std::make_shared<block_state>(head_header_state);
+                  fork_db.set(head_state);
+                  fork_db.set_validity(head_state, true);
+                  fork_db.mark_in_current_chain(head_state, true);
+                  head = head_state;
+                  snapshot_head_block = head->block_num;
+              });
+          }
+      } else {
           snapshot->read_section<block_state>([this](snapshot_reader::section_reader &section) {
             block_header_state head_header_state;
             section.read_pbft_migrate_row(head_header_state, db);
@@ -1338,30 +1403,7 @@ struct controller_impl {
          pending.emplace(maybe_session());
       }
 
-      auto utb = optional<block_num_type>{};
-      auto&  upo = db.get<upgrade_property_object>();
-      if (upo.upgrade_target_block_num > 0) utb = upo.upgrade_target_block_num;
-
-      auto ucb = optional<block_num_type>{};
-      if (upo.upgrade_complete_block_num > 0) ucb = upo.upgrade_complete_block_num;
-
-
-      if (utb && !ucb && head->dpos_irreversible_blocknum >= *utb) {
-            db.modify( upo, [&]( auto& up ) {
-               up.upgrade_complete_block_num = head->block_num;
-            });
-            if (!replaying) wlog("pbft will be working after the block ${b}", ("b", head->block_num));
-      }
-
-      if ( !pbft_enabled && utb && head->block_num >= *utb) {
-          if (!pbft_upgrading) pbft_upgrading = true;
-
-          // new version starts from the next block of ucb, this is to avoid inconsistency after pre calculation inside schedule loop.
-          if (ucb && head->block_num > *ucb) {
-              if (pbft_upgrading) pbft_upgrading = false;
-              pbft_enabled = true;
-          }
-      }
+      update_pbft_status();
 
       pending->_block_status = s;
       pending->_producer_block_id = producer_block_id;
@@ -1616,6 +1658,9 @@ struct controller_impl {
 
       EOS_ASSERT(!pending, block_validate_exception, "it is not valid to push a block when there is a pending block");
 
+      set_pbft_lib();
+      set_pbft_lscb();
+
       try {
          EOS_ASSERT( b, block_validate_exception, "trying to push empty block" );
          EOS_ASSERT( (s == controller::block_status::irreversible || s == controller::block_status::validated),
@@ -1636,9 +1681,7 @@ struct controller_impl {
          for (const auto &extn: b->block_extensions) {
             if (extn.first == static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint)) {
                pbft_commit_local(b->id());
-               set_pbft_lib();
                set_pbft_latest_checkpoint(b->id());
-               set_pbft_lscb();
                break;
             }
          }
@@ -2330,7 +2373,9 @@ block_id_type controller::last_stable_checkpoint_block_id() const {
     if( block_header::num_from_id(tapos_block_summary.block_id) == lscb_num )
         return tapos_block_summary.block_id;
 
-    return fetch_block_by_number(lscb_num)->id();
+    auto b = fetch_block_by_number(lscb_num);
+    if (b) return b->id();
+    return block_id_type{};
 }
 
 
