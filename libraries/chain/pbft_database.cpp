@@ -1202,7 +1202,7 @@ namespace eosio {
             }
 
             if (!pending_checkpoint_block_num.empty()) {
-                std::sort(pending_checkpoint_block_num.begin(), pending_checkpoint_block_num.begin());
+                std::sort(pending_checkpoint_block_num.begin(), pending_checkpoint_block_num.end());
                 for (auto h: pending_checkpoint_block_num) {
                     for (auto const &my_sp : ctrl.my_signature_providers()) {
                         auto uuid = boost::uuids::to_string(uuid_generator());
