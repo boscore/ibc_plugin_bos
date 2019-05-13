@@ -667,9 +667,11 @@ namespace eosio {
             pcc.resize(ctrl.my_signature_providers().size());
             const auto &by_commit_and_num_index = pbft_state_index.get<by_commit_and_num>();
             auto itr = by_commit_and_num_index.begin();
+            if (itr == by_commit_and_num_index.end()) return vector<vector<pbft_committed_certificate>>{};
 
             pbft_state_ptr psp = *itr;
-            if (itr == by_commit_and_num_index.end() || !psp->should_committed) return vector<vector<pbft_committed_certificate>>{};
+
+            if (!psp->should_committed) return vector<vector<pbft_committed_certificate>>{};
 
             auto highest_committed_block_num = psp->block_num;
 
