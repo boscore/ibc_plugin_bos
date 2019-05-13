@@ -1088,7 +1088,7 @@ namespace eosio {
             return pbft_stable_checkpoint{};
         }
 
-        const pbft_state_ptr& pbft_database::get_pbft_state_by_id(const block_id_type &block_id){
+        const pbft_state_ptr pbft_database::get_pbft_state_by_id(const block_id_type &block_id){
             auto &by_block_id_index = pbft_state_index.get<by_block_id>();
             auto itr = by_block_id_index.find(block_id);
             if (itr != by_block_id_index.end()) {
@@ -1096,7 +1096,7 @@ namespace eosio {
                 return *itr;
             }
            ilog("--==2==--");
-            return std::move(static_cast<pbft_state_ptr>(nullptr));
+            return nullptr;
         }
 
         pbft_stable_checkpoint pbft_database::get_stable_checkpoint_by_id(const block_id_type &block_id) {
@@ -1480,18 +1480,18 @@ namespace eosio {
             if (cw > lib) return cw; else return 0;
         }
 
-        pbft_state_ptr pbft_database::get_pbft_state_by_id(const block_id_type& id) const {
-
-            auto &by_block_id_index = pbft_state_index.get<by_block_id>();
-
-            auto itr = by_block_id_index.find(id);
-
-            if (itr != by_block_id_index.end()) {
-                return (*itr);
-            }
-
-            return pbft_state_ptr{};
-        }
+//        pbft_state_ptr pbft_database::get_pbft_state_by_id(const block_id_type& id) const {
+//
+//            auto &by_block_id_index = pbft_state_index.get<by_block_id>();
+//
+//            auto itr = by_block_id_index.find(id);
+//
+//            if (itr != by_block_id_index.end()) {
+//                return (*itr);
+//            }
+//
+//            return pbft_state_ptr{};
+//        }
 
         void pbft_database::set(pbft_state_ptr s) {
             auto result = pbft_state_index.insert(s);

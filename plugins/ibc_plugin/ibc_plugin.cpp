@@ -2698,11 +2698,11 @@ namespace eosio { namespace ibc {
 
       ilog("---1---");
       const auto& block_id = chain_plug->chain().get_block_id_for_num( msg.block_num );
-      const auto& bps_ptr = chain_plug->pbft_ctrl().pbft_db.get_pbft_state_by_id( block_id );
+      const auto bps_ptr = chain_plug->pbft_ctrl().pbft_db.get_pbft_state_by_id( block_id );
       ilog("---2---");
       lwc_block_commits_data_message ret_msg;
 
-      if ( ! bps_ptr ){
+      if ( bps_ptr ){
          ilog("---3---");
          // ret_msg.headers
          uint32_t end_block_num = msg.block_num ;
@@ -2742,8 +2742,10 @@ namespace eosio { namespace ibc {
       vector<char>   content;
       uint32_t       check_num;
       for( int i = 0; i < 101; ++i ){
+
          check_num = msg.block_num + i;
          if ( check_num > lib_block_num ){ break;}
+         ilog("check_num = ${n}", ("n",check_num));
          signed_block_ptr sbp = chain_plug->chain().fetch_block_by_number( check_num );
          for ( auto& ext : sbp->block_extensions ){
             if ( ext.first == 0x1 && ext.second.size()>0 ){
@@ -2760,12 +2762,13 @@ namespace eosio { namespace ibc {
          return;
       }
       ilog("---7---");
-      vector<pbft_checkpoint> commits = fc::raw::unpack<vector<pbft_checkpoint>>( content );
+
+      auto scp = fc::raw::unpack<pbft_stable_checkpoint>( content );
 
       // ret_msg.headers
       uint32_t end_block_num = check_num ;
-      for( auto& commit : commits ){
-         end_block_num = std::max( end_block_num, commit.block_num );
+      for( auto& checkpoint : scp.checkpoints ){
+         end_block_num = std::max( end_block_num, checkpoint.block_num );
       }
       for( uint32_t num = check_num; num <= end_block_num; ++num ){
          auto sbp = chain_plug->chain().fetch_block_by_number( num );
@@ -4308,7 +4311,7 @@ namespace eosio { namespace ibc {
          ( "ibc-listen-endpoint", bpo::value<string>()->default_value( "0.0.0.0:5678" ), "The actual host:port used to listen for incoming ibc connections.")
          ( "ibc-server-address", bpo::value<string>(), "An externally accessible host:port for identifying this node. Defaults to ibc-listen-endpoint.")
          ( "ibc-agent-name", bpo::value<string>()->default_value("\"EOSIO IBC Agent\""), "The name supplied to identify this node amongst the peers.")
-         ( "ibc-peer-chain-id", bpo::value<string>(), "The peer chain's chain id")
+         ( "ibc-peer-chain-id", bpo::value<string>()->default_value(""), "The peer chain's chain id")
          ( "ibc-peer-address", bpo::value<vector<string>>()->composing(), "The public endpoint of a peer node to connect to. Use multiple ibc-peer-address options as needed to compose a network.")
          ( "ibc-allowed-connection", bpo::value<string>()->default_value( "any" ), "Can be 'any' or 'specified'. If 'specified', 'ibc-peer-key' must be specified at least once.")
          ( "ibc-peer-key", bpo::value<vector<string>>()->composing()->multitoken(), "Optional public key of peer allowed to connect.  May be used multiple times.")
@@ -4410,7 +4413,6 @@ namespace eosio { namespace ibc {
             my->user_agent_name = options.at( "ibc-agent-name" ).as<string>();
          }
 
-         OPTION_ASSERT( "ibc-peer-chain-id" )
          my->peerchain_id = fc::sha256( options.at( "ibc-peer-chain-id" ).as<string>() );
          ilog( "ibc peer chain id is ${id}", ("id",  my->peerchain_id.str()));
 
