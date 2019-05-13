@@ -142,8 +142,8 @@ namespace eosio {
             current->on_new_view(this, e, pbft_db);
         }
 
-        void psm_machine::manually_set_current_view(const uint32_t &current_view) {
-            current->manually_set_view(this, current_view);
+        void psm_machine::manually_set_current_view(const uint32_t &cv) {
+            current->manually_set_view(this, cv);
         }
 
         /**
@@ -575,24 +575,24 @@ namespace eosio {
             return this->cache.prepares_cache;
         }
 
-        void psm_machine::set_prepares_cache(const vector<pbft_prepare> &prepares_cache) {
-            this->cache.prepares_cache = prepares_cache;
+        void psm_machine::set_prepares_cache(const vector<pbft_prepare> &pcache) {
+            this->cache.prepares_cache = pcache;
         }
 
         const vector<pbft_commit> &psm_machine::get_commits_cache() const {
             return this->cache.commits_cache;
         }
 
-        void psm_machine::set_commits_cache(const vector<pbft_commit> &commits_cache) {
-            this->cache.commits_cache = commits_cache;
+        void psm_machine::set_commits_cache(const vector<pbft_commit> &ccache) {
+            this->cache.commits_cache = ccache;
         }
 
         const vector<pbft_view_change> &psm_machine::get_view_changes_cache() const {
             return this->cache.view_changes_cache;
         }
 
-        void psm_machine::set_view_changes_cache(const vector<pbft_view_change> &view_changes_cache) {
-            this->cache.view_changes_cache = view_changes_cache;
+        void psm_machine::set_view_changes_cache(const vector<pbft_view_change> &vc_cache) {
+            this->cache.view_changes_cache = vc_cache;
         }
 
         const uint32_t &psm_machine::get_current_view() const {
@@ -607,16 +607,16 @@ namespace eosio {
             return this->cache.prepared_certificate;
         }
 
-        void psm_machine::set_prepared_certificate(const vector<pbft_prepared_certificate> &prepared_certificate) {
-            this->cache.prepared_certificate = prepared_certificate;
+        void psm_machine::set_prepared_certificate(const vector<pbft_prepared_certificate> &pcert) {
+            this->cache.prepared_certificate = pcert;
         }
 
         const vector<vector<pbft_committed_certificate>> &psm_machine::get_committed_certificate() const {
             return this->cache.committed_certificate;
         }
 
-        void psm_machine::set_committed_certificate(const vector<vector<pbft_committed_certificate>> &pbft_committed_certificate_vector) {
-            this->cache.committed_certificate = pbft_committed_certificate_vector;
+        void psm_machine::set_committed_certificate(const vector<vector<pbft_committed_certificate>> &ccert) {
+            this->cache.committed_certificate = ccert;
         }
 
         const vector<pbft_view_changed_certificate> &psm_machine::get_view_changed_certificate() const {
@@ -624,32 +624,32 @@ namespace eosio {
         }
 
         void psm_machine::set_view_changed_certificate(
-                const vector<pbft_view_changed_certificate> &view_changed_certificate) {
-            this->cache.view_changed_certificate = view_changed_certificate;
+                const vector<pbft_view_changed_certificate> &vc_cert) {
+            this->cache.view_changed_certificate = vc_cert;
         }
 
         const uint32_t &psm_machine::get_target_view_retries() const {
             return this->target_view_retries;
         }
 
-        void psm_machine::set_target_view_retries(const uint32_t &target_view_reties) {
-            this->target_view_retries = target_view_reties;
+        void psm_machine::set_target_view_retries(const uint32_t &tv_reties) {
+            this->target_view_retries = tv_reties;
         }
 
         const uint32_t &psm_machine::get_target_view() const {
             return this->target_view;
         }
 
-        void psm_machine::set_target_view(const uint32_t &target_view) {
-            this->target_view = target_view;
+        void psm_machine::set_target_view(const uint32_t &tv) {
+            this->target_view = tv;
         }
 
         const uint32_t &psm_machine::get_view_change_timer() const {
             return this->view_change_timer;
         }
 
-        void psm_machine::set_view_change_timer(const uint32_t &view_change_timer) {
-            this->view_change_timer = view_change_timer;
+        void psm_machine::set_view_change_timer(const uint32_t &vc_timer) {
+            this->view_change_timer = vc_timer;
         }
     }
 }

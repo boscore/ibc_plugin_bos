@@ -667,9 +667,11 @@ namespace eosio {
             pcc.resize(ctrl.my_signature_providers().size());
             const auto &by_commit_and_num_index = pbft_state_index.get<by_commit_and_num>();
             auto itr = by_commit_and_num_index.begin();
+            if (itr == by_commit_and_num_index.end()) return vector<vector<pbft_committed_certificate>>{};
 
             pbft_state_ptr psp = *itr;
-            if (itr == by_commit_and_num_index.end() || !psp->should_committed) return vector<vector<pbft_committed_certificate>>{};
+
+            if (!psp->should_committed) return vector<vector<pbft_committed_certificate>>{};
 
             auto highest_committed_block_num = psp->block_num;
 
@@ -1200,7 +1202,7 @@ namespace eosio {
             }
 
             if (!pending_checkpoint_block_num.empty()) {
-                std::sort(pending_checkpoint_block_num.begin(), pending_checkpoint_block_num.begin());
+                std::sort(pending_checkpoint_block_num.begin(), pending_checkpoint_block_num.end());
                 for (auto h: pending_checkpoint_block_num) {
                     for (auto const &my_sp : ctrl.my_signature_providers()) {
                         auto uuid = boost::uuids::to_string(uuid_generator());
