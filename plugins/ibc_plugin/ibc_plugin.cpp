@@ -2783,7 +2783,7 @@ namespace eosio { namespace ibc {
          return;
       }
       ilog("---9---");
-      ret_msg.proof_data = fc::raw::pack( commits );
+      ret_msg.proof_data = fc::raw::pack( scp.checkpoints );
       ret_msg.proof_type = N(checkpoint);
 
       c->enqueue( ret_msg );
