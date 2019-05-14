@@ -544,6 +544,7 @@ struct controller_impl {
       });
    }
 
+   struct lscb_branch{};
    void add_to_snapshot( const snapshot_writer_ptr& snapshot ) const {
       snapshot->write_section<chain_snapshot_header>([this]( auto &section ){
          section.add_row(chain_snapshot_header(), db);
@@ -562,9 +563,10 @@ struct controller_impl {
          snapshot->write_section<batch_pbft_enabled>([this]( auto &section ) {
             section.add_row(batch_pbft_enabled{}, db);
          });
-         snapshot->write_section<branch_type>([this, &lscb](auto &section) {
+
+         snapshot->write_section<lscb_branch>([this, &lscb](auto &section) {
             auto bss = fork_db.fetch_branch_from(fork_db.head()->id, lscb->id).first;
-            section.add_row(bss, db);
+            section.template add_row<branch_type>(bss, db);
          });
       } else {
          snapshot->write_section<block_state>([this]( auto &section ) {
@@ -603,25 +605,24 @@ struct controller_impl {
       bool migrated = snapshot->has_section<batch_pbft_snapshot_migration>();
       auto upgraded = snapshot->has_section<batch_pbft_enabled>();
       if (migrated && upgraded) {
+         snapshot->read_section<lscb_branch>([this](auto &section) {
+            branch_type bss;
+            section.template read_row<branch_type>(bss, db);
+            if (bss.empty()) elog( "no last stable checkpoint block found in the snapshot, perhaps corrupted");
 
-            snapshot->read_section<branch_type>([this](auto &section) {
-               branch_type bss;
-               section.read_row(bss, db);
-               if (bss.empty()) elog( "no last stable checkpoint block found in the snapshot, perhaps corrupted");
+            wlog("${n} fork_db blocks found in the snapshot", ("n", bss.size()));
 
-               wlog("${n} fork_db blocks found in the snapshot", ("n", bss.size()));
-
-               for (auto i = bss.rbegin(); i != bss.rend(); ++i ) {
-                  if (i == bss.rbegin()) {
-                     fork_db.set(*i);
-                     snapshot_head_block = (*i)->block_num;
-                  } else {
-                     fork_db.add((*i), true, true);
-                  }
-                     fork_db.set_validity((*i), true);
-                     fork_db.mark_in_current_chain((*i), true);
-                  }
-                  head = fork_db.head();
+            for (auto i = bss.rbegin(); i != bss.rend(); ++i ) {
+               if (i == bss.rbegin()) {
+                  fork_db.set(*i);
+                  snapshot_head_block = (*i)->block_num;
+               } else {
+                  fork_db.add((*i), true, true);
+               }
+                  fork_db.set_validity((*i), true);
+                  fork_db.mark_in_current_chain((*i), true);
+               }
+               head = fork_db.head();
             });
       } else {
          snapshot->read_section<block_state>([this, &migrated](snapshot_reader::section_reader &section) {
