@@ -557,20 +557,19 @@ struct controller_impl {
          section.add_row(batch_pbft_snapshot_migration{}, db);
       });
 
-      if (pbft_enabled) {
-          snapshot->write_section<batch_pbft_enabled>([this]( auto &section ) {
-              section.add_row(batch_pbft_enabled{}, db);
-          });
-          snapshot->write_section<branch_type>([this](auto &section) {
-              auto bid = fork_db.get_block_in_current_chain_by_num(fork_db.head()->pbft_stable_checkpoint_blocknum)->id;
-              EOS_ASSERT(bid != block_id_type{}, snapshot_exception, "cannot find lscb block");
-              auto bss = fork_db.fetch_branch_from(fork_db.head()->id, bid).first;
-              section.template add_row<branch_type>(bss, db);
-          });
+      auto lscb = fork_db.get_block_in_current_chain_by_num(fork_db.head()->pbft_stable_checkpoint_blocknum);
+      if (pbft_enabled && lscb) {
+         snapshot->write_section<batch_pbft_enabled>([this]( auto &section ) {
+            section.add_row(batch_pbft_enabled{}, db);
+         });
+         snapshot->write_section<branch_type>([this, &lscb](auto &section) {
+            auto bss = fork_db.fetch_branch_from(fork_db.head()->id, lscb->id).first;
+            section.add_row(bss, db);
+         });
       } else {
-          snapshot->write_section<block_state>([this]( auto &section ){
-              section.template add_row<block_header_state>(*fork_db.head(), db);
-          });
+         snapshot->write_section<block_state>([this]( auto &section ) {
+            section.template add_row<block_header_state>(*fork_db.head(), db);
+         });
       }
 
       controller_index_set::walk_indices([this, &snapshot]( auto utils ){
@@ -602,53 +601,43 @@ struct controller_impl {
       });
 
       bool migrated = snapshot->has_section<batch_pbft_snapshot_migration>();
-      if (migrated) {
-          auto upgraded = snapshot->has_section<batch_pbft_enabled>();
-          if (upgraded) {
-              snapshot->read_section<branch_type>([this](auto &section) {
-                  branch_type bss;
-                  section.template read_row<branch_type>(bss, db);
-                  EOS_ASSERT(!bss.empty(), snapshot_exception, "no last stable checkpoint block in the snapshot");
+      auto upgraded = snapshot->has_section<batch_pbft_enabled>();
+      if (migrated && upgraded) {
 
-                  wlog("${n} reversible blocks found in the snapshot", ("n", bss.size()));
+            snapshot->read_section<branch_type>([this](auto &section) {
+               branch_type bss;
+               section.read_row(bss, db);
+               if (bss.empty()) elog( "no last stable checkpoint block found in the snapshot, perhaps corrupted");
 
-                  for (auto i = bss.rbegin(); i != bss.rend(); ++i ) {
-                      if (i == bss.rbegin()) {
-                          fork_db.set(*i);
-                          snapshot_head_block = (*i)->block_num;
-                      } else {
-                          fork_db.add((*i), true, true);
-                      }
-                      fork_db.set_validity((*i), true);
-                      fork_db.mark_in_current_chain((*i), true);
+               wlog("${n} fork_db blocks found in the snapshot", ("n", bss.size()));
+
+               for (auto i = bss.rbegin(); i != bss.rend(); ++i ) {
+                  if (i == bss.rbegin()) {
+                     fork_db.set(*i);
+                     snapshot_head_block = (*i)->block_num;
+                  } else {
+                     fork_db.add((*i), true, true);
+                  }
+                     fork_db.set_validity((*i), true);
+                     fork_db.mark_in_current_chain((*i), true);
                   }
                   head = fork_db.head();
-              });
-          } else {
-              snapshot->read_section<block_state>([this](auto &section) {
-                  block_header_state head_header_state;
-                  section.read_row(head_header_state, db);
-
-                  auto head_state = std::make_shared<block_state>(head_header_state);
-                  fork_db.set(head_state);
-                  fork_db.set_validity(head_state, true);
-                  fork_db.mark_in_current_chain(head_state, true);
-                  head = head_state;
-                  snapshot_head_block = head->block_num;
-              });
-          }
+            });
       } else {
-          snapshot->read_section<block_state>([this](snapshot_reader::section_reader &section) {
+         snapshot->read_section<block_state>([this, &migrated](snapshot_reader::section_reader &section) {
             block_header_state head_header_state;
-            section.read_pbft_migrate_row(head_header_state, db);
-
+            if (migrated) {
+                section.read_row(head_header_state, db);
+            } else {
+                section.read_pbft_migrate_row(head_header_state, db);
+            }
             auto head_state = std::make_shared<block_state>(head_header_state);
             fork_db.set(head_state);
             fork_db.set_validity(head_state, true);
             fork_db.mark_in_current_chain(head_state, true);
             head = head_state;
             snapshot_head_block = head->block_num;
-          });
+         });
 
       }
 
@@ -661,14 +650,14 @@ struct controller_impl {
          }
 
          if(snapshot->has_section<value_t>()){
-             snapshot->read_section<value_t>([this]( auto& section ) {
+            snapshot->read_section<value_t>([this]( auto& section ) {
                bool more = !section.empty();
                while(more) {
-                   decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
+                  decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
                      more = section.read_row(row, db);
-                   });
+                  });
                }
-             });
+            });
          }
       });
 
