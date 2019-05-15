@@ -544,7 +544,6 @@ struct controller_impl {
       });
    }
 
-   struct lscb_branch{};
    void add_to_snapshot( const snapshot_writer_ptr& snapshot ) const {
       snapshot->write_section<chain_snapshot_header>([this]( auto &section ){
          section.add_row(chain_snapshot_header(), db);
@@ -554,17 +553,13 @@ struct controller_impl {
          section.add_row(conf.genesis, db);
       });
 
-      snapshot->write_section<batch_pbft_snapshot_migration>([this]( auto &section ){
-         section.add_row(batch_pbft_snapshot_migration{}, db);
-      });
+      snapshot->write_section<batch_pbft_snapshot_migrated>([]( auto &section ){});
 
       auto lscb = fork_db.get_block_in_current_chain_by_num(fork_db.head()->pbft_stable_checkpoint_blocknum);
       if (pbft_enabled && lscb) {
-         snapshot->write_section<batch_pbft_enabled>([this]( auto &section ) {
-            section.add_row(batch_pbft_enabled{}, db);
-         });
+         snapshot->write_section<batch_pbft_enabled>([]( auto &section ) {});
 
-         snapshot->write_section<lscb_branch>([this, &lscb](auto &section) {
+         snapshot->write_section<batch_pbft_lscb_branch>([this, &lscb](auto &section) {
             auto bss = fork_db.fetch_branch_from(fork_db.head()->id, lscb->id).first;
             section.template add_row<branch_type>(bss, db);
          });
@@ -602,15 +597,15 @@ struct controller_impl {
          header.validate();
       });
 
-      bool migrated = snapshot->has_section<batch_pbft_snapshot_migration>();
+      bool migrated = snapshot->has_section<batch_pbft_snapshot_migrated>();
       auto upgraded = snapshot->has_section<batch_pbft_enabled>();
       if (migrated && upgraded) {
-         snapshot->read_section<lscb_branch>([this](auto &section) {
+         snapshot->read_section<batch_pbft_lscb_branch>([this](auto &section) {
             branch_type bss;
             section.template read_row<branch_type>(bss, db);
             if (bss.empty()) elog( "no last stable checkpoint block found in the snapshot, perhaps corrupted");
 
-            wlog("${n} fork_db blocks found in the snapshot", ("n", bss.size()));
+            ilog("${n} fork_db blocks found in the snapshot", ("n", bss.size()));
 
             for (auto i = bss.rbegin(); i != bss.rend(); ++i ) {
                if (i == bss.rbegin()) {
@@ -920,26 +915,6 @@ struct controller_impl {
       }
    }
    // "bos end"
-
-   optional<block_num_type> upgrade_target_block() {
-
-       const auto&  upo = db.get<upgrade_property_object>();
-       if (upo.upgrade_target_block_num > 0) {
-           return upo.upgrade_target_block_num;
-       } else {
-           return optional<block_num_type>{};
-       }
-   }
-
-   optional<block_num_type> upgrade_complete_block() {
-
-       const auto&  upo = db.get<upgrade_property_object>();
-       if (upo.upgrade_complete_block_num > 0) {
-           return upo.upgrade_complete_block_num;
-       } else {
-           return optional<block_num_type>{};
-       }
-   }
 
    /**
     * @post regardless of the success of commit block there is no active pending block

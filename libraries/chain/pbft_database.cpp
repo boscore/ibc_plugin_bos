@@ -212,24 +212,26 @@ namespace eosio {
                 auto current_watermark = get_current_pbft_watermark();
                 auto lib = ctrl.last_irreversible_block_num();
 
-                uint32_t high_water_mark_block_num = head_block_num;
+                uint32_t high_watermark_block_num = head_block_num;
 
                 if ( current_watermark > 0 ) {
-                    high_water_mark_block_num = std::min(head_block_num, current_watermark);
+                    high_watermark_block_num = std::min(head_block_num, current_watermark);
                 }
 
-                if (high_water_mark_block_num <= lib) return vector<pbft_prepare>{};
+                if (high_watermark_block_num <= lib) return vector<pbft_prepare>{};
 
-                block_id_type high_water_mark_block_id = ctrl.get_block_id_for_num(high_water_mark_block_num);
-                for (auto const &sp : ctrl.my_signature_providers()) {
-                    auto uuid = boost::uuids::to_string(uuid_generator());
-                    auto p = pbft_prepare{uuid, current_view, high_water_mark_block_num, high_water_mark_block_id,
-                                          sp.first, chain_id()};
-                    p.producer_signature = sp.second(p.digest());
-                    add_pbft_prepare(p);
-                    emit(pbft_outgoing_prepare, p);
-                    new_pv.emplace_back(p);
-                    ctrl.set_pbft_my_prepare(high_water_mark_block_id);
+                if (auto hwbs = ctrl.fork_db().get_block_in_current_chain_by_num(high_watermark_block_num)) {
+
+                    for (auto const &sp : ctrl.my_signature_providers()) {
+                        auto uuid = boost::uuids::to_string(uuid_generator());
+                        auto p = pbft_prepare{uuid, current_view, high_watermark_block_num, hwbs->id, sp.first,
+                                              chain_id()};
+                        p.producer_signature = sp.second(p.digest());
+                        add_pbft_prepare(p);
+                        emit(pbft_outgoing_prepare, p);
+                        new_pv.emplace_back(p);
+                        ctrl.set_pbft_my_prepare(hwbs->id);
+                    }
                 }
                 return new_pv;
             }
@@ -338,13 +340,14 @@ namespace eosio {
             } else {
                 const auto &by_prepare_and_num_index = pbft_state_index.get<by_prepare_and_num>();
                 auto itr = by_prepare_and_num_index.begin();
-                if (itr == by_prepare_and_num_index.end()) {
-                    return vector<pbft_commit>{};
-                }
-                vector<pbft_commit> new_cv;
+                if (itr == by_prepare_and_num_index.end()) return vector<pbft_commit>{};
+
+
                 pbft_state_ptr psp = *itr;
                 auto bs = ctrl.fork_db().get_block(psp->block_id);
+                if (!bs) return vector<pbft_commit>{};
 
+                vector<pbft_commit> new_cv;
                 if (psp->should_prepared && (psp->block_num > ctrl.last_irreversible_block_num())) {
 
                     for (auto const &sp : ctrl.my_signature_providers()) {
@@ -1174,8 +1177,10 @@ namespace eosio {
             auto checkpoint = [&](const block_num_type &in) {
                 const auto& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
                 if (!ctrl.is_pbft_enabled()) return false;
-                return in >= ucb
-                && (in == ucb + 1 || in % 100 == 1 || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end());
+                if (in <= ucb) return false;
+                return in == ucb + 1 // checkpoint on first pbft block;
+                || in % 100 == 1 // checkpoint on every 100 block;
+                || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end(); // checkpoint on bp schedule change;
             };
 
             for (auto i = psp->block_num;
@@ -1183,19 +1188,22 @@ namespace eosio {
                 if (checkpoint(i)) {
                     my_latest_checkpoint = max(i, my_latest_checkpoint);
                     auto &by_block = checkpoint_index.get<by_block_id>();
-                    auto c_itr = by_block.find(ctrl.get_block_id_for_num(i));
-                    if (c_itr == by_block.end()) {
-                        pending_checkpoint_block_num.emplace_back(i);
-                    } else {
-                        auto checkpoints = (*c_itr)->checkpoints;
-                        bool contains_mine = false;
-                        for (auto const &my_sp : ctrl.my_signature_providers()) {
-                            auto p_itr = find_if(checkpoints.begin(), checkpoints.end(),
-                                    [&](const pbft_checkpoint &ext) { return ext.public_key == my_sp.first; });
-                            if (p_itr != checkpoints.end()) contains_mine = true;
-                        }
-                        if (!contains_mine) {
+
+                    if (auto bs = ctrl.fork_db().get_block_in_current_chain_by_num(i)) {
+                        auto c_itr = by_block.find(bs->id);
+                        if (c_itr == by_block.end()) {
                             pending_checkpoint_block_num.emplace_back(i);
+                        } else {
+                            auto checkpoints = (*c_itr)->checkpoints;
+                            bool contains_mine = false;
+                            for (auto const &my_sp : ctrl.my_signature_providers()) {
+                                auto p_itr = find_if(checkpoints.begin(), checkpoints.end(),
+                                        [&](const pbft_checkpoint &ext) { return ext.public_key == my_sp.first; });
+                                if (p_itr != checkpoints.end()) contains_mine = true;
+                            }
+                            if (!contains_mine) {
+                                pending_checkpoint_block_num.emplace_back(i);
+                            }
                         }
                     }
                 }
@@ -1204,36 +1212,37 @@ namespace eosio {
             if (!pending_checkpoint_block_num.empty()) {
                 std::sort(pending_checkpoint_block_num.begin(), pending_checkpoint_block_num.end());
                 for (auto h: pending_checkpoint_block_num) {
-                    for (auto const &my_sp : ctrl.my_signature_providers()) {
-                        auto uuid = boost::uuids::to_string(uuid_generator());
-                        auto cp = pbft_checkpoint{uuid, h, ctrl.get_block_id_for_num(h),
-                                                  my_sp.first, .chain_id=chain_id()};
-                        cp.producer_signature = my_sp.second(cp.digest());
-                        add_pbft_checkpoint(cp);
-                        new_pc.emplace_back(cp);
+                    if (auto bs = ctrl.fork_db().get_block_in_current_chain_by_num(h)) {
+                        for (auto const &my_sp : ctrl.my_signature_providers()) {
+                            auto uuid = boost::uuids::to_string(uuid_generator());
+                            auto cp = pbft_checkpoint{uuid, h, bs->id, my_sp.first, .chain_id=chain_id()};
+                            cp.producer_signature = my_sp.second(cp.digest());
+                            add_pbft_checkpoint(cp);
+                            new_pc.emplace_back(cp);
+                        }
                     }
                 }
             } else if (my_latest_checkpoint > 1) {
-                auto lscb_id = ctrl.get_block_id_for_num(my_latest_checkpoint);
-                auto &by_block = checkpoint_index.get<by_block_id>();
-                auto h_itr = by_block.find(lscb_id);
-                if (h_itr != by_block.end()) {
-                    auto checkpoints = (*h_itr)->checkpoints;
-                    for (auto const &my_sp : ctrl.my_signature_providers()) {
-                        for (auto const &cp: checkpoints) {
-                            if (my_sp.first == cp.public_key) {
-                                auto retry_cp = cp;
-                                auto uuid = boost::uuids::to_string(uuid_generator());
-                                retry_cp.uuid = uuid;
-                                retry_cp.timestamp = time_point::now();
-                                retry_cp.producer_signature = my_sp.second(retry_cp.digest());
-                                new_pc.emplace_back(retry_cp);
+                if (auto bs = ctrl.fork_db().get_block_in_current_chain_by_num(my_latest_checkpoint)) {
+                    auto &by_block = checkpoint_index.get<by_block_id>();
+                    auto h_itr = by_block.find(bs->id);
+                    if (h_itr != by_block.end()) {
+                        auto checkpoints = (*h_itr)->checkpoints;
+                        for (auto const &my_sp : ctrl.my_signature_providers()) {
+                            for (auto const &cp: checkpoints) {
+                                if (my_sp.first == cp.public_key) {
+                                    auto retry_cp = cp;
+                                    auto uuid = boost::uuids::to_string(uuid_generator());
+                                    retry_cp.uuid = uuid;
+                                    retry_cp.timestamp = time_point::now();
+                                    retry_cp.producer_signature = my_sp.second(retry_cp.digest());
+                                    new_pc.emplace_back(retry_cp);
+                                }
                             }
                         }
                     }
                 }
             }
-
             return new_pc;
         }
 
@@ -1262,9 +1271,7 @@ namespace eosio {
                 auto csp = (*itr);
                 auto checkpoints = csp->checkpoints;
                 auto p_itr = find_if(checkpoints.begin(), checkpoints.end(),
-                                     [&](const pbft_checkpoint &existed) {
-                                         return existed.public_key == cp.public_key;
-                                     });
+                        [&](const pbft_checkpoint &existed) { return existed.public_key == cp.public_key; });
                 if (p_itr == checkpoints.end()) {
                     by_block.modify(itr, [&](const pbft_checkpoint_state_ptr &pcp) {
                         csp->checkpoints.emplace_back(cp);
