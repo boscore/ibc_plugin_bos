@@ -156,7 +156,7 @@ namespace eosio { namespace ibc {
       boost::asio::steady_timer::duration    ibc_heartbeat_interval{std::chrono::seconds{3}};
 
       unique_ptr<boost::asio::steady_timer>  ibc_core_timer;
-      boost::asio::steady_timer::duration    ibc_core_interval{std::chrono::seconds{3}};
+      boost::asio::steady_timer::duration    ibc_core_interval{std::chrono::seconds{2}};
 
 
       const std::chrono::system_clock::duration peer_authentication_interval{std::chrono::seconds{1}}; ///< Peer clock may be no more than 1 second skewed from our clock, including network latency.
@@ -2707,9 +2707,6 @@ namespace eosio { namespace ibc {
          // ret_msg.headers
          uint32_t end_block_num = msg.block_num ;
 
-
-
-//         idump(( bps_ptr->commits));
          for( auto& commit : bps_ptr->commits ){
             idump((commit));
             ilog("---3---");
@@ -3610,21 +3607,22 @@ namespace eosio { namespace ibc {
       }
 
       // ---- ibc.token ----
-      uint32_t last_finished_trx_block_time_slot = 0;
+      uint32_t last_confirmed_orig_trx_block_time_slot = 0;
       auto pchm_opt = token_contract->get_peer_chain_mutable();
       if ( pchm_opt.valid() ){
-         last_finished_trx_block_time_slot = pchm_opt->last_finished_trx_block_time_slot;
+         last_confirmed_orig_trx_block_time_slot = pchm_opt->last_confirmed_orig_trx_block_time_slot;
       } else {
          elog("get_peer_chain_mutable failed");
          return;
       }
 
-      if ( last_finished_trx_block_time_slot == 0 ){
+      if ( last_confirmed_orig_trx_block_time_slot == 0 ){
          return;
       }
 
       uint32_t count = 0;
       range_type range = token_contract->get_table_origtrxs_id_range();
+
       if ( range == range_type() ){
          return;
       }
@@ -3635,12 +3633,12 @@ namespace eosio { namespace ibc {
       for ( uint64_t i = range.first; i <= range.second ; ++i ){
          auto trx_opt = token_contract->get_table_origtrxs_trx_info_by_id( i );
          if ( trx_opt.valid() ){
-            if ( trx_opt->block_time_slot +  3600 * 24 * 2 < last_finished_trx_block_time_slot ){
+            if ( trx_opt->block_time_slot +  3600 * 24 * 2 < last_confirmed_orig_trx_block_time_slot ){
                to_rmunablerb.push_back( trx_opt->trx_id );
                continue;
             }
 
-            if ( trx_opt->block_time_slot + 25 < last_finished_trx_block_time_slot ){
+            if ( trx_opt->block_time_slot + 25 < last_confirmed_orig_trx_block_time_slot ){
                to_rollback.push_back( trx_opt->trx_id );
             } else {
                break;
@@ -3690,8 +3688,8 @@ namespace eosio { namespace ibc {
       ilog("local_origtrxs id range [${of},${ot}], local_cashtrxs id range [${cf},${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
 
       ///< ---- step 0: remove side effect of unapplied trxs ---- >///
-//      chain_plug->chain().abort_block();
-//      chain_plug->chain().drop_all_unapplied_transactions();
+      chain_plug->chain().abort_block();
+      chain_plug->chain().drop_all_unapplied_transactions();
 
       check_if_remove_old_data_in_ibc_contracts();
 

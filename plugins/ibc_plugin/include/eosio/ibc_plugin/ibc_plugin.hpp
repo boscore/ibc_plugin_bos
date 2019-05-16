@@ -119,11 +119,11 @@ namespace eosio { namespace ibc {
    };
 
    struct peer_chain_mutable_ibc_token {
-      peer_chain_mutable_ibc_token():peerchain_name(),cash_seq_num(0),last_finished_trx_block_time_slot(0),
+      peer_chain_mutable_ibc_token():peerchain_name(),cash_seq_num(0),last_confirmed_orig_trx_block_time_slot(0),
                                      current_block_time_slot(0),current_block_trxs(0),origtrxs_tb_next_id(0){}
       name        peerchain_name;
       uint64_t    cash_seq_num;
-      uint32_t    last_finished_trx_block_time_slot;
+      uint32_t    last_confirmed_orig_trx_block_time_slot;
       uint32_t    current_block_time_slot;
       uint32_t    current_block_trxs;
       uint64_t    origtrxs_tb_next_id;
@@ -197,7 +197,7 @@ FC_REFLECT( eosio::ibc::peer_chain_state_ibc_token, (peerchain_name)(peerchain_i
             (thischain_ibc_chain_contract)(max_original_trxs_per_block)(max_origtrxs_table_records)
             (cache_cashtrxs_table_records)(active) )
 FC_REFLECT( eosio::ibc::peer_chain_mutable_ibc_token, (peerchain_name)(cash_seq_num)
-            (last_finished_trx_block_time_slot)(current_block_time_slot)(current_block_trxs)(origtrxs_tb_next_id) )
+            (last_confirmed_orig_trx_block_time_slot)(current_block_time_slot)(current_block_trxs)(origtrxs_tb_next_id) )
 FC_REFLECT( eosio::ibc::original_trx_info, (id)(block_time_slot)(trx_id)(action) )
 FC_REFLECT( eosio::ibc::cash_trx_info, (seq_num)(block_time_slot)(trx_id)(action)(orig_trx_id)(orig_trx_block_num) )
 FC_REFLECT( eosio::ibc::cash_action_params, (seq_num)(from_chain)(orig_trx_id)(orig_trx_packed_trx_receipt)
