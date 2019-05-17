@@ -103,8 +103,6 @@ namespace eosio { namespace ibc {
    struct global_state_ibc_token {
       name              this_chain;
       bool              active;
-      uint32_t          lock_start_time;
-      uint32_t          lock_minutes;
    };
 
    struct peer_chain_state_ibc_token {
@@ -191,7 +189,7 @@ FC_REFLECT( eosio::ibc::block_header_state_type, (block_num)(block_id)(header)(a
 FC_REFLECT( eosio::ibc::blockroot_merkle_type, (block_num)(merkle) )
 FC_REFLECT( eosio::ibc::transfer_action_type, (from)(to)(quantity)(memo) )
 FC_REFLECT( eosio::ibc::transfer_action_info, (contract)(from)(quantity) )
-FC_REFLECT( eosio::ibc::global_state_ibc_token, (this_chain)(active)(lock_start_time)(lock_minutes) )
+FC_REFLECT( eosio::ibc::global_state_ibc_token, (this_chain)(active) )
 FC_REFLECT( eosio::ibc::global_mutable_ibc_chain, (last_anchor_block_num) )
 FC_REFLECT( eosio::ibc::peer_chain_state_ibc_token, (peerchain_name)(peerchain_info)(peerchain_ibc_token_contract)
             (thischain_ibc_chain_contract)(max_original_trxs_per_block)(max_origtrxs_table_records)

@@ -2765,6 +2765,7 @@ namespace eosio { namespace ibc {
       // ret_msg.headers
       uint32_t end_block_num = check_num ;
       for( auto& checkpoint : scp.checkpoints ){
+         idump((checkpoint));
          end_block_num = std::max( end_block_num, checkpoint.block_num );
       }
       for( uint32_t num = check_num; num <= end_block_num; ++num ){
@@ -3098,8 +3099,8 @@ namespace eosio { namespace ibc {
 
       static uint32_t check_block_num = 0;
 
-      if ( lwcls.last_num > check_block_num ){
-         check_block_num = lwcls.last_num;
+      if ( lwcls.last_num >= check_block_num ){
+         check_block_num = lwcls.last_num + 1;
       }
 
       auto get_block_ptr = [=]( uint32_t num ) -> signed_block_ptr {
@@ -3905,7 +3906,7 @@ namespace eosio { namespace ibc {
                   ++it;
                }
             } else { // maybe happen when restart ibc_plugin node
-               wlog("can not find original transacton infomation form local_origtrxs, is nodeos restarted ?");
+               // ilog("can not find original transacton infomation form local_origtrxs");
                auto it_blk_num = local_origtrxs.get<by_block_num>().lower_bound( cash_opt->orig_trx_block_num + 1 );
                it = local_origtrxs.project<0>(it_blk_num);
                while ( it != local_origtrxs.end() ){
