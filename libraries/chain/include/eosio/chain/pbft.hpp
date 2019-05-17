@@ -13,9 +13,9 @@ namespace eosio {
             vector<pbft_prepare> prepares_cache;
             vector<pbft_commit> commits_cache;
             vector<pbft_view_change> view_changes_cache;
-            vector<pbft_prepared_certificate> prepared_certificate;
-            vector<vector<pbft_committed_certificate>> committed_certificate;
-            vector<pbft_view_changed_certificate> view_changed_certificate;
+            pbft_prepared_certificate prepared_certificate;
+            vector<pbft_committed_certificate> committed_certificate;
+            pbft_view_changed_certificate view_changed_certificate;
         };
 
         class psm_machine {
@@ -52,6 +52,9 @@ namespace eosio {
             void transit_to_view_change_state(T const & s);
 
             template<typename T>
+            bool maybe_new_view(T const & s);
+
+            template<typename T>
             void transit_to_new_view(const pbft_new_view &new_view, T const &s);
 
             const vector<pbft_prepare> &get_prepares_cache() const;
@@ -70,17 +73,17 @@ namespace eosio {
 
             void set_current_view(const uint32_t &cv);
 
-            const vector<pbft_prepared_certificate> &get_prepared_certificate() const;
+            const pbft_prepared_certificate &get_prepared_certificate() const;
 
-            void set_prepared_certificate(const vector<pbft_prepared_certificate> &pcert);
+            void set_prepared_certificate(const pbft_prepared_certificate &pcert);
 
-            const vector<vector<pbft_committed_certificate>> &get_committed_certificate() const;
+            const vector<pbft_committed_certificate> &get_committed_certificate() const;
 
-            void set_committed_certificate(const vector<vector<pbft_committed_certificate>> &ccert);
+            void set_committed_certificate(const vector<pbft_committed_certificate> &ccert);
 
-            const vector<pbft_view_changed_certificate> &get_view_changed_certificate() const;
+            const pbft_view_changed_certificate &get_view_changed_certificate() const;
 
-            void set_view_changed_certificate(const vector<pbft_view_changed_certificate> &vc_cert);
+            void set_view_changed_certificate(const pbft_view_changed_certificate &vc_cert);
 
             const uint32_t &get_target_view_retries() const;
 
@@ -208,7 +211,7 @@ namespace eosio {
 
         class pbft_controller {
         public:
-            pbft_controller(controller& ctrl);
+            explicit pbft_controller(controller& ctrl);
             ~pbft_controller();
 
             pbft_database pbft_db;

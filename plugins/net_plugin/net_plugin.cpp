@@ -28,6 +28,10 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/device/back_inserter.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+
 using namespace eosio::chain::plugin_interface::compat;
 
 namespace fc {
@@ -109,6 +113,8 @@ namespace eosio {
    };
    class net_plugin_impl {
    private:
+      std::vector<char> compress_pbft(const std::shared_ptr<std::vector<char>>& m)const;
+      std::vector<char> decompress_pbft(const std::shared_ptr<std::vector<char>>& m)const;
       std::shared_ptr<std::vector<char>> encode_pbft_message(const net_message &msg)const;
    public:
       net_plugin_impl();
@@ -264,6 +270,7 @@ namespace eosio {
       void handle_message( connection_ptr c, const pbft_checkpoint &msg);
       void handle_message( connection_ptr c, const pbft_stable_checkpoint &msg);
       void handle_message( connection_ptr c, const checkpoint_request_message &msg);
+      void handle_message( connection_ptr c, const compressed_pbft_new_view &msg);
 
       void start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection);
       void start_txn_timer();
@@ -677,6 +684,7 @@ namespace eosio {
                            bool trigger_send, go_away_reason close_after_send,
                            bool to_sync_queue = false);
       void enqueue_pbft( const std::shared_ptr<std::vector<char>>& m, const time_point_sec deadline);
+
       bool pbft_read_to_send();
 
       void cancel_sync(go_away_reason);
@@ -1380,35 +1388,6 @@ namespace eosio {
        sync_wait();
    }
 
-//    bool connection::process_next_message(net_plugin_impl& impl, uint32_t message_length) {
-//        vector<char> tmp_data;
-//        tmp_data.resize(message_length);
-//
-//        try {
-//            auto ds = pending_message_buffer.create_datastream();
-//            auto read_index = pending_message_buffer.read_index();
-//            pending_message_buffer.peek(tmp_data.data(),message_length,read_index);
-//
-//            net_message msg;
-//            fc::raw::unpack(ds, msg);
-//            msg_handler m(impl, shared_from_this() );
-//            if( msg.contains<signed_block>() ) {
-//                m( std::move( msg.get<signed_block>() ) );
-//            } else if( msg.contains<packed_transaction>() ) {
-//                m( std::move( msg.get<packed_transaction>() ) );
-//            } else {
-//                msg.visit( m );
-//            }
-//        } catch(  const fc::exception& e ) {
-//            wlog("error message length: ${l}", ("l", message_length));
-//            wlog("error raw bytes ${s}", ("s", tmp_data));
-//            edump((e.to_detail_string() ));
-//            impl.close( shared_from_this() );
-//            return false;
-//        }
-//        return true;
-//    }
-
    bool connection::process_next_message(net_plugin_impl& impl, uint32_t message_length) {
       try {
          auto ds = pending_message_buffer.create_datastream();
@@ -2066,6 +2045,51 @@ namespace eosio {
    }
 
    //------------------------------------------------------------------------
+
+   namespace bio = boost::iostreams;
+   template<size_t Limit>
+   struct read_limiter {
+      using char_type = char;
+      using category = bio::multichar_output_filter_tag;
+
+      template<typename Sink>
+      size_t write(Sink &sink, const char* s, size_t count)
+      {
+         EOS_ASSERT(_total + count <= Limit, tx_decompression_error, "Exceeded maximum decompressed transaction size");
+         _total += count;
+         return bio::write(sink, s, count);
+      }
+      size_t _total = 0;
+   };
+
+   std::vector<char> net_plugin_impl::compress_pbft(const std::shared_ptr<std::vector<char>>& m) const {
+      std::vector<char> out;
+      bio::filtering_ostream comp;
+      comp.push(bio::zlib_compressor(bio::zlib::best_compression));
+      comp.push(bio::back_inserter(out));
+      bio::write(comp, m->data(), m->size());
+      bio::close(comp);
+      return out;
+   }
+
+   std::vector<char> net_plugin_impl::decompress_pbft(const std::shared_ptr<std::vector<char>>& m) const {
+      try {
+         std::vector<char> out;
+         bio::filtering_ostream decomp;
+         decomp.push(bio::zlib_decompressor());
+         decomp.push(read_limiter<1*1024*1024>()); // limit to 10 megs decompressed for zip bomb protections
+         decomp.push(bio::back_inserter(out));
+         bio::write(decomp, m->data(), m->size());
+         bio::close(decomp);
+         return out;
+      } catch( fc::exception& er ) {
+         throw;
+      } catch( ... ) {
+         fc::unhandled_exception er( FC_LOG_MESSAGE( warn, "internal decompression error"), std::current_exception() );
+         throw er;
+      }
+   }
+
    std::shared_ptr<std::vector<char>> net_plugin_impl::encode_pbft_message(const net_message &msg) const {
 
        uint32_t payload_size = fc::raw::pack_size( msg );
@@ -2078,8 +2102,25 @@ namespace eosio {
        fc::datastream<char*> ds( send_buffer->data(), buffer_size);
        ds.write( header, header_size );
        fc::raw::pack( ds, msg );
+       auto out_buffer = send_buffer;
 
-       return send_buffer;
+       if (msg.contains<pbft_new_view>()) {
+           payload_size = fc::raw::pack_size( msg );
+
+           header = reinterpret_cast<char*>(&payload_size);
+           header_size = sizeof(payload_size);
+           buffer_size = header_size + payload_size;
+
+           auto compressed_buffer = std::make_shared<vector<char>>(buffer_size);
+           fc::datastream<char*> ds( compressed_buffer->data(), buffer_size);
+           ds.write( header, header_size );
+
+           auto compressed_msg = std::make_shared<vector<char>>(compress_pbft(send_buffer));
+           auto cpnv = compressed_pbft_new_view{compressed_msg};
+           fc::raw::pack( ds, &cpnv );
+           out_buffer = compressed_buffer;
+       }
+       return out_buffer;
    }
 
    void net_plugin_impl::connect(const connection_ptr& c) {
@@ -3103,6 +3144,17 @@ namespace eosio {
        pbft_incoming_new_view_channel.publish(msg);
     }
 
+    void net_plugin_impl::handle_message( connection_ptr c, const compressed_pbft_new_view &msg) {
+
+        auto decompressed_new_view = decompress_pbft(msg.content);
+
+        pbft_new_view nv;
+        fc::datastream<const char *> ds(decompressed_new_view.data(), decompressed_new_view.size());
+        fc::raw::unpack(ds, nv);
+
+        handle_message(c, nv);
+    }
+
     void net_plugin_impl::handle_message( connection_ptr c, const pbft_checkpoint &msg) {
 
        if (!is_pbft_msg_valid(msg)) return;
@@ -3126,7 +3178,7 @@ namespace eosio {
 
        if (pcc.pbft_db.is_valid_stable_checkpoint(msg)) {
            fc_ilog(logger, "received stable checkpoint at ${n}, from ${v}", ("n", msg.block_num)("v", c->peer_name()));
-           for (auto cp: msg.checkpoints) {
+           for (auto cp: msg.messages) {
                pbft_incoming_checkpoint_channel.publish(cp);
            }
        }

@@ -2343,7 +2343,6 @@ block_id_type controller::last_stable_checkpoint_block_id() const {
     return block_id_type{};
 }
 
-
 vector<uint32_t> controller::proposed_schedule_block_nums() const {
     return my->proposed_schedule_blocks;
 }
@@ -2680,7 +2679,6 @@ path controller::blocks_dir() const {
 producer_schedule_type controller::initial_schedule() const {
    return producer_schedule_type{ 0, {{eosio::chain::config::system_account_name, my->conf.genesis.initial_key}} };
 }
-
 
 bool controller::is_known_unexpired_transaction( const transaction_id_type& id) const {
    return db().find<transaction_object, by_trx_id>(id);

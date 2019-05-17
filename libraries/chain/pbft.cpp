@@ -103,8 +103,9 @@ namespace eosio {
             this->set_commits_cache(vector<pbft_commit>{});
             this->set_view_changes_cache(vector<pbft_view_change>{});
 
-            this->set_prepared_certificate(vector<pbft_prepared_certificate>{});
-            this->set_view_changed_certificate(vector<pbft_view_changed_certificate>{});
+            this->set_prepared_certificate(pbft_prepared_certificate{});
+            this->set_committed_certificate(vector<pbft_committed_certificate>{});
+            this->set_view_changed_certificate(pbft_view_changed_certificate{});
 
             this->view_change_timer = 0;
             this->target_view_retries = 0;
@@ -236,9 +237,9 @@ namespace eosio {
             }
         }
 
-        void psm_prepared_state::manually_set_view(psm_machine *m, const uint32_t &current_view) {
-            m->set_current_view(current_view);
-            m->set_target_view(current_view+1);
+        void psm_prepared_state::manually_set_view(psm_machine *m, const uint32_t &view) {
+            m->set_current_view(view);
+            m->set_target_view(view+1);
             m->transit_to_view_change_state(this);
         }
 
@@ -317,9 +318,9 @@ namespace eosio {
             }
         }
 
-        void psm_committed_state::manually_set_view(psm_machine *m, const uint32_t &current_view) {
-            m->set_current_view(current_view);
-            m->set_target_view(current_view+1);
+        void psm_committed_state::manually_set_view(psm_machine *m, const uint32_t &view) {
+            m->set_current_view(view);
+            m->set_target_view(view+1);
             m->transit_to_view_change_state(this);
         }
 
@@ -355,28 +356,7 @@ namespace eosio {
 
             pbft_db.add_pbft_view_change(e);
 
-            //if view_change >= 2f+1, calculate next primary, send new view if is primary
-            auto nv = m->get_target_view();
-            if (pbft_db.should_new_view(nv) && pbft_db.is_new_primary(nv)) {
-
-                m->set_view_changed_certificate(pbft_db.generate_view_changed_certificate(nv));
-
-                auto new_view = pbft_db.get_proposed_new_view_num();
-                if (new_view != nv) return;
-
-                auto nv_msg = pbft_db.send_pbft_new_view(
-                        m->get_view_changed_certificate(),
-                        new_view);
-
-                if (nv_msg == pbft_new_view{}) return;
-
-                try {
-                    m->transit_to_new_view(nv_msg, this);
-                } catch(const fc::exception& ex) {
-                    wlog("bad new view, ${s} ", ("s",ex.to_string()));
-                }
-                return;
-            }
+            m->maybe_new_view(this);
         }
 
         void psm_view_change_state::send_view_change(psm_machine *m, pbft_database &pbft_db) {
@@ -390,28 +370,7 @@ namespace eosio {
 
             m->send_pbft_view_change();
 
-            //if view_change >= 2f+1, calculate next primary, send new view if is primary
-            auto nv = m->get_target_view();
-            if (pbft_db.should_new_view(nv) && pbft_db.is_new_primary(nv)) {
-
-                m->set_view_changed_certificate(pbft_db.generate_view_changed_certificate(nv));
-
-                auto new_view = pbft_db.get_proposed_new_view_num();
-                if (new_view != nv) return;
-
-                auto nv_msg = pbft_db.send_pbft_new_view(
-                        m->get_view_changed_certificate(),
-                        new_view);
-
-                if (nv_msg == pbft_new_view{}) return;
-
-                try {
-                    m->transit_to_new_view(nv_msg, this);
-                } catch(const fc::exception& ex) {
-                    wlog("bad new view, ${s} ", ("s",ex.to_string()));
-                }
-                return;
-            }
+            m->maybe_new_view(this);
         }
 
 
@@ -426,9 +385,9 @@ namespace eosio {
             }
         }
 
-        void psm_view_change_state::manually_set_view(psm_machine *m, const uint32_t &current_view) {
-            m->set_current_view(current_view);
-            m->set_target_view(current_view+1);
+        void psm_view_change_state::manually_set_view(psm_machine *m, const uint32_t &view) {
+            m->set_current_view(view);
+            m->set_target_view(view+1);
             m->transit_to_view_change_state(this);
         }
 
@@ -473,9 +432,39 @@ namespace eosio {
             this->set_target_view_retries(0);
 
             this->set_current(new psm_view_change_state);
-            if (pbft_db.should_send_pbft_msg()) this->send_pbft_view_change();
-
+            if (pbft_db.should_send_pbft_msg()) {
+                this->send_pbft_view_change();
+                auto nv = this->maybe_new_view(s);
+                if (nv) return;
+            }
             delete s;
+        }
+
+        template<typename T>
+        bool psm_machine::maybe_new_view(T const &s) {
+            //if view_change >= 2f+1, calculate next primary, send new view if is primary
+            auto nv = this->get_target_view();
+            if (pbft_db.should_new_view(nv) && pbft_db.is_new_primary(nv)) {
+
+                this->set_view_changed_certificate(pbft_db.generate_view_changed_certificate(nv));
+
+                auto new_view = pbft_db.get_proposed_new_view_num();
+                if (new_view != nv) return false;
+
+                auto nv_msg = pbft_db.send_pbft_new_view(
+                        this->get_view_changed_certificate(),
+                        new_view);
+
+                if (nv_msg == pbft_new_view{}) return false;
+
+                try {
+                    this->transit_to_new_view(nv_msg, s);
+                    return true;
+                } catch(const fc::exception& ex) {
+                    wlog("bad new view, ${s} ", ("s",ex.to_string()));
+                }
+            }
+            return false;
         }
 
         template<typename T>
@@ -500,7 +489,7 @@ namespace eosio {
             this->pbft_db.prune_pbft_index();
 
             if (!(new_view.stable_checkpoint == pbft_stable_checkpoint{})) {
-                for (auto cp :new_view.stable_checkpoint.checkpoints) {
+                for (auto cp :new_view.stable_checkpoint.messages) {
                     try {
                         pbft_db.add_pbft_checkpoint(cp);
                     } catch (...) {
@@ -513,7 +502,7 @@ namespace eosio {
                 auto committed_certs = new_view.committed;
                 std::sort(committed_certs.begin(), committed_certs.end());
                 for (auto cp :committed_certs) {
-                    for (auto c: cp.commits) {
+                    for (auto c: cp.messages) {
                         try {
                             pbft_db.add_pbft_commit(c);
                         } catch (...) {
@@ -523,8 +512,8 @@ namespace eosio {
                 }
             }
 
-            if (!new_view.prepared.prepares.empty()) {
-                for (auto p: new_view.prepared.prepares) {
+            if (!new_view.prepared.messages.empty()) {
+                for (auto p: new_view.prepared.messages) {
                     try {
                         pbft_db.add_pbft_prepare(p);
                     } catch (...) {
@@ -603,28 +592,27 @@ namespace eosio {
             this->current_view = cv;
         }
 
-        const vector<pbft_prepared_certificate> &psm_machine::get_prepared_certificate() const {
+        const pbft_prepared_certificate &psm_machine::get_prepared_certificate() const {
             return this->cache.prepared_certificate;
         }
 
-        void psm_machine::set_prepared_certificate(const vector<pbft_prepared_certificate> &pcert) {
+        void psm_machine::set_prepared_certificate(const pbft_prepared_certificate &pcert) {
             this->cache.prepared_certificate = pcert;
         }
 
-        const vector<vector<pbft_committed_certificate>> &psm_machine::get_committed_certificate() const {
+        const vector<pbft_committed_certificate> &psm_machine::get_committed_certificate() const {
             return this->cache.committed_certificate;
         }
 
-        void psm_machine::set_committed_certificate(const vector<vector<pbft_committed_certificate>> &ccert) {
+        void psm_machine::set_committed_certificate(const vector<pbft_committed_certificate> &ccert) {
             this->cache.committed_certificate = ccert;
         }
 
-        const vector<pbft_view_changed_certificate> &psm_machine::get_view_changed_certificate() const {
+        const pbft_view_changed_certificate &psm_machine::get_view_changed_certificate() const {
             return this->cache.view_changed_certificate;
         }
 
-        void psm_machine::set_view_changed_certificate(
-                const vector<pbft_view_changed_certificate> &vc_cert) {
+        void psm_machine::set_view_changed_certificate(const pbft_view_changed_certificate &vc_cert) {
             this->cache.view_changed_certificate = vc_cert;
         }
 
