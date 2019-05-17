@@ -110,6 +110,7 @@ namespace eosio { namespace ibc {
       string         peerchain_info;
       name           peerchain_ibc_token_contract;
       name           thischain_ibc_chain_contract;
+      name           thischain_free_account;
       uint32_t       max_original_trxs_per_block;
       uint32_t       max_origtrxs_table_records;
       uint32_t       cache_cashtrxs_table_records;
@@ -192,7 +193,7 @@ FC_REFLECT( eosio::ibc::transfer_action_info, (contract)(from)(quantity) )
 FC_REFLECT( eosio::ibc::global_state_ibc_token, (this_chain)(active) )
 FC_REFLECT( eosio::ibc::global_mutable_ibc_chain, (last_anchor_block_num) )
 FC_REFLECT( eosio::ibc::peer_chain_state_ibc_token, (peerchain_name)(peerchain_info)(peerchain_ibc_token_contract)
-            (thischain_ibc_chain_contract)(max_original_trxs_per_block)(max_origtrxs_table_records)
+            (thischain_ibc_chain_contract)(thischain_free_account)(max_original_trxs_per_block)(max_origtrxs_table_records)
             (cache_cashtrxs_table_records)(active) )
 FC_REFLECT( eosio::ibc::peer_chain_mutable_ibc_token, (peerchain_name)(cash_seq_num)
             (last_confirmed_orig_trx_block_time_slot)(current_block_time_slot)(current_block_trxs)(origtrxs_tb_next_id) )
