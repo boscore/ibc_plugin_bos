@@ -142,10 +142,15 @@ namespace eosio {
                             psp->prepares.emplace_back(p);
                             std::sort(psp->prepares.begin(), psp->prepares.end(), less<>());
                         });
+                    } else {
+                        dlog( "prepare already exists: ${p}", ("p", p));
                     }
                 }
                 curr_itr = by_block_id_index.find(current->id);
-                if (curr_itr == by_block_id_index.end()) return;
+                if (curr_itr == by_block_id_index.end()) {
+                    dlog( "block id ${id} cannot be found", ("id", current->id));
+                    return;
+                }
 
                 auto prepares = (*curr_itr)->prepares;
                 auto as = current->active_schedule.producers;
@@ -164,6 +169,7 @@ namespace eosio {
                         if (e.second >= as.size() * 2 / 3 + 1) {
                             by_block_id_index.modify(curr_itr,
                                                      [&](const pbft_state_ptr &psp) { psp->should_prepared = true; });
+                            dlog( "block id ${id} is now prepared at view ${v}", ("id", current->id)("v", e.first));
                         }
                     }
                 }
@@ -293,11 +299,16 @@ namespace eosio {
                             psp->commits.emplace_back(c);
                             std::sort(psp->commits.begin(), psp->commits.end(), less<>());
                         });
+                    } else {
+                        dlog( "commit already exists: ${c}", ("c", c));
                     }
                 }
 
                 curr_itr = by_block_id_index.find(current->id);
-                if (curr_itr == by_block_id_index.end()) return;
+                if (curr_itr == by_block_id_index.end()) {
+                    dlog( "block id ${id} cannot be found", ("id", current->id));
+                    return;
+                }
 
                 auto commits = (*curr_itr)->commits;
 
@@ -319,6 +330,7 @@ namespace eosio {
                         if (e.second >= current->active_schedule.producers.size() * 2 / 3 + 1) {
                             by_block_id_index.modify(curr_itr,
                                                      [&](const pbft_state_ptr &psp) { psp->should_committed = true; });
+                            dlog( "block id ${id} is now committed at view ${v}", ("id", current->id)("v", e.first));
                         }
                     }
                 }
@@ -417,11 +429,15 @@ namespace eosio {
         void pbft_database::commit_local() {
             const auto &by_commit_and_num_index = pbft_state_index.get<by_commit_and_num>();
             auto itr = by_commit_and_num_index.begin();
-            if (itr == by_commit_and_num_index.end()) return;
+            if (itr == by_commit_and_num_index.end()) {
+                dlog( "no block to be committed local");
+                return;
+            }
 
             pbft_state_ptr psp = *itr;
 
             ctrl.pbft_commit_local(psp->block_id);
+            dlog( "block id ${id} is committed local", ("id", psp->block_id));
         }
 
         bool pbft_database::pending_pbft_lib() {
@@ -892,15 +908,23 @@ namespace eosio {
 
             EOS_ASSERT(nv.chain_id == chain_id(), pbft_exception, "wrong chain.");
 
+            EOS_ASSERT(nv.is_signature_valid(), pbft_exception, "bad new view signature");
+
+            EOS_ASSERT(nv.public_key == get_new_view_primary_key(nv.view), pbft_exception, "new view is not signed with expected key");
+
             EOS_ASSERT(is_valid_prepared_certificate(nv.prepared), pbft_exception,
                     "bad prepared certificate: ${pc}", ("pc", nv.prepared));
 
             EOS_ASSERT(is_valid_stable_checkpoint(nv.stable_checkpoint), pbft_exception,
                        "bad stable checkpoint: ${scp}", ("scp", nv.stable_checkpoint));
 
+            for (auto const &c: nv.committed) {
+                EOS_ASSERT(is_valid_committed_certificate(c), pbft_exception,
+                           "bad committed certificate: ${cc}", ("cc", c));
+            }
+
             EOS_ASSERT(nv.view_changed.is_signature_valid(), pbft_exception, "bad view changed signature");
 
-            EOS_ASSERT(nv.is_signature_valid(), pbft_exception, "bad new view signature");
 
             EOS_ASSERT(nv.view_changed.view == nv.view, pbft_exception, "target view not match");
 
@@ -1401,7 +1425,6 @@ namespace eosio {
             auto lscb_num = ctrl.last_stable_checkpoint_block_num();
 
             auto as = lscb_active_producers();
-            auto my_sp = ctrl.my_signature_providers();
 
             for (auto i = lscb_num; i <= ctrl.head_block_num(); ++i) {
                 for (auto const &bp: as.producers) {

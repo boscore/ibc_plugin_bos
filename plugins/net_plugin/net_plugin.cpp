@@ -3095,7 +3095,7 @@ namespace eosio {
        if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
-       if (!pcc.pbft_db.is_valid_new_view(msg)) return;
+       if (!(msg.public_key == pcc.pbft_db.get_new_view_primary_key(msg.view) && msg.is_signature_valid())) return;
 
        forward_pbft_msg(c, msg);
        fc_ilog( logger, "received new view: ${n}, from ${v}", ("n", msg)("v", msg.public_key));

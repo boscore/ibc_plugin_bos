@@ -621,6 +621,8 @@ namespace eosio {
 
             bool should_recv_pbft_msg(const public_key_type &pub_key);
 
+            public_key_type get_new_view_primary_key(uint32_t target_view);
+
             void send_pbft_checkpoint();
 
             bool is_valid_checkpoint(const pbft_checkpoint &cp);
@@ -665,8 +667,6 @@ namespace eosio {
             bool is_valid_prepared_certificate(const pbft_prepared_certificate &certificate);
 
             bool is_valid_committed_certificate(const pbft_committed_certificate &certificate);
-
-            public_key_type get_new_view_primary_key(uint32_t target_view);
 
             vector<vector<block_info>> fetch_fork_from(vector<block_info> block_infos);
 
