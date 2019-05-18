@@ -35,10 +35,6 @@ namespace fc {
 }
 
 namespace eosio { namespace ibc {
-
-/* #define PLUGIN_TEST */
-#define BATCH_PBFT
-
    static appbase::abstract_plugin& _ibc_plugin = app().register_plugin<ibc_plugin>();
 
    using std::vector;
@@ -59,11 +55,11 @@ namespace eosio { namespace ibc {
 
    // consts
    const static uint32_t MaxSendSectionLength = 30;
-   const static uint32_t DiffOfTrxBeforeLib = 20;
+   const static uint32_t AfterLib = 10;
    const static uint32_t BPScheduleReplaceMinLength = 330;  // important para, 330 > 325, safer
    const static uint32_t BlocksPerSecond = 2;
-   const static uint32_t MaxLocalOrigtrxsCache = 100*1000;
-   const static uint32_t MaxLocalCashtrxsCache = 100*1000;
+   const static uint32_t MaxLocalOrigtrxsCache = 10000;
+   const static uint32_t MaxLocalCashtrxsCache = 10000;
    const static uint32_t MaxLocalOldSectionsCache = 5;
 
 
@@ -745,8 +741,8 @@ namespace eosio { namespace ibc {
             chain_name     = gstate.chain_name;
             chain_id       = gstate.chain_id;
             consensus_algo = gstate.consensus_algo;
-//            lwc_lib_depth  = 325;
-            lwc_lib_depth  = 50;
+            lwc_lib_depth  = 325;
+            /*lwc_lib_depth  = 50; // used for test env */
          }
          if ( lwc_chain_initialized() && lwc_config_valid() ){
             c_state = working;
@@ -990,8 +986,7 @@ namespace eosio { namespace ibc {
 
       memo_info_type info;
 
-      string memo = memo_str;
-      trim( memo );
+      string memo = trim( memo_str );
 
       // --- get receiver ---
       auto pos = memo.find("@");
@@ -1001,12 +996,12 @@ namespace eosio { namespace ibc {
       }
       
       string receiver_str = memo.substr( 0, pos );
-      trim( receiver_str );
+      receiver_str = trim( receiver_str );
       info.receiver = name( receiver_str );
 
       // --- trim ---
       memo = memo.substr( pos + 1 );
-      trim( memo );
+      memo = trim( memo );
 
       // --- get chain name and notes ---
       pos = memo.find(" ");
@@ -1016,7 +1011,7 @@ namespace eosio { namespace ibc {
       } else {
          info.chain = name( memo.substr(0,pos) );
          info.notes = memo.substr( pos + 1 );
-         trim( info.notes );
+         info.notes = trim( info.notes );
       }
 
       if ( info.receiver == name() ){
@@ -1085,7 +1080,7 @@ namespace eosio { namespace ibc {
          return range;
       }
 
-      uint64_t lib_tslot = my_impl->get_lib_tslot();
+      uint64_t lib_tslot = my_impl->get_lib_tslot() - AfterLib;
       chain_apis::read_only::get_table_rows_params par;
       par.json = true;  // must be true
       par.code = account;
@@ -1149,7 +1144,7 @@ namespace eosio { namespace ibc {
          return range;
       }
 
-      uint64_t lib_tslot = my_impl->get_lib_tslot();
+      uint64_t lib_tslot = my_impl->get_lib_tslot() - AfterLib;
       chain_apis::read_only::get_table_rows_params par;
       par.json = true;  // must be true
       par.code = account;
@@ -2267,13 +2262,12 @@ namespace eosio { namespace ibc {
             fc_dlog(logger, "skipping duplicate check, addr == ${pa}, id = ${ni}",("pa",c->peer_addr)("ni",c->last_handshake_recv.node_id));
          }
 
-//#ifndef PLUGIN_TEST
-//         if( msg.chain_id != peerchain_id) {
-//            elog( "Peer chain id not correct. Closing connection");
-//            c->enqueue( go_away_message(go_away_reason::wrong_chain) );
-//            return;
-//         }
-//#endif
+         //if( msg.chain_id != peerchain_id) {
+         //   elog( "Peer chain id not correct. Closing connection");
+         //   c->enqueue( go_away_message(go_away_reason::wrong_chain) );
+         //   return;
+         //}
+
          c->protocol_version = msg.network_version;
          if(c->protocol_version != net_version) {
             if (network_version_match) {
@@ -2692,49 +2686,40 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_block_commits_request_message &msg){
       peer_dlog(c, "received lwc_block_commits_request_message [${num}]",("num",msg.block_num));
 
-      #ifdef BATCH_PBFT
+      #ifdef BOSCORE
       uint32_t lib_block_num = chain_plug->chain().last_irreversible_block_num();
       if ( msg.block_num > lib_block_num ){ return; }
 
-      ilog("---1---");
       const auto& block_id = chain_plug->chain().get_block_id_for_num( msg.block_num );
       const auto bps_ptr = chain_plug->pbft_ctrl().pbft_db.get_pbft_state_by_id( block_id );
-      ilog("---2---");
+
       lwc_block_commits_data_message ret_msg;
 
       if ( bps_ptr ){
-         ilog("---3---");
          // ret_msg.headers
          uint32_t end_block_num = msg.block_num ;
 
          for( auto& commit : bps_ptr->commits ){
             idump((commit));
-            ilog("---3---");
             end_block_num = std::max( end_block_num, commit.block_num );
          }
          for( uint32_t num = msg.block_num; num <= end_block_num; ++num ){
-            ilog("---4-1--");
             auto sbp = chain_plug->chain().fetch_block_by_number( num );
-            ilog("---4--2-");
             if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", num)); return; }
-            ilog("---4-3--");
             ret_msg.headers.push_back( *sbp );
          }
-         ilog("---4---");
          // ret_msg.blockroot_merkle
          ret_msg.blockroot_merkle = get_blockroot_merkle_by_num( msg.block_num );
          if ( ret_msg.blockroot_merkle._node_count == 0 ){
             elog("get blockroot_merkle of block ${n} failed", ("n", msg.block_num));
             return;
          }
-         ilog("---5---");
          ret_msg.proof_data = fc::raw::pack( bps_ptr->commits );
          ret_msg.proof_type = N(commit);
 
          c->enqueue( ret_msg );
          return;
       }
-      ilog("---6---");
       /* bps_ptr == nullptr */
       vector<char>   content;
       uint32_t       check_num;
@@ -2758,7 +2743,6 @@ namespace eosio { namespace ibc {
          elog("didn't get pbft_state of block ${n}", ("n",msg.block_num));
          return;
       }
-      ilog("---7---");
 
       auto scp = fc::raw::unpack<pbft_stable_checkpoint>( content );
 
@@ -2773,26 +2757,23 @@ namespace eosio { namespace ibc {
          if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", num)); return; }
          ret_msg.headers.push_back( *sbp );
       }
-      ilog("---8---");
       // ret_msg.blockroot_merkle
       ret_msg.blockroot_merkle = get_blockroot_merkle_by_num( check_num );
       if ( ret_msg.blockroot_merkle._node_count == 0 ){
          elog("get blockroot_merkle of block ${n} failed", ("n", check_num));
          return;
       }
-      ilog("---9---");
       ret_msg.proof_data = fc::raw::pack( scp.checkpoints );
       ret_msg.proof_type = N(checkpoint);
 
       c->enqueue( ret_msg );
-
       #endif
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_block_commits_data_message &msg){
       peer_dlog(c, "received lwc_block_commits_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
-      #ifdef BATCH_PBFT
 
+      #ifdef BOSCORE
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !p.valid() ){
          elog("can not get section info from ibc.chain contract");
@@ -2803,7 +2784,6 @@ namespace eosio { namespace ibc {
       if ( msg.headers.front().block_num() > ls.last ){
          chain_contract->pushblkcmits( msg );
       }
-
       #endif
    }
 
