@@ -938,7 +938,6 @@ namespace eosio {
 
    void connection::blk_send_branch() {
       controller& cc = my_impl->chain_plug->chain();
-      pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
       uint32_t head_num = cc.fork_db_head_block_num();
       notice_message note;
       note.known_blocks.mode = normal;
@@ -2798,7 +2797,9 @@ namespace eosio {
        controller &cc = my_impl->chain_plug->chain();
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
 
-       for (auto i = msg.end_block; i >= msg.start_block && i>0; --i) {
+       auto end_block = std::min(msg.end_block, cc.last_stable_checkpoint_block_num());
+
+       for (auto i = end_block; i >= msg.start_block && i>0; --i) {
            auto bid = cc.get_block_id_for_num(i);
            auto scp = pcc.pbft_db.get_stable_checkpoint_by_id(bid);
            if (scp != pbft_stable_checkpoint{}) {
@@ -3104,7 +3105,7 @@ namespace eosio {
     }
 
     void net_plugin_impl::handle_message( connection_ptr c, const pbft_checkpoint &msg) {
-
+       fc_ilog( logger, "received checkpoint at ${n}, from ${v}", ("n", msg.block_num)("v", msg.public_key));
        if (!is_pbft_msg_valid(msg)) return;
 
        auto added = maybe_add_pbft_cache(msg.uuid);

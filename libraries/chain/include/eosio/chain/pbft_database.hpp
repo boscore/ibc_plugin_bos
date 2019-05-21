@@ -689,6 +689,8 @@ namespace eosio {
 
             void prune(const pbft_state_ptr &h);
 
+            void prune_checkpoints(const pbft_checkpoint_state_ptr &h);
+
         };
 
     }

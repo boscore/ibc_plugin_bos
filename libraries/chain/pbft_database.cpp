@@ -1345,7 +1345,14 @@ namespace eosio {
                     prune(*pitr);
                 }
             }
-
+//            auto &bni = checkpoint_index.get<by_num>();
+//            auto oldest = bni.begin();
+//            if (oldest != bni.end() && lscb_num - (*oldest)->block_num > 10000) {
+//                auto it = bni.lower_bound(lscb_num - 10000);
+//                if (it != bni.end() && (*it)->is_stable) {
+//                    prune_checkpoints(*it);
+//                }
+//            }
         }
 
         void pbft_database::send_pbft_checkpoint() {
@@ -1404,12 +1411,11 @@ namespace eosio {
         bool pbft_database::should_send_pbft_msg() {
 
             //use last_stable_checkpoint producer schedule
-            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
 
             auto as = lscb_active_producers();
             auto my_sp = ctrl.my_signature_providers();
 
-            for (auto i = lscb_num; i <= ctrl.head_block_num(); ++i) {
+            for (auto i: prepare_watermarks) {
                 for (auto const &bp: as.producers) {
                     for (auto const &my: my_sp) {
                         if (bp.block_signing_key == my.first) return true;
@@ -1422,11 +1428,10 @@ namespace eosio {
         }
 
         bool pbft_database::should_recv_pbft_msg(const public_key_type &pub_key) {
-            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
 
             auto as = lscb_active_producers();
 
-            for (auto i = lscb_num; i <= ctrl.head_block_num(); ++i) {
+            for (auto i: prepare_watermarks) {
                 for (auto const &bp: as.producers) {
                     if (bp.block_signing_key == pub_key) return true;
                 }
@@ -1539,6 +1544,22 @@ namespace eosio {
             auto itr = pbft_state_index.find(h->block_id);
             if (itr != pbft_state_index.end()) {
                 pbft_state_index.erase(itr);
+            }
+        }
+
+        void pbft_database::prune_checkpoints(const pbft_checkpoint_state_ptr &h) {
+            auto num = h->block_num;
+
+            auto &by_bn = checkpoint_index.get<by_num>();
+            auto bni = by_bn.begin();
+            while (bni != by_bn.end() && (*bni)->block_num < num) {
+                prune_checkpoints(*bni);
+                bni = by_bn.begin();
+            }
+
+            auto itr = checkpoint_index.find(h->block_id);
+            if (itr != checkpoint_index.end()) {
+                checkpoint_index.erase(itr);
             }
         }
 
