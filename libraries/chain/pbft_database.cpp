@@ -35,15 +35,6 @@ namespace eosio {
                     set(std::make_shared<pbft_state>(move(s)));
                 }
 
-                unsigned_int watermarks_size;
-                fc::raw::unpack(ds, watermarks_size);
-                for (uint32_t i = 0, n = watermarks_size.value; i < n; ++i) {
-                    block_num_type h;
-                    fc::raw::unpack(ds, h);
-                    prepare_watermarks.emplace_back(h);
-                }
-                sort(prepare_watermarks.begin(), prepare_watermarks.end());
-
             } else {
                 pbft_state_index = pbft_state_multi_index_type{};
             }
@@ -72,7 +63,6 @@ namespace eosio {
 
         void pbft_database::close() {
 
-
             fc::path checkpoints_db = checkpoints_dir / config::checkpoints_filename;
             std::ofstream c_out(checkpoints_db.generic_string().c_str(),
                                 std::ios::out | std::ios::binary | std::ofstream::trunc);
@@ -94,23 +84,13 @@ namespace eosio {
                 fc::raw::pack(out, *s);
             }
 
-
-            uint32_t watermarks_size = prepare_watermarks.size();
-            fc::raw::pack(out, unsigned_int{watermarks_size});
-
-            for (const auto &n: prepare_watermarks) {
-                fc::raw::pack(out, n);
-            }
-
             pbft_state_index.clear();
             checkpoint_index.clear();
-            prepare_watermarks.clear();
         }
 
         pbft_database::~pbft_database() {
             close();
         }
-
 
         void pbft_database::add_pbft_prepare(pbft_prepare &p) {
 
@@ -701,6 +681,7 @@ namespace eosio {
                 ccb.emplace_back(highest_committed_block_num);
             }
 
+            update_fork_schedules();
             for (auto i = 0; i < prepare_watermarks.size() && prepare_watermarks[i] < highest_committed_block_num; ++i) {
                 //adding committed cert on every water mark.
                 ccb.emplace_back(prepare_watermarks[i]);
@@ -1157,7 +1138,6 @@ namespace eosio {
 
                     if (lscb_num == 0) {
                         const auto& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
-//                        if (ucb == 0) return lscb_info;
                         if (ucb == 0) {
                             current_schedule = ctrl.initial_schedule();
                             new_schedule = ctrl.initial_schedule();
@@ -1207,8 +1187,8 @@ namespace eosio {
                 || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end(); // checkpoint on bp schedule change;
             };
 
-            for (auto i = psp->block_num;
-                 i > std::max(ctrl.last_stable_checkpoint_block_num(), static_cast<uint32_t>(1)); --i) {
+            update_fork_schedules();
+            for (auto i = psp->block_num; i > ctrl.last_stable_checkpoint_block_num() && i > 1; --i) {
                 if (checkpoint(i)) {
                     my_latest_checkpoint = max(i, my_latest_checkpoint);
                     auto &by_block = checkpoint_index.get<by_block_id>();
@@ -1410,33 +1390,21 @@ namespace eosio {
 
         bool pbft_database::should_send_pbft_msg() {
 
-            //use last_stable_checkpoint producer schedule
-
-            auto as = lscb_active_producers();
             auto my_sp = ctrl.my_signature_providers();
-
-            for (auto i: prepare_watermarks) {
-                for (auto const &bp: as.producers) {
-                    for (auto const &my: my_sp) {
-                        if (bp.block_signing_key == my.first) return true;
-                    }
+            update_fork_schedules();
+            for (auto const &bp: fork_schedules) {
+                for (auto const &my: my_sp) {
+                    if (bp.first == my.first) return true;
                 }
-                auto bs = ctrl.fetch_block_state_by_number(i);
-                if (bs && bs->active_schedule != as) as = bs->active_schedule;
             }
             return false;
         }
 
         bool pbft_database::should_recv_pbft_msg(const public_key_type &pub_key) {
 
-            auto as = lscb_active_producers();
-
-            for (auto i: prepare_watermarks) {
-                for (auto const &bp: as.producers) {
-                    if (bp.block_signing_key == pub_key) return true;
-                }
-                auto bs = ctrl.fetch_block_state_by_number(i);
-                if (bs && bs->active_schedule != as) as = bs->active_schedule;
+            update_fork_schedules();
+            for (auto const &bp: fork_schedules) {
+                if (bp.first == pub_key) return true;
             }
             return false;
         }
@@ -1470,40 +1438,66 @@ namespace eosio {
         }
 
         block_num_type pbft_database::get_current_pbft_watermark() {
-            auto unique_merge = [&](vector<block_num_type> &v1, vector<block_num_type> &v2)
-            {
-                std::sort(v1.begin(), v1.end());
-                v1.reserve(v1.size() + v2.size());
-                v1.insert(v1.end(), v2.begin(), v2.end());
-
-                sort( v1.begin(), v1.end() );
-                v1.erase( unique( v1.begin(), v1.end() ), v1.end() );
-            };
-
+            update_fork_schedules();
             auto lib = ctrl.last_irreversible_block_num();
-            auto lscb = ctrl.last_stable_checkpoint_block_num();
-
-            auto proposed_schedule_blocks = ctrl.proposed_schedule_block_nums();
-            auto promoted_schedule_blocks = ctrl.promoted_schedule_block_nums();
-            unique_merge(prepare_watermarks, proposed_schedule_blocks);
-            unique_merge(prepare_watermarks, promoted_schedule_blocks);
-
-
-            for ( auto itr = prepare_watermarks.begin(); itr != prepare_watermarks.end();) {
-                if ((*itr) <= lscb) {
-                    itr = prepare_watermarks.erase(itr);
-                } else {
-                    ++itr;
-                }
-            }
-            std::sort(prepare_watermarks.begin(), prepare_watermarks.end());
-
 
             if (prepare_watermarks.empty()) return 0;
 
             auto cw = *std::upper_bound(prepare_watermarks.begin(), prepare_watermarks.end(), lib);
 
             if (cw > lib) return cw; else return 0;
+        }
+
+        void pbft_database::update_fork_schedules() {
+
+            auto vector_minus = [&](vector<block_num_type> &v1, vector<block_num_type> &v2)
+            {
+                vector<block_num_type> diff;
+                std::set_difference(v1.begin(), v1.end(), v2.begin(), v2.end(),
+                                    std::inserter(diff, diff.begin()));
+                return diff;
+            };
+
+            auto watermarks = ctrl.get_watermarks();
+
+            if (watermarks != prepare_watermarks) {
+                auto prev = prepare_watermarks;
+                prepare_watermarks = watermarks;
+                std::sort(prepare_watermarks.begin(), prepare_watermarks.end());
+                auto added = vector_minus(prepare_watermarks, prev);
+                auto removed = vector_minus(prev, prepare_watermarks);
+                for (auto i: added) {
+                    if (auto bs = ctrl.fetch_block_state_by_number(i)) {
+                        auto as = bs->active_schedule.producers;
+                        for (auto &bp: as) {
+                            auto key = bp.block_signing_key;
+                            if (fork_schedules.find(key) == fork_schedules.end()) {
+                                fork_schedules[key] = i;
+                            } else if ( i > fork_schedules[key]) {
+                                fork_schedules[key] = i;
+                            }
+                        }
+                    }
+                }
+                if (!removed.empty()) {
+                    auto pruned_num = *max_element(removed.begin(), removed.end());
+                    for (auto itr = fork_schedules.begin(); itr != fork_schedules.end();) {
+                        if ((*itr).second <= pruned_num) {
+                            itr = fork_schedules.erase(itr);
+                        } else {
+                            ++itr;
+                        }
+                    }
+                }
+            }
+
+            if (fork_schedules.empty()) {
+                auto lscb_bps = lscb_active_producers().producers;
+                auto lscb_num = ctrl.last_stable_checkpoint_block_num();
+                for (auto &bp: lscb_bps) {
+                    fork_schedules[bp.block_signing_key] = lscb_num;
+                }
+            }
         }
 
         pbft_state_ptr pbft_database::get_pbft_state_by_id(const block_id_type& id) const {
