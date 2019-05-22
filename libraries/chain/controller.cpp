@@ -127,8 +127,6 @@ struct controller_impl {
    bool                           pbft_upgrading = false;
    optional<block_id_type>        pending_pbft_lib;
    optional<block_id_type>        pending_pbft_checkpoint;
-   vector<block_num_type>         proposed_schedule_blocks;
-   vector<block_num_type>         promoted_schedule_blocks;
    block_state_ptr                pbft_prepared;
    block_state_ptr                my_prepare;
    block_state_ptr                head;
@@ -1390,14 +1388,8 @@ struct controller_impl {
          auto lscb_num = pending->_pending_block_state->pbft_stable_checkpoint_blocknum;
 
          if (pbft_enabled && gpo.proposed_schedule_block_num) {
-             proposed_schedule_blocks.emplace_back(*gpo.proposed_schedule_block_num);
-             for ( auto itr = proposed_schedule_blocks.begin(); itr != proposed_schedule_blocks.end();) {
-                 if ((*itr) < lscb_num) {
-                     itr = proposed_schedule_blocks.erase(itr);
-                 } else {
-                     ++itr;
-                 }
-             }
+             auto bs = fork_db.get_block_in_current_chain_by_num(*gpo.proposed_schedule_block_num);
+             if (bs) fork_db.mark_as_pbft_watermark(bs);
          }
 
          bool should_promote_pending_schedule = false;
@@ -1429,14 +1421,7 @@ struct controller_impl {
                  pending->_pending_block_state->set_new_producers(gpo.proposed_schedule);
 
                  if (pbft_enabled) {
-                     promoted_schedule_blocks.emplace_back(pending->_pending_block_state->block_num);
-                     for ( auto itr = promoted_schedule_blocks.begin(); itr != promoted_schedule_blocks.end();) {
-                         if ((*itr) < lscb_num) {
-                             itr = promoted_schedule_blocks.erase(itr);
-                         } else {
-                             ++itr;
-                         }
-                     }
+                     pending->_pending_block_state->pbft_watermark = true;
                  }
              }
              db.modify( gpo, [&]( auto& gp ) {
@@ -2343,13 +2328,8 @@ block_id_type controller::last_stable_checkpoint_block_id() const {
     return block_id_type{};
 }
 
-
-vector<uint32_t> controller::proposed_schedule_block_nums() const {
-    return my->proposed_schedule_blocks;
-}
-
-vector<uint32_t> controller::promoted_schedule_block_nums() const {
-    return my->promoted_schedule_blocks;
+vector<uint32_t> controller::get_watermarks() const {
+    return my->fork_db.get_watermarks_in_forkdb();
 }
 
 bool controller::is_replaying() const {

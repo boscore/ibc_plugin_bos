@@ -82,6 +82,10 @@ namespace eosio { namespace chain {
 
          void remove_pbft_prepared_fork();
 
+         vector<block_num_type> get_watermarks_in_forkdb();
+
+         void mark_as_pbft_watermark( const block_state_ptr& h);
+
    private:
          unique_ptr<fork_database_impl> my;
    };

@@ -17,6 +17,7 @@ namespace eosio { namespace chain {
    struct by_block_id;
    struct by_block_num;
    struct by_lib_block_num;
+   struct by_watermark;
    struct by_prev;
    typedef multi_index_container<
       block_state_ptr,
@@ -32,13 +33,20 @@ namespace eosio { namespace chain {
          >,
          ordered_non_unique< tag<by_lib_block_num>,
             composite_key< block_state,
-                member<block_header_state,uint32_t,&block_header_state::dpos_irreversible_blocknum>,
-                member<block_header_state,uint32_t,&block_header_state::bft_irreversible_blocknum>,
-                member<block_state,bool,&block_state::pbft_prepared>,
-                member<block_state,bool,&block_state::pbft_my_prepare>,
-                member<block_header_state,uint32_t,&block_header_state::block_num>
+               member<block_header_state,uint32_t,&block_header_state::dpos_irreversible_blocknum>,
+               member<block_header_state,uint32_t,&block_header_state::bft_irreversible_blocknum>,
+               member<block_state,bool,&block_state::pbft_prepared>,
+               member<block_state,bool,&block_state::pbft_my_prepare>,
+               member<block_header_state,uint32_t,&block_header_state::block_num>
             >,
             composite_key_compare< std::greater<uint32_t>, std::greater<uint32_t>, std::greater<bool>, std::greater<bool>, std::greater<uint32_t> >
+         >,
+         ordered_non_unique< tag<by_watermark>,
+            composite_key< block_state,
+               member<block_state,bool,&block_state::pbft_watermark>,
+               member<block_header_state,uint32_t,&block_header_state::block_num>
+            >,
+            composite_key_compare< std::greater<>, std::greater<uint32_t> >
          >
       >
    > fork_multi_index_type;
@@ -202,7 +210,6 @@ namespace eosio { namespace chain {
 
       auto prior = my->index.find( n->block->previous );
 
-      //TODO: to be optimised.
       if (prior !=  my->index.end()) {
           if ((*prior)->pbft_prepared) mark_pbft_prepared_fork(*prior);
           if ((*prior)->pbft_my_prepare) mark_pbft_my_prepare_fork(*prior);
@@ -601,5 +608,23 @@ namespace eosio { namespace chain {
        }
    }
 
+   vector<block_num_type> fork_database::get_watermarks_in_forkdb() {
+       vector<block_num_type> watermarks;
+       auto& pidx = my->index.get<by_watermark>();
+       auto pitr  = pidx.begin();
+       while (pitr != pidx.end() && (*pitr)->pbft_watermark) {
+           watermarks.emplace_back((*pitr)->block_num);
+       }
+       return watermarks;
+   }
 
-    } } /// eosio::chain
+   void fork_database::mark_as_pbft_watermark( const block_state_ptr& h) {
+       auto& by_id_idx = my->index.get<by_block_id>();
+       auto itr = by_id_idx.find( h->id );
+       EOS_ASSERT( itr != by_id_idx.end(), fork_db_block_not_found, "could not find block in fork database" );
+       by_id_idx.modify( itr, [&]( auto& bsp ) { bsp->pbft_watermark = true; });
+   }
+
+
+
+   } } /// eosio::chain

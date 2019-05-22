@@ -654,6 +654,8 @@ namespace eosio {
 
             block_num_type get_current_pbft_watermark();
 
+            void update_fork_schedules();
+
         private:
             controller                                  &ctrl;
             pbft_state_multi_index_type                 pbft_state_index;
@@ -663,6 +665,7 @@ namespace eosio {
             fc::path                                    checkpoints_dir;
             boost::uuids::random_generator              uuid_generator;
             vector<block_num_type>                      prepare_watermarks;
+            flat_map<public_key_type, uint32_t>         fork_schedules;
 
             bool is_valid_prepared_certificate(const pbft_prepared_certificate &certificate);
 
