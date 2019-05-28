@@ -1187,9 +1187,8 @@ namespace eosio {
                 || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end(); // checkpoint on bp schedule change;
             };
 
-            for (auto i = psp->block_num;
-                 i > std::max(ctrl.last_stable_checkpoint_block_num(), static_cast<uint32_t>(1)); --i) {
-                update_fork_schedules();
+            update_fork_schedules();
+            for (auto i = psp->block_num; i > ctrl.last_stable_checkpoint_block_num() && i > 1; --i) {
                 if (checkpoint(i)) {
                     my_latest_checkpoint = max(i, my_latest_checkpoint);
                     auto &by_block = checkpoint_index.get<by_block_id>();
@@ -1451,7 +1450,7 @@ namespace eosio {
 
         void pbft_database::update_fork_schedules() {
 
-            auto vector_diff = [&](vector<block_num_type> &v1, vector<block_num_type> &v2)
+            auto vector_minus = [&](vector<block_num_type> &v1, vector<block_num_type> &v2)
             {
                 vector<block_num_type> diff;
                 std::set_difference(v1.begin(), v1.end(), v2.begin(), v2.end(),
@@ -1465,8 +1464,8 @@ namespace eosio {
                 auto prev = prepare_watermarks;
                 prepare_watermarks = watermarks;
                 std::sort(prepare_watermarks.begin(), prepare_watermarks.end());
-                auto added = vector_diff(prepare_watermarks, prev);
-                auto removed = vector_diff(prev, prepare_watermarks);
+                auto added = vector_minus(prepare_watermarks, prev);
+                auto removed = vector_minus(prev, prepare_watermarks);
                 for (auto i: added) {
                     if (auto bs = ctrl.fetch_block_state_by_number(i)) {
                         auto as = bs->active_schedule.producers;
@@ -1489,6 +1488,14 @@ namespace eosio {
                             ++itr;
                         }
                     }
+                }
+            }
+
+            if (fork_schedules.empty()) {
+                auto lscb_bps = lscb_active_producers().producers;
+                auto lscb_num = ctrl.last_stable_checkpoint_block_num();
+                for (auto &bp: lscb_bps) {
+                    fork_schedules[bp.block_signing_key] = lscb_num;
                 }
             }
         }

@@ -46,7 +46,7 @@ namespace eosio { namespace chain {
                member<block_state,bool,&block_state::pbft_watermark>,
                member<block_header_state,uint32_t,&block_header_state::block_num>
             >,
-            composite_key_compare< std::greater<>, std::greater<uint32_t> >
+            composite_key_compare< std::greater<>, std::less<> >
          >
       >
    > fork_multi_index_type;
@@ -614,6 +614,7 @@ namespace eosio { namespace chain {
        auto pitr  = pidx.begin();
        while (pitr != pidx.end() && (*pitr)->pbft_watermark) {
            watermarks.emplace_back((*pitr)->block_num);
+           ++pitr;
        }
        return watermarks;
    }

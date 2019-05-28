@@ -942,6 +942,10 @@ struct controller_impl {
             });
          }
 
+         if (pbft_enabled && pending->_pending_block_state->pbft_watermark) {
+            if (auto bs = fork_db.get_block(pending->_pending_block_state->id)) fork_db.mark_as_pbft_watermark(bs);
+         }
+
          emit( self.accepted_block, pending->_pending_block_state );
       } catch (...) {
          // dont bother resetting pending, instead abort the block
@@ -1385,7 +1389,6 @@ struct controller_impl {
          const auto& gpo = db.get<global_property_object>();
 
          auto lib_num = std::max(pending->_pending_block_state->dpos_irreversible_blocknum, pending->_pending_block_state->bft_irreversible_blocknum);
-         auto lscb_num = pending->_pending_block_state->pbft_stable_checkpoint_blocknum;
 
          if (pbft_enabled && gpo.proposed_schedule_block_num) {
              auto bs = fork_db.get_block_in_current_chain_by_num(*gpo.proposed_schedule_block_num);
