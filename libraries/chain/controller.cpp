@@ -2533,6 +2533,12 @@ void controller::set_pbft_my_prepare(const block_id_type& id) {
    }
 }
 
+block_id_type controller::get_pbft_prepared() const {
+    if (my->pbft_prepared) return my->pbft_prepared->id;
+    return block_id_type{};
+}
+
+
 block_id_type controller::get_pbft_my_prepare() const {
    if (my->my_prepare) return my->my_prepare->id;
    return block_id_type{};

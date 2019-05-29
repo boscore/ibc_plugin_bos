@@ -290,6 +290,7 @@ namespace eosio { namespace chain {
 
          void set_pbft_prepared(const block_id_type& id);
          void set_pbft_my_prepare(const block_id_type& id);
+         block_id_type get_pbft_prepared()const;
          block_id_type get_pbft_my_prepare()const;
          void reset_pbft_my_prepare();
          void reset_pbft_prepared();

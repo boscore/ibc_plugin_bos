@@ -29,6 +29,10 @@ namespace eosio {
                 current = s;
             }
 
+            psm_state* get_current() {
+                return this->current;
+            }
+
             void on_prepare(pbft_prepare &e);
             void send_prepare();
 
@@ -130,6 +134,8 @@ namespace eosio {
 
             virtual void manually_set_view(psm_machine *m, const uint32_t &view) = 0;
 
+            virtual const char* get_name() = 0;
+
         };
 
         class psm_prepared_state final: public psm_state {
@@ -156,6 +162,7 @@ namespace eosio {
 
             bool pending_commit_local;
 
+            const char* get_name() override { return "prepared"; }
         };
 
         class psm_committed_state final: public psm_state {
@@ -179,7 +186,7 @@ namespace eosio {
 
             void manually_set_view(psm_machine *m, const uint32_t &view) override;
 
-            bool pending_commit_local;
+            const char* get_name() override { return "committed"; }
         };
 
         class psm_view_change_state final: public psm_state {
@@ -199,6 +206,8 @@ namespace eosio {
             void on_new_view(psm_machine *m, pbft_new_view &e, pbft_database &pbft_db) override;
 
             void manually_set_view(psm_machine *m, const uint32_t &view) override;
+
+            const char* get_name() override { return "view change"; }
         };
 
         struct pbft_config {

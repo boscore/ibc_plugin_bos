@@ -979,12 +979,6 @@ producer_plugin::snapshot_information producer_plugin::create_snapshot() const {
    return {head_id, snapshot_path};
 }
 
-void producer_plugin::set_pbft_current_view(const uint32_t view) {
-    //this is used to recover from a disaster, do not set this unless you have to do so.
-    pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
-    pbft_ctrl.state_machine.manually_set_current_view(view);
-}
-
 optional<fc::time_point> producer_plugin_impl::calculate_next_block_time(const account_name& producer_name, const block_timestamp_type& current_block_time) const {
    chain::controller& chain = chain_plug->chain();
    const auto& hbs = chain.head_block_state();

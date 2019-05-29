@@ -24,7 +24,7 @@ namespace eosio {
                 fc::datastream<const char *> ds(content.data(), content.size());
 
                 // keep these unused variables.
-                uint32_t current_view;
+                pbft_view_type current_view;
                 fc::raw::unpack(ds, current_view);
 
                 unsigned_int size;
@@ -134,7 +134,7 @@ namespace eosio {
 
                 auto prepares = (*curr_itr)->prepares;
                 auto as = current->active_schedule.producers;
-                flat_map<uint32_t, uint32_t> prepare_count;
+                flat_map<pbft_view_type, uint32_t> prepare_count;
                 for (const auto &pre: prepares) {
                     if (prepare_count.find(pre.view) == prepare_count.end()) prepare_count[pre.view] = 0;
                 }
@@ -158,7 +158,7 @@ namespace eosio {
         }
 
 
-        vector<pbft_prepare> pbft_database::send_and_add_pbft_prepare(const vector<pbft_prepare> &pv, uint32_t current_view) {
+        vector<pbft_prepare> pbft_database::send_and_add_pbft_prepare(const vector<pbft_prepare> &pv, pbft_view_type current_view) {
 
             auto head_block_num = ctrl.head_block_num();
             if (head_block_num <= 1) return vector<pbft_prepare>{};
@@ -293,7 +293,7 @@ namespace eosio {
                 auto commits = (*curr_itr)->commits;
 
                 auto as = current->active_schedule;
-                flat_map<uint32_t, uint32_t> commit_count;
+                flat_map<pbft_view_type, uint32_t> commit_count;
                 for (const auto &com: commits) {
                     if (commit_count.find(com.view) == commit_count.end()) commit_count[com.view] = 0;
                 }
@@ -318,7 +318,7 @@ namespace eosio {
             }
         }
 
-        vector<pbft_commit> pbft_database::send_and_add_pbft_commit(const vector<pbft_commit> &cv, uint32_t current_view) {
+        vector<pbft_commit> pbft_database::send_and_add_pbft_commit(const vector<pbft_commit> &cv, pbft_view_type current_view) {
             if (!cv.empty()) {
                 for (auto c : cv) {
                     //change uuid, sign again, update cache, then emit
@@ -368,8 +368,8 @@ namespace eosio {
             return (psp->should_committed && (psp->block_num > ctrl.last_irreversible_block_num()));
         }
 
-        uint32_t pbft_database::get_committed_view() {
-            uint32_t new_view = 0;
+        pbft_view_type pbft_database::get_committed_view() {
+            pbft_view_type new_view = 0;
             if (!should_committed()) return new_view;
 
             const auto &by_commit_and_num_index = pbft_state_index.get<by_commit_and_num>();
@@ -382,7 +382,7 @@ namespace eosio {
 
             auto commits = (*itr)->commits;
 
-            flat_map<uint32_t, uint32_t> commit_count;
+            flat_map<pbft_view_type, uint32_t> commit_count;
             for (const auto &com: commits) {
                 if (commit_count.find(com.view) == commit_count.end()) {
                     commit_count[com.view] = 1;
@@ -464,8 +464,8 @@ namespace eosio {
             }
         }
 
-        uint32_t pbft_database::should_view_change() {
-            uint32_t nv = 0;
+        pbft_view_type pbft_database::should_view_change() {
+            pbft_view_type nv = 0;
             auto &by_view_index = view_state_index.get<by_view>();
             auto itr = by_view_index.begin();
             if (itr == by_view_index.end()) return nv;
@@ -494,8 +494,8 @@ namespace eosio {
                 const vector<pbft_view_change> &vcv,
                 const vector<pbft_prepared_certificate> &ppc,
                 const vector<vector<pbft_committed_certificate>> &pcc,
-                uint32_t current_view,
-                uint32_t new_view) {
+                pbft_view_type current_view,
+                pbft_view_type new_view) {
             if (!vcv.empty()) {
                 for (auto vc : vcv) {
                     //change uuid, sign again, update cache, then emit
@@ -538,21 +538,21 @@ namespace eosio {
             }
         }
 
-        bool pbft_database::should_new_view(const uint32_t target_view) {
+        bool pbft_database::should_new_view(const pbft_view_type target_view) {
             auto &by_view_index = view_state_index.get<by_view>();
             auto itr = by_view_index.find(target_view);
             if (itr == by_view_index.end()) return false;
             return (*itr)->should_view_changed;
         }
 
-        uint32_t pbft_database::get_proposed_new_view_num() {
+        pbft_view_type pbft_database::get_proposed_new_view_num() {
             auto &by_count_and_view_index = view_state_index.get<by_count_and_view>();
             auto itr = by_count_and_view_index.begin();
             if (itr == by_count_and_view_index.end() || !(*itr)->should_view_changed) return 0;
             return (*itr)->view;
         }
 
-        bool pbft_database::is_new_primary(const uint32_t target_view) {
+        bool pbft_database::is_new_primary(const pbft_view_type target_view) {
 
             auto primary_key = get_new_view_primary_key(target_view);
             if (primary_key == public_key_type{}) return false;
@@ -562,14 +562,13 @@ namespace eosio {
         }
 
         void pbft_database::prune_pbft_index() {
-//            pbft_state_index.clear();
             view_state_index.clear();
             ctrl.reset_pbft_my_prepare();
         }
 
         pbft_new_view pbft_database::send_pbft_new_view(
                 const vector<pbft_view_changed_certificate> &vcc,
-                uint32_t current_view) {
+                pbft_view_type current_view) {
 
             auto primary_key = get_new_view_primary_key(current_view);
             if (!is_new_primary(current_view)) return pbft_new_view{};
@@ -631,8 +630,8 @@ namespace eosio {
                     auto prepares = psp->prepares;
                     auto valid_prepares = vector<pbft_prepare>{};
 
-                    flat_map<uint32_t, uint32_t> prepare_count;
-                    flat_map<uint32_t, vector<pbft_prepare>> prepare_msg;
+                    flat_map<pbft_view_type, uint32_t> prepare_count;
+                    flat_map<pbft_view_type, vector<pbft_prepare>> prepare_msg;
 
                     for (const auto &pre: prepares) {
                         if (prepare_count.find(pre.view) == prepare_count.end()) prepare_count[pre.view] = 0;
@@ -703,8 +702,8 @@ namespace eosio {
                 auto commits = (*it)->commits;
                 auto valid_commits = vector<pbft_commit>{};
 
-                flat_map<uint32_t, uint32_t> commit_count;
-                flat_map<uint32_t, vector<pbft_commit>> commit_msg;
+                flat_map<pbft_view_type, uint32_t> commit_count;
+                flat_map<pbft_view_type, vector<pbft_commit>> commit_msg;
 
                 for (const auto &com: commits) {
                     if (commit_count.find(com.view) == commit_count.end()) commit_count[com.view] = 0;
@@ -736,7 +735,7 @@ namespace eosio {
             return pcc;
         }
 
-        vector<pbft_view_changed_certificate> pbft_database::generate_view_changed_certificate(uint32_t target_view) {
+        vector<pbft_view_changed_certificate> pbft_database::generate_view_changed_certificate(pbft_view_type target_view) {
             auto vcc = vector<pbft_view_changed_certificate>{};
 
             auto &by_view_index = view_state_index.get<by_view>();
@@ -777,7 +776,7 @@ namespace eosio {
             auto bp_threshold = producer_schedule.producers.size() * 2 / 3 + 1;
 
             auto prepares = certificate.prepares;
-            flat_map<uint32_t, uint32_t> prepare_count;
+            flat_map<pbft_view_type, uint32_t> prepare_count;
 
             for (const auto &pre: prepares) {
                 if (prepare_count.find(pre.view) == prepare_count.end()) prepare_count[pre.view] = 0;
@@ -837,7 +836,7 @@ namespace eosio {
             auto bp_threshold = producer_schedule.producers.size() * 2 / 3 + 1;
 
             auto commits = certificate.commits;
-            flat_map<uint32_t, uint32_t> commit_count;
+            flat_map<pbft_view_type, uint32_t> commit_count;
 
             for (const auto &pre: commits) {
                 if (commit_count.find(pre.view) == commit_count.end()) commit_count[pre.view] = 0;
@@ -1254,8 +1253,6 @@ namespace eosio {
 
             if (!is_valid_checkpoint(cp)) return;
 
-            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
-
             auto cp_block_state = ctrl.fetch_block_state_by_id(cp.block_id);
             if (!cp_block_state) return;
             auto active_bps = cp_block_state->active_schedule.producers;
@@ -1312,8 +1309,18 @@ namespace eosio {
                     }
                 }
             }
+        }
 
+        void pbft_database::send_pbft_checkpoint() {
+            auto cps_to_send = generate_and_add_pbft_checkpoint();
+            for (auto const &cp: cps_to_send) {
+                emit(pbft_outgoing_checkpoint, cp);
+            }
+        }
+
+        void pbft_database::checkpoint_local() {
             auto lscb_info = cal_pending_stable_checkpoint();
+            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
             auto pending_num = lscb_info.block_num;
             auto pending_id = lscb_info.block_id;
             if (pending_num > lscb_num) {
@@ -1325,21 +1332,14 @@ namespace eosio {
                     prune(*pitr);
                 }
             }
-//            auto &bni = checkpoint_index.get<by_num>();
-//            auto oldest = bni.begin();
-//            if (oldest != bni.end() && lscb_num - (*oldest)->block_num > 10000) {
-//                auto it = bni.lower_bound(lscb_num - 10000);
-//                if (it != bni.end() && (*it)->is_stable) {
-//                    prune_checkpoints(*it);
-//                }
-//            }
-        }
-
-        void pbft_database::send_pbft_checkpoint() {
-            auto cps_to_send = generate_and_add_pbft_checkpoint();
-            for (auto const &cp: cps_to_send) {
-                emit(pbft_outgoing_checkpoint, cp);
-            }
+            //            auto &bni = checkpoint_index.get<by_num>();
+            //            auto oldest = bni.begin();
+            //            if (oldest != bni.end() && lscb_num - (*oldest)->block_num > 10000) {
+            //                auto it = bni.lower_bound(lscb_num - 10000);
+            //                if (it != bni.end() && (*it)->is_stable) {
+            //                    prune_checkpoints(*it);
+            //                }
+            //            }
         }
 
         bool pbft_database::is_valid_checkpoint(const pbft_checkpoint &cp) {
@@ -1409,7 +1409,7 @@ namespace eosio {
             return false;
         }
 
-        public_key_type pbft_database::get_new_view_primary_key(const uint32_t target_view) {
+        public_key_type pbft_database::get_new_view_primary_key(const pbft_view_type target_view) {
 
             auto active_bps = lscb_active_producers().producers;
             if (active_bps.empty()) return public_key_type{};
@@ -1491,26 +1491,56 @@ namespace eosio {
                 }
             }
 
-            if (fork_schedules.empty()) {
-                auto lscb_bps = lscb_active_producers().producers;
-                auto lscb_num = ctrl.last_stable_checkpoint_block_num();
-                for (auto &bp: lscb_bps) {
+            auto lscb_bps = lscb_active_producers().producers;
+            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
+            for (auto &bp: lscb_bps) {
+                if (fork_schedules.find(bp.block_signing_key) == fork_schedules.end()
+                || fork_schedules[bp.block_signing_key] < lscb_num) {
                     fork_schedules[bp.block_signing_key] = lscb_num;
                 }
             }
+
         }
 
         pbft_state_ptr pbft_database::get_pbft_state_by_id(const block_id_type& id) const {
 
             auto &by_block_id_index = pbft_state_index.get<by_block_id>();
-
             auto itr = by_block_id_index.find(id);
 
-            if (itr != by_block_id_index.end()) {
-                return (*itr);
-            }
+            if (itr != by_block_id_index.end()) return (*itr);
 
             return pbft_state_ptr{};
+        }
+
+        vector<pbft_checkpoint_state> pbft_database::get_checkpoints_by_num(const block_num_type& num) const {
+            auto results = vector<pbft_checkpoint_state>{};
+            auto &by_num_index = checkpoint_index.get<by_num>();
+
+            auto pitr  = by_num_index.lower_bound( num );
+            auto epitr = by_num_index.upper_bound( num );
+            while( pitr != epitr ) {
+                if (pitr != by_num_index.end() && (*pitr)) results.emplace_back(*(*pitr));
+                ++pitr;
+            }
+
+            return results;
+        }
+
+        pbft_view_state_ptr pbft_database::get_view_changes_by_target_view(const pbft_view_type& tv) const {
+            auto &by_view_index = view_state_index.get<by_view>();
+            auto itr = by_view_index.find(tv);
+
+            if (itr != by_view_index.end()) return (*itr);
+
+            return pbft_view_state_ptr{};
+        }
+
+        vector<block_num_type> pbft_database::get_pbft_watermarks() const {
+            return prepare_watermarks;
+        }
+
+        flat_map<public_key_type, uint32_t> pbft_database::get_pbft_fork_schedules() const {
+            return fork_schedules;
         }
 
         void pbft_database::set(pbft_state_ptr s) {

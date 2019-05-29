@@ -3015,6 +3015,7 @@ namespace eosio {
         if (!pcc.pbft_db.is_valid_checkpoint(msg)) return;
 
         bcast_pbft_msg(msg);
+        fc_ilog( logger, "sent checkpoint at height: ${n}, from ${k}, ", ("n", msg.block_num)("k", msg.public_key));
     }
 
     bool net_plugin_impl::maybe_add_pbft_cache(const string &uuid){
@@ -3105,7 +3106,7 @@ namespace eosio {
     }
 
     void net_plugin_impl::handle_message( connection_ptr c, const pbft_checkpoint &msg) {
-       fc_ilog( logger, "received checkpoint at ${n}, from ${v}", ("n", msg.block_num)("v", msg.public_key));
+
        if (!is_pbft_msg_valid(msg)) return;
 
        auto added = maybe_add_pbft_cache(msg.uuid);

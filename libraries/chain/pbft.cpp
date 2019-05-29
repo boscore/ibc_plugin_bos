@@ -85,10 +85,12 @@ namespace eosio {
         void pbft_controller::send_pbft_checkpoint() {
             if (!pbft_db.should_send_pbft_msg()) return;
             pbft_db.send_pbft_checkpoint();
+            pbft_db.checkpoint_local();
         }
 
         void pbft_controller::on_pbft_checkpoint(pbft_checkpoint &cp) {
             pbft_db.add_pbft_checkpoint(cp);
+            pbft_db.checkpoint_local();
         }
 
         psm_state::psm_state() = default;
@@ -245,9 +247,7 @@ namespace eosio {
             m->transit_to_view_change_state(this);
         }
 
-        psm_committed_state::psm_committed_state() {
-            pending_commit_local = false;
-        }
+        psm_committed_state::psm_committed_state() = default;
 
         psm_committed_state::~psm_committed_state() = default;
 

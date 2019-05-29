@@ -20,6 +20,7 @@ namespace eosio {
         using namespace std;
         using boost::uuids::uuid;
 
+        using pbft_view_type = uint32_t;
 
         struct block_info {
             block_id_type block_id;
@@ -28,7 +29,7 @@ namespace eosio {
 
         struct pbft_prepare {
             string uuid;
-            uint32_t view;
+            pbft_view_type view;
             block_num_type block_num = 0;
             block_id_type block_id;
             public_key_type public_key;
@@ -79,7 +80,7 @@ namespace eosio {
 
         struct pbft_commit {
             string uuid;
-            uint32_t view;
+            pbft_view_type view;
             block_num_type block_num = 0;
             block_id_type block_id;
             public_key_type public_key;
@@ -143,7 +144,6 @@ namespace eosio {
                        && public_key == rhs.public_key
                        && chain_id == rhs.chain_id
                        && timestamp == rhs.timestamp;
-
             }
 
             bool operator!=(const pbft_checkpoint &rhs) const {
@@ -288,8 +288,8 @@ namespace eosio {
 
         struct pbft_view_change {
             string uuid;
-            uint32_t current_view;
-            uint32_t target_view;
+            pbft_view_type current_view;
+            pbft_view_type target_view;
             pbft_prepared_certificate prepared;
             vector<pbft_committed_certificate> committed;
             pbft_stable_checkpoint stable_checkpoint;
@@ -341,7 +341,7 @@ namespace eosio {
         };
 
         struct pbft_view_changed_certificate {
-            uint32_t view;
+            pbft_view_type view;
             vector<pbft_view_change> view_changes;
 
             public_key_type public_key;
@@ -377,7 +377,7 @@ namespace eosio {
 
         struct pbft_new_view {
             string uuid;
-            uint32_t view;
+            pbft_view_type view;
             pbft_prepared_certificate prepared;
             vector<pbft_committed_certificate> committed;
             pbft_stable_checkpoint stable_checkpoint;
@@ -439,7 +439,7 @@ namespace eosio {
         };
 
         struct pbft_view_state {
-            uint32_t view;
+            pbft_view_type view;
             vector<pbft_view_change> view_changes;
             bool should_view_changed = false;
         };
@@ -504,15 +504,15 @@ namespace eosio {
                 indexed_by<
                         hashed_unique<
                                 tag<by_view>,
-                                member<pbft_view_state, uint32_t, &pbft_view_state::view>,
-                                std::hash<uint32_t>
+                                member<pbft_view_state, pbft_view_type, &pbft_view_state::view>,
+                                std::hash<pbft_view_type>
                         >,
                         ordered_non_unique<
                                 tag<by_count_and_view>,
                                 composite_key<
                                         pbft_view_state,
                                         member<pbft_view_state, bool, &pbft_view_state::should_view_changed>,
-                                        member<pbft_view_state, uint32_t, &pbft_view_state::view>
+                                        member<pbft_view_state, pbft_view_type, &pbft_view_state::view>
                                 >,
                                 composite_key_compare<greater<>, greater<>>
                         >
@@ -554,13 +554,13 @@ namespace eosio {
 
             bool should_committed();
 
-            uint32_t should_view_change();
+            pbft_view_type should_view_change();
 
-            bool should_new_view(uint32_t target_view);
+            bool should_new_view(pbft_view_type target_view);
 
-            bool is_new_primary(uint32_t target_view);
+            bool is_new_primary(pbft_view_type target_view);
 
-            uint32_t get_proposed_new_view_num();
+            pbft_view_type get_proposed_new_view_num();
 
             void add_pbft_prepare(pbft_prepare &p);
 
@@ -572,22 +572,22 @@ namespace eosio {
 
             vector<pbft_prepare> send_and_add_pbft_prepare(
                     const vector<pbft_prepare> &pv = vector<pbft_prepare>{},
-                    uint32_t current_view = 0);
+                    pbft_view_type current_view = 0);
 
             vector<pbft_commit> send_and_add_pbft_commit(
                     const vector<pbft_commit> &cv = vector<pbft_commit>{},
-                    uint32_t current_view = 0);
+                    pbft_view_type current_view = 0);
 
             vector<pbft_view_change> send_and_add_pbft_view_change(
                     const vector<pbft_view_change> &vcv = vector<pbft_view_change>{},
                     const vector<pbft_prepared_certificate> &ppc = vector<pbft_prepared_certificate>{},
                     const vector<vector<pbft_committed_certificate>> &pcc = vector<vector<pbft_committed_certificate>>{},
-                    uint32_t current_view = 0,
-                    uint32_t new_view = 1);
+                    pbft_view_type current_view = 0,
+                    pbft_view_type new_view = 1);
 
             pbft_new_view send_pbft_new_view(
                     const vector<pbft_view_changed_certificate> &vcc = vector<pbft_view_changed_certificate>{},
-                    uint32_t current_view = 1);
+                    pbft_view_type current_view = 1);
 
             vector<pbft_checkpoint> generate_and_add_pbft_checkpoint();
 
@@ -601,7 +601,7 @@ namespace eosio {
 
             void prune_pbft_index();
 
-            uint32_t get_committed_view();
+            pbft_view_type get_committed_view();
 
             chain_id_type chain_id();
 
@@ -609,7 +609,7 @@ namespace eosio {
 
             vector<vector<pbft_committed_certificate>> generate_committed_certificate();
 
-            vector<pbft_view_changed_certificate> generate_view_changed_certificate(uint32_t target_view);
+            vector<pbft_view_changed_certificate> generate_view_changed_certificate(pbft_view_type target_view);
 
             pbft_stable_checkpoint get_stable_checkpoint_by_id(const block_id_type &block_id);
 
@@ -621,9 +621,11 @@ namespace eosio {
 
             bool should_recv_pbft_msg(const public_key_type &pub_key);
 
-            public_key_type get_new_view_primary_key(uint32_t target_view);
+            public_key_type get_new_view_primary_key(pbft_view_type target_view);
 
             void send_pbft_checkpoint();
+
+            void checkpoint_local();
 
             bool is_valid_checkpoint(const pbft_checkpoint &cp);
 
@@ -651,6 +653,14 @@ namespace eosio {
             bool should_stop_view_change(const pbft_view_change &vc);
 
             pbft_state_ptr get_pbft_state_by_id(const block_id_type& id)const;
+
+            vector<pbft_checkpoint_state> get_checkpoints_by_num(const block_num_type& num)const;
+
+            pbft_view_state_ptr get_view_changes_by_target_view(const pbft_view_type& tv)const;
+
+            vector<block_num_type> get_pbft_watermarks()const;
+
+            flat_map<public_key_type, uint32_t> get_pbft_fork_schedules()const;
 
             block_num_type get_current_pbft_watermark();
 
@@ -716,3 +726,4 @@ FC_REFLECT(eosio::chain::pbft_checkpoint,
            (uuid)(block_num)(block_id)(public_key)(chain_id)(producer_signature)(timestamp))
 FC_REFLECT(eosio::chain::pbft_stable_checkpoint, (block_num)(block_id)(checkpoints)(chain_id))
 FC_REFLECT(eosio::chain::pbft_checkpoint_state, (block_id)(block_num)(checkpoints)(is_stable))
+FC_REFLECT(eosio::chain::pbft_view_state, (view)(view_changes)(should_view_changed))
