@@ -95,7 +95,7 @@ namespace eosio {
         return pbft_ctrl.state_machine.get_current()->get_name();
     }
 
-    block_id_type pbft_plugin::get_pbft_prepared_block_id() const {
+    block_id_type pbft_plugin::get_pbft_prepared_id() const {
         auto& ctrl = app().get_plugin<chain_plugin>().chain();
         return ctrl.get_pbft_prepared();
     }

@@ -57,6 +57,8 @@ void pbft_api_plugin::plugin_startup() {
        CALL(pbft, pbft, get_pbft_checkpoints_record, INVOKE_R_P(pbft, get_pbft_checkpoints_record, block_num_type), 200),
        CALL(pbft, pbft, get_view_change_record, INVOKE_R_P(pbft, get_view_change_record, pbft_view_type), 200),
        CALL(pbft, pbft, get_pbft_status, INVOKE_R(pbft, get_pbft_status), 200),
+       CALL(pbft, pbft, get_pbft_prepared_id, INVOKE_R(pbft, get_pbft_prepared_id), 200),
+       CALL(pbft, pbft, get_pbft_my_prepare_id, INVOKE_R(pbft, get_pbft_my_prepare_id), 200),
        CALL(pbft, pbft, set_pbft_current_view, INVOKE_W_P(pbft, set_pbft_current_view, pbft_view_type), 201),
    });
 }

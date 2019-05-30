@@ -247,9 +247,9 @@ namespace eosio {
       template<typename M>
       bool is_pbft_msg_valid(M const & msg);
 
-      void bcast_pbft_msg(const net_message &msg);
+      void bcast_pbft_msg(const net_message &msg, int ttl);
 
-      void forward_pbft_msg(connection_ptr c, const net_message &msg);
+      void forward_pbft_msg(connection_ptr c, const net_message &msg, int ttl);
 
       void pbft_outgoing_prepare(const pbft_prepare &prepare);
       void pbft_outgoing_commit(const pbft_commit &commit);
@@ -2912,15 +2912,15 @@ namespace eosio {
     template<typename M>
     bool net_plugin_impl::is_pbft_msg_valid(M const & msg) {
         // Do some basic validations of an incoming pbft msg, bad msgs should be quickly discarded without affecting state.
-        return chain_id == msg.chain_id
+        return  chain_id == msg.chain_id
                 && !is_pbft_msg_outdated(msg)
                 && !sync_master->is_syncing();
     }
 
-    void net_plugin_impl::bcast_pbft_msg(const net_message &msg) {
+    void net_plugin_impl::bcast_pbft_msg(const net_message &msg, int ttl) {
         if (sync_master->is_syncing()) return;
 
-        auto deadline = time_point_sec(time_point::now()) + pbft_message_TTL;
+        auto deadline = time_point_sec(time_point::now()) + ttl;
 
         for (auto &conn: connections) {
             if (conn->pbft_ready()) {
@@ -2929,8 +2929,8 @@ namespace eosio {
         }
     }
 
-    void net_plugin_impl::forward_pbft_msg(connection_ptr c, const net_message &msg) {
-        auto deadline = time_point_sec(time_point::now()) + pbft_message_TTL;
+    void net_plugin_impl::forward_pbft_msg(connection_ptr c, const net_message &msg, int ttl) {
+        auto deadline = time_point_sec(time_point::now()) + ttl;
 
         for (auto &conn: connections) {
             if (conn != c && conn->pbft_ready()) {
@@ -2946,7 +2946,7 @@ namespace eosio {
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_prepare(msg)) return;
 
-        bcast_pbft_msg(msg);
+        bcast_pbft_msg(msg, pbft_message_TTL);
         fc_ilog( logger, "sent prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_num)("v", msg.view)("k", msg.public_key));
     }
 
@@ -2957,7 +2957,7 @@ namespace eosio {
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_commit(msg)) return;
 
-        bcast_pbft_msg(msg);
+        bcast_pbft_msg(msg, pbft_message_TTL);
         fc_ilog( logger, "sent commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_num)("v", msg.view)("k", msg.public_key));
     }
 
@@ -2968,7 +2968,7 @@ namespace eosio {
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_view_change(msg)) return;
 
-        bcast_pbft_msg(msg);
+        bcast_pbft_msg(msg, pbft_message_TTL);
         fc_ilog( logger, "sent view change {cv: ${cv}, tv: ${tv}} from ${v}", ("cv", msg.current_view)("tv", msg.target_view)("v", msg.public_key));
     }
 
@@ -2979,7 +2979,7 @@ namespace eosio {
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_new_view(msg)) return;
 
-        bcast_pbft_msg(msg);
+        bcast_pbft_msg(msg, INT_MAX);
         fc_ilog( logger, "sent new view at view: ${v}, from ${k}, ", ("v", msg.view)("k", msg.public_key));
     }
 
@@ -2990,7 +2990,7 @@ namespace eosio {
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_checkpoint(msg)) return;
 
-        bcast_pbft_msg(msg);
+        bcast_pbft_msg(msg, pbft_message_TTL);
         fc_ilog( logger, "sent checkpoint at height: ${n}, from ${k}, ", ("n", msg.block_num)("k", msg.public_key));
     }
 
@@ -3026,7 +3026,7 @@ namespace eosio {
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_prepare(msg)) return;
 
-       forward_pbft_msg(c, msg);
+       forward_pbft_msg(c, msg, pbft_message_TTL);
        fc_ilog( logger, "received prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_num)("v", msg.view)("k", msg.public_key));
 
        pbft_incoming_prepare_channel.publish(msg);
@@ -3043,7 +3043,7 @@ namespace eosio {
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_commit(msg)) return;
 
-       forward_pbft_msg(c, msg);
+       forward_pbft_msg(c, msg, pbft_message_TTL);
        fc_ilog( logger, "received commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_num)("v", msg.view)("k", msg.public_key));
 
        pbft_incoming_commit_channel.publish(msg);
@@ -3059,7 +3059,7 @@ namespace eosio {
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_view_change(msg)) return;
 
-       forward_pbft_msg(c, msg);
+       forward_pbft_msg(c, msg, pbft_message_TTL);
        fc_ilog( logger, "received view change {cv: ${cv}, tv: ${tv}} from ${v}", ("cv", msg.current_view)("tv", msg.target_view)("v", msg.public_key));
 
        pbft_incoming_view_change_channel.publish(msg);
@@ -3067,7 +3067,7 @@ namespace eosio {
 
     void net_plugin_impl::handle_message( connection_ptr c, const pbft_new_view &msg) {
 
-       if (!is_pbft_msg_valid(msg)) return;
+       if (chain_id != msg.chain_id) return;
 
        auto added = maybe_add_pbft_cache(msg.uuid);
        if (!added) return;
@@ -3075,7 +3075,7 @@ namespace eosio {
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!(msg.public_key == pcc.pbft_db.get_new_view_primary_key(msg.view) && msg.is_signature_valid())) return;
 
-       forward_pbft_msg(c, msg);
+       forward_pbft_msg(c, msg, INT_MAX);
        fc_ilog( logger, "received new view: ${n}, from ${v}", ("n", msg)("v", msg.public_key));
 
        pbft_incoming_new_view_channel.publish(msg);
@@ -3091,7 +3091,7 @@ namespace eosio {
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_checkpoint(msg)) return;
 
-       forward_pbft_msg(c, msg);
+       forward_pbft_msg(c, msg, pbft_message_TTL);
        fc_ilog( logger, "received checkpoint at ${n}, from ${v}", ("n", msg.block_num)("v", msg.public_key));
 
        pbft_incoming_checkpoint_channel.publish(msg);

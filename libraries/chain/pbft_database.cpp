@@ -122,8 +122,6 @@ namespace eosio {
                             psp->prepares.emplace_back(p);
                             std::sort(psp->prepares.begin(), psp->prepares.end(), less<>());
                         });
-                    } else {
-                        dlog( "prepare already exists: ${p}", ("p", p));
                     }
                 }
                 curr_itr = by_block_id_index.find(current->id);
@@ -148,8 +146,7 @@ namespace eosio {
                     for (auto const &e: prepare_count) {
                         if (e.second >= as.size() * 2 / 3 + 1) {
                             by_block_id_index.modify(curr_itr,
-                                                     [&](const pbft_state_ptr &psp) { psp->should_prepared = true; });
-                            dlog( "block id ${id} is now prepared at view ${v}", ("id", current->id)("v", e.first));
+                                    [&](const pbft_state_ptr &psp) { psp->should_prepared = true; });
                         }
                     }
                 }
@@ -279,8 +276,6 @@ namespace eosio {
                             psp->commits.emplace_back(c);
                             std::sort(psp->commits.begin(), psp->commits.end(), less<>());
                         });
-                    } else {
-                        dlog( "commit already exists: ${c}", ("c", c));
                     }
                 }
 
@@ -309,8 +304,7 @@ namespace eosio {
                     for (auto const &e: commit_count) {
                         if (e.second >= current->active_schedule.producers.size() * 2 / 3 + 1) {
                             by_block_id_index.modify(curr_itr,
-                                                     [&](const pbft_state_ptr &psp) { psp->should_committed = true; });
-                            dlog( "block id ${id} is now committed at view ${v}", ("id", current->id)("v", e.first));
+                                    [&](const pbft_state_ptr &psp) { psp->should_committed = true; });
                         }
                     }
                 }
@@ -417,7 +411,6 @@ namespace eosio {
             pbft_state_ptr psp = *itr;
 
             ctrl.pbft_commit_local(psp->block_id);
-            dlog( "block id ${id} is committed local", ("id", psp->block_id));
         }
 
         bool pbft_database::pending_pbft_lib() {
