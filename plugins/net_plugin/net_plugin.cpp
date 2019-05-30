@@ -175,7 +175,7 @@ namespace eosio {
 
       std::unordered_map<string, time_point_sec> pbft_message_cache{};
       const int                     pbft_message_cache_TTL = 600;
-      const int                     pbft_message_TTL = 10;
+      const int                     pbft_message_TTL = 60;
 
       channels::transaction_ack::channel_type::handle  incoming_transaction_ack_subscription;
       eosio::chain::plugin_interface::pbft::outgoing::prepare_channel::channel_type::handle pbft_outgoing_prepare_subscription;
@@ -1155,7 +1155,7 @@ namespace eosio {
                 break;
             }
         }
-
+        if (drop_pbft_count) wlog("dropped ${n} outdated pbft messages", ("n",drop_pbft_count));
         //drop timeout messages in mem, init send buffer only when actual send happens
         //copied from a previous version of  connection::enqueue
         connection_wptr weak_this = shared_from_this();
@@ -1287,8 +1287,7 @@ namespace eosio {
                   to_sync_queue);
    }
 
-   void connection::enqueue_pbft(const std::shared_ptr<std::vector<char>>& m,
-                                 const time_point_sec deadline = time_point_sec(static_cast<uint32_t>(600)))
+   void connection::enqueue_pbft(const std::shared_ptr<std::vector<char>>& m, const time_point_sec deadline)
    {
        pbft_queue.push_back(queued_pbft_message{m, deadline });
        if (buffer_queue.is_out_queue_empty()) {
@@ -1378,35 +1377,6 @@ namespace eosio {
        enqueue( net_message(crm));
        sync_wait();
    }
-
-//    bool connection::process_next_message(net_plugin_impl& impl, uint32_t message_length) {
-//        vector<char> tmp_data;
-//        tmp_data.resize(message_length);
-//
-//        try {
-//            auto ds = pending_message_buffer.create_datastream();
-//            auto read_index = pending_message_buffer.read_index();
-//            pending_message_buffer.peek(tmp_data.data(),message_length,read_index);
-//
-//            net_message msg;
-//            fc::raw::unpack(ds, msg);
-//            msg_handler m(impl, shared_from_this() );
-//            if( msg.contains<signed_block>() ) {
-//                m( std::move( msg.get<signed_block>() ) );
-//            } else if( msg.contains<packed_transaction>() ) {
-//                m( std::move( msg.get<packed_transaction>() ) );
-//            } else {
-//                msg.visit( m );
-//            }
-//        } catch(  const fc::exception& e ) {
-//            wlog("error message length: ${l}", ("l", message_length));
-//            wlog("error raw bytes ${s}", ("s", tmp_data));
-//            edump((e.to_detail_string() ));
-//            impl.close( shared_from_this() );
-//            return false;
-//        }
-//        return true;
-//    }
 
    bool connection::process_next_message(net_plugin_impl& impl, uint32_t message_length) {
       try {
@@ -2932,13 +2902,19 @@ namespace eosio {
 
     template<typename M>
     bool net_plugin_impl::is_pbft_msg_outdated(M const & msg) {
-        return (time_point_sec(time_point::now()) > time_point_sec(msg.timestamp) + pbft_message_TTL);
+        if (time_point_sec(time_point::now()) > time_point_sec(msg.timestamp) + pbft_message_TTL) {
+            wlog("received a outdated pbft message ${m}", ("m", msg));
+            return true;
+        }
+        return false;
     }
 
     template<typename M>
     bool net_plugin_impl::is_pbft_msg_valid(M const & msg) {
         // Do some basic validations of an incoming pbft msg, bad msgs should be quickly discarded without affecting state.
-        return (chain_id == msg.chain_id && !is_pbft_msg_outdated(msg) && !sync_master->is_syncing());
+        return chain_id == msg.chain_id
+                && !is_pbft_msg_outdated(msg)
+                && !sync_master->is_syncing();
     }
 
     void net_plugin_impl::bcast_pbft_msg(const net_message &msg) {
