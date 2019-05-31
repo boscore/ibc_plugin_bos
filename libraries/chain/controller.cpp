@@ -2538,7 +2538,6 @@ block_id_type controller::get_pbft_prepared() const {
     return block_id_type{};
 }
 
-
 block_id_type controller::get_pbft_my_prepare() const {
    if (my->my_prepare) return my->my_prepare->id;
    return block_id_type{};
@@ -2669,7 +2668,6 @@ path controller::blocks_dir() const {
 producer_schedule_type controller::initial_schedule() const {
    return producer_schedule_type{ 0, {{eosio::chain::config::system_account_name, my->conf.genesis.initial_key}} };
 }
-
 
 bool controller::is_known_unexpired_transaction( const transaction_id_type& id) const {
    return db().find<transaction_object, by_trx_id>(id);

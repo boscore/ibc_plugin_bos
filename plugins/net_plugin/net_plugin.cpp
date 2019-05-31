@@ -1163,7 +1163,7 @@ namespace eosio {
                 break;
             }
         }
-        if (drop_pbft_count) wlog("dropped ${n} outdated pbft messages", ("n",drop_pbft_count));
+
         //drop timeout messages in mem, init send buffer only when actual send happens
         //copied from a previous version of  connection::enqueue
         connection_wptr weak_this = shared_from_this();
@@ -2971,11 +2971,7 @@ namespace eosio {
 
     template<typename M>
     bool net_plugin_impl::is_pbft_msg_outdated(M const & msg) {
-        if (time_point_sec(time_point::now()) > time_point_sec(msg.timestamp) + pbft_message_TTL) {
-            wlog("received a outdated pbft message ${m}", ("m", msg));
-            return true;
-        }
-        return false;
+        return (time_point_sec(time_point::now()) > time_point_sec(msg.timestamp) + pbft_message_TTL);
     }
 
     template<typename M>
