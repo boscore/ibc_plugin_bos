@@ -25,6 +25,14 @@ namespace eosio {
         struct block_info {
             block_id_type block_id;
             block_num_type block_num = 0;
+
+            bool operator==(const block_info &rhs) const {
+                return block_id == rhs.block_id && block_num == rhs.block_num;
+            }
+
+            bool operator!=(const block_info &rhs) const {
+                return !(*this == rhs);
+            }
         };
 
         struct pbft_message {
@@ -36,8 +44,10 @@ namespace eosio {
 
             virtual digest_type digest() const {
                 digest_type::encoder enc;
+                fc::raw::pack(enc, uuid);
                 fc::raw::pack(enc, public_key);
                 fc::raw::pack(enc, chain_id);
+                fc::raw::pack(enc, timestamp);
                 return enc.result();
             }
 
@@ -55,56 +65,57 @@ namespace eosio {
 
         struct pbft_prepare final: public pbft_message {
             explicit pbft_prepare() = default;
-            uint32_t        view = 0;
-            block_num_type  block_num = 0;
-            block_id_type   block_id;
+
+            pbft_view_type  view = 0;
+            block_info      block;
 
             bool operator==(const pbft_prepare &rhs) const {
                 return digest() == rhs.digest();
             }
 
             bool operator<(const pbft_prepare &rhs) const {
-                if (block_num < rhs.block_num) {
+                if (block.block_num < rhs.block.block_num) {
                     return true;
                 } else {
-                    return block_num == rhs.block_num && view < rhs.view;
+                    return block.block_num == rhs.block.block_num && view < rhs.view;
                 }
             }
 
             digest_type digest() const override {
                 digest_type::encoder enc;
+                fc::raw::pack(enc, uuid);
                 fc::raw::pack(enc, view);
-                fc::raw::pack(enc, block_num);
-                fc::raw::pack(enc, block_id);
+                fc::raw::pack(enc, block);
                 fc::raw::pack(enc, public_key);
                 fc::raw::pack(enc, chain_id);
+                fc::raw::pack(enc, timestamp);
                 return enc.result();
             }
         };
 
         struct pbft_commit final: public pbft_message {
             explicit pbft_commit() = default;
-            pbft_view_type        view = 0;
-            block_num_type  block_num = 0;
-            block_id_type   block_id;
+
+            pbft_view_type  view = 0;
+            block_info      block;
 
             bool operator==(const pbft_commit &rhs) const {
                 return digest() == rhs.digest();
             }
 
             bool operator<(const pbft_commit &rhs) const {
-                if (block_num < rhs.block_num) {
+                if (block.block_num < rhs.block.block_num) {
                     return true;
                 } else {
-                    return block_num == rhs.block_num && view < rhs.view;
+                    return block.block_num == rhs.block.block_num && view < rhs.view;
                 }
             }
 
             digest_type digest() const override {
                 digest_type::encoder enc;
+                fc::raw::pack(enc, uuid);
                 fc::raw::pack(enc, view);
-                fc::raw::pack(enc, block_num);
-                fc::raw::pack(enc, block_id);
+                fc::raw::pack(enc, block);
                 fc::raw::pack(enc, public_key);
                 fc::raw::pack(enc, chain_id);
                 fc::raw::pack(enc, timestamp);
@@ -115,8 +126,7 @@ namespace eosio {
         struct pbft_checkpoint final: public pbft_message {
             explicit pbft_checkpoint() = default;
 
-            block_num_type  block_num = 0;
-            block_id_type   block_id;
+            block_info      block;
 
             bool operator==(const pbft_checkpoint &rhs) const {
                 return digest() == rhs.digest();
@@ -127,13 +137,13 @@ namespace eosio {
             }
 
             bool operator<(const pbft_checkpoint &rhs) const {
-                return block_num < rhs.block_num;
+                return block.block_num < rhs.block.block_num;
             }
 
             digest_type digest() const override {
                 digest_type::encoder enc;
-                fc::raw::pack(enc, block_num);
-                fc::raw::pack(enc, block_id);
+                fc::raw::pack(enc, uuid);
+                fc::raw::pack(enc, block);
                 fc::raw::pack(enc, public_key);
                 fc::raw::pack(enc, chain_id);
                 fc::raw::pack(enc, timestamp);
@@ -142,19 +152,17 @@ namespace eosio {
         };
 
         struct pbft_certificate {
-            block_num_type          block_num = 0;
-            block_id_type           block_id;
+            block_info              block;
             vector<pbft_message>    messages;
             chain_id_type           chain_id = chain_id_type("");
 
             bool operator<(const pbft_certificate &rhs) const {
-                return block_num < rhs.block_num;
+                return block.block_num < rhs.block.block_num;
             }
 
             digest_type digest() const {
                 digest_type::encoder enc;
-                fc::raw::pack(enc, block_num);
-                fc::raw::pack(enc, block_id);
+                fc::raw::pack(enc, block);
                 fc::raw::pack(enc, messages);
                 fc::raw::pack(enc, chain_id);
                 return enc.result();
@@ -199,8 +207,8 @@ namespace eosio {
         struct pbft_view_change final: public pbft_message {
             explicit pbft_view_change() = default;
 
-            uint32_t                            current_view = 0;
-            uint32_t                            target_view = 1;
+            pbft_view_type                      current_view = 0;
+            pbft_view_type                      target_view = 1;
             pbft_prepared_certificate           prepared;
             vector<pbft_committed_certificate>  committed;
             pbft_stable_checkpoint              stable_checkpoint;
@@ -215,12 +223,14 @@ namespace eosio {
 
             digest_type digest() const override {
                 digest_type::encoder enc;
+                fc::raw::pack(enc, uuid);
                 fc::raw::pack(enc, current_view);
                 fc::raw::pack(enc, target_view);
                 fc::raw::pack(enc, prepared);
                 fc::raw::pack(enc, committed);
                 fc::raw::pack(enc, stable_checkpoint);
                 fc::raw::pack(enc, public_key);
+                fc::raw::pack(enc, timestamp);
                 fc::raw::pack(enc, chain_id);
                 return enc.result();
             }
@@ -247,7 +257,7 @@ namespace eosio {
         struct pbft_new_view final: public pbft_message {
             explicit pbft_new_view() = default;
 
-            pbft_view_type                            view = 0;
+            pbft_view_type                      view = 0;
             pbft_prepared_certificate           prepared;
             vector<pbft_committed_certificate>  committed;
             pbft_stable_checkpoint              stable_checkpoint;
@@ -263,12 +273,14 @@ namespace eosio {
 
             digest_type digest() const override {
                 digest_type::encoder enc;
+                fc::raw::pack(enc, uuid);
                 fc::raw::pack(enc, view);
                 fc::raw::pack(enc, prepared);
                 fc::raw::pack(enc, committed);
                 fc::raw::pack(enc, stable_checkpoint);
                 fc::raw::pack(enc, view_changed);
                 fc::raw::pack(enc, public_key);
+                fc::raw::pack(enc, timestamp);
                 fc::raw::pack(enc, chain_id);
                 return enc.result();
             }
@@ -284,7 +296,7 @@ namespace eosio {
         };
 
         struct pbft_view_change_state {
-            pbft_view_type                    view;
+            pbft_view_type              view;
             vector<pbft_view_change>    view_changes;
             bool                        should_view_changed = false;
         };
@@ -474,6 +486,26 @@ namespace eosio {
 
             bool is_valid_stable_checkpoint(const pbft_stable_checkpoint &scp);
 
+            bool is_valid_view_change(const pbft_view_change &vc);
+
+            bool is_valid_new_view(const pbft_new_view &nv);
+
+            bool should_stop_view_change(const pbft_view_change &vc);
+
+            pbft_state_ptr get_pbft_state_by_id(const block_id_type& id)const;
+
+            vector<pbft_checkpoint_state> get_checkpoints_by_num(const block_num_type& num)const;
+
+            pbft_view_change_state_ptr get_view_changes_by_target_view(const pbft_view_type& tv)const;
+
+            vector<block_num_type> get_pbft_watermarks()const;
+
+            flat_map<public_key_type, uint32_t> get_pbft_fork_schedules()const;
+
+            block_num_type get_current_pbft_watermark();
+
+            void update_fork_schedules();
+
             signal<void(const pbft_prepare &)> pbft_outgoing_prepare;
             signal<void(const pbft_prepare &)> pbft_incoming_prepare;
 
@@ -488,26 +520,6 @@ namespace eosio {
 
             signal<void(const pbft_checkpoint &)> pbft_outgoing_checkpoint;
             signal<void(const pbft_checkpoint &)> pbft_incoming_checkpoint;
-
-            bool is_valid_view_change(const pbft_view_change &vc);
-
-            bool is_valid_new_view(const pbft_new_view &nv);
-
-            bool should_stop_view_change(const pbft_view_change &vc);
-
-            pbft_state_ptr get_pbft_state_by_id(const block_id_type& id)const;
-
-            vector<pbft_checkpoint_state> get_checkpoints_by_num(const block_num_type& num)const;
-
-            pbft_view_state_ptr get_view_changes_by_target_view(const pbft_view_type& tv)const;
-
-            vector<block_num_type> get_pbft_watermarks()const;
-
-            flat_map<public_key_type, uint32_t> get_pbft_fork_schedules()const;
-
-            block_num_type get_current_pbft_watermark();
-
-            void update_fork_schedules();
 
         private:
             controller                                  &ctrl;
@@ -555,17 +567,16 @@ namespace eosio {
 
 FC_REFLECT(eosio::chain::block_info, (block_id)(block_num))
 FC_REFLECT(eosio::chain::pbft_message, (uuid)(public_key)(chain_id)(producer_signature)(timestamp))
-FC_REFLECT_DERIVED(eosio::chain::pbft_prepare, (eosio::chain::pbft_message), (view)(block_num)(block_id))
-FC_REFLECT_DERIVED(eosio::chain::pbft_commit, (eosio::chain::pbft_message), (view)(block_num)(block_id))
+FC_REFLECT_DERIVED(eosio::chain::pbft_prepare, (eosio::chain::pbft_message), (view)(block))
+FC_REFLECT_DERIVED(eosio::chain::pbft_commit, (eosio::chain::pbft_message), (view)(block))
 FC_REFLECT_DERIVED(eosio::chain::pbft_view_change, (eosio::chain::pbft_message), (current_view)(target_view)(prepared)(committed)(stable_checkpoint))
 FC_REFLECT_DERIVED(eosio::chain::pbft_new_view, (eosio::chain::pbft_message), (view)(prepared)(committed)(stable_checkpoint)(view_changed))
-FC_REFLECT_DERIVED(eosio::chain::pbft_checkpoint, (eosio::chain::pbft_message), (block_num)(block_id))
-FC_REFLECT(eosio::chain::pbft_certificate, (block_num)(block_id)(messages))
-FC_REFLECT_DERIVED(eosio::chain::pbft_prepared_certificate, (eosio::chain::pbft_certificate), )
-FC_REFLECT_DERIVED(eosio::chain::pbft_committed_certificate,(eosio::chain::pbft_certificate), )
+FC_REFLECT_DERIVED(eosio::chain::pbft_checkpoint, (eosio::chain::pbft_message), (block))
+FC_REFLECT(eosio::chain::pbft_certificate, (block)(messages))
+FC_REFLECT_DERIVED(eosio::chain::pbft_prepared_certificate, (eosio::chain::pbft_certificate), (messages))
+FC_REFLECT_DERIVED(eosio::chain::pbft_committed_certificate,(eosio::chain::pbft_certificate), (messages))
 FC_REFLECT(eosio::chain::pbft_view_changed_certificate, (view)(messages))
-FC_REFLECT_DERIVED(eosio::chain::pbft_stable_checkpoint, (eosio::chain::pbft_certificate), )
+FC_REFLECT_DERIVED(eosio::chain::pbft_stable_checkpoint, (eosio::chain::pbft_certificate), (messages))
 FC_REFLECT(eosio::chain::pbft_state, (block_id)(block_num)(prepares)(should_prepared)(commits)(should_committed))
 FC_REFLECT(eosio::chain::pbft_view_change_state, (view)(view_changes)(should_view_changed))
 FC_REFLECT(eosio::chain::pbft_checkpoint_state, (block_id)(block_num)(checkpoints)(is_stable))
-FC_REFLECT(eosio::chain::pbft_view_state, (view)(view_changes)(should_view_changed))

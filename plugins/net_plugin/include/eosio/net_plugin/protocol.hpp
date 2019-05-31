@@ -147,7 +147,7 @@ struct request_p2p_message{
      string p2p_peer_list;
    };
 
-   struct compressed_pbft_new_view {
+   struct compressed_pbft_message {
       std::shared_ptr<std::vector<char> > content;
    };
 
@@ -169,7 +169,7 @@ struct request_p2p_message{
                                       pbft_checkpoint,
                                       pbft_stable_checkpoint,
                                       checkpoint_request_message,
-                                      compressed_pbft_new_view>;
+                                      compressed_pbft_message>;
 
 } // namespace eosio
 
@@ -191,7 +191,7 @@ FC_REFLECT( eosio::sync_request_message, (start_block)(end_block) )
 FC_REFLECT( eosio::request_p2p_message, (discoverable) )
 FC_REFLECT( eosio::response_p2p_message, (discoverable)(p2p_peer_list) )
 FC_REFLECT( eosio::checkpoint_request_message, (start_block)(end_block) )
-FC_REFLECT( eosio::compressed_pbft_new_view, (content))
+FC_REFLECT( eosio::compressed_pbft_message, (content))
 
 
 /**

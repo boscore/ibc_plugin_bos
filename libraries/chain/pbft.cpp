@@ -105,9 +105,9 @@ namespace eosio {
             this->set_commits_cache(vector<pbft_commit>{});
             this->set_view_changes_cache(vector<pbft_view_change>{});
 
-            this->set_prepared_certificate(vector<pbft_prepared_certificate>{});
-            this->set_committed_certificate(vector<vector<pbft_committed_certificate>>{});
-            this->set_view_changed_certificate(vector<pbft_view_changed_certificate>{});
+            this->set_prepared_certificate(pbft_prepared_certificate{});
+            this->set_committed_certificate(vector<pbft_committed_certificate>{});
+            this->set_view_changed_certificate(pbft_view_changed_certificate{});
 
             this->view_change_timer = 0;
             this->target_view_retries = 0;
@@ -187,7 +187,6 @@ namespace eosio {
 
             if (pending_commit_local && !pbft_db.pending_pbft_lib()) {
                 pbft_db.send_pbft_checkpoint();
-                dlog("pending pbft lib has been applied, transit to committed state now..");
                 m->transit_to_committed_state(this, false);
             }
         }
@@ -207,7 +206,6 @@ namespace eosio {
 
             if (pending_commit_local && !pbft_db.pending_pbft_lib()) {
                 pbft_db.send_pbft_checkpoint();
-                dlog("pending pbft lib has been applied, transit to committed state now..");
                 m->transit_to_committed_state(this, false);
             }
         }

@@ -73,11 +73,11 @@ namespace eosio {
         if (!records.empty()) return records;
         return vector<pbft_checkpoint_state>();
     }
-    pbft_view_state pbft_plugin::get_view_change_record(const pbft_view_type& view) const {
+    pbft_view_change_state pbft_plugin::get_view_change_record(const pbft_view_type& view) const {
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         auto record = pbft_ctrl.pbft_db.get_view_changes_by_target_view(view);
         if (record) return *record;
-        return pbft_view_state();
+        return pbft_view_change_state();
     }
 
     vector<block_num_type> pbft_plugin::get_watermarks() const {
