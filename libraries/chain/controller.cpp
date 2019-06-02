@@ -360,7 +360,7 @@ struct controller_impl {
          read_from_snapshot( snapshot );
 
          //do upgrade migration if necessary;
-         migrate_upgrade(); //compatiable for snapshot integrity test
+         update_pbft_status(); //compatiable for snapshot integrity test
 
          auto end = blog.read_head();
          if( !end ) {
@@ -375,7 +375,7 @@ struct controller_impl {
          }
       } else {
          //do upgrade migration if necessary;
-         migrate_upgrade();  //compatiable for snapshot integrity test
+         update_pbft_status();  //compatiable for snapshot integrity test
          if( !head ) {
             initialize_fork_db(); // set head to genesis state
          }
@@ -426,43 +426,35 @@ struct controller_impl {
       //*bos end*
    }
 
-   void migrate_upgrade() {
-       //generate upo.
-       try {
-           db.get<upgrade_property_object>();
-           if (pbft_enabled) wlog("pbft enabled");
-       } catch( const boost::exception& e) {
-           wlog("no upo found, generating...");
-           db.create<upgrade_property_object>([](auto&){});
-       }
-       update_pbft_status();
-   }
-
    void update_pbft_status() {
-       auto utb = optional<block_num_type>{};
-       auto&  upo = db.get<upgrade_property_object>();
-       if (upo.upgrade_target_block_num > 0) utb = upo.upgrade_target_block_num;
+      try {
+         auto utb = optional<block_num_type>{};
+         auto&  upo = db.get<upgrade_property_object>();
+         if (upo.upgrade_target_block_num > 0) utb = upo.upgrade_target_block_num;
 
-       auto ucb = optional<block_num_type>{};
-       if (upo.upgrade_complete_block_num > 0) ucb = upo.upgrade_complete_block_num;
+         auto ucb = optional<block_num_type>{};
+         if (upo.upgrade_complete_block_num > 0) ucb = upo.upgrade_complete_block_num;
 
+         if (utb && !ucb && head->dpos_irreversible_blocknum >= *utb) {
+            db.modify( upo, [&]( auto& up ) {
+                up.upgrade_complete_block_num = head->block_num;
+            });
+            if (!replaying) wlog("pbft will be working after the block ${b}", ("b", head->block_num));
+         }
 
-       if (utb && !ucb && head->dpos_irreversible_blocknum >= *utb) {
-           db.modify( upo, [&]( auto& up ) {
-               up.upgrade_complete_block_num = head->block_num;
-           });
-           if (!replaying) wlog("pbft will be working after the block ${b}", ("b", head->block_num));
-       }
+         if ( !pbft_enabled && utb && head->block_num >= *utb) {
+            if (!pbft_upgrading) pbft_upgrading = true;
 
-       if ( !pbft_enabled && utb && head->block_num >= *utb) {
-           if (!pbft_upgrading) pbft_upgrading = true;
-
-           // new version starts from the next block of ucb, this is to avoid inconsistency after pre calculation inside schedule loop.
-           if (ucb && head->block_num > *ucb) {
+            // new version starts from the next block of ucb, this is to avoid inconsistency after pre calculation inside schedule loop.
+            if (ucb && head->block_num > *ucb) {
                if (pbft_upgrading) pbft_upgrading = false;
                pbft_enabled = true;
-           }
-       }
+            }
+         }
+      } catch( const boost::exception& e) {
+          wlog("no upo found, generating...");
+          db.create<upgrade_property_object>([](auto&){});
+      }
    }
 
    ~controller_impl() {

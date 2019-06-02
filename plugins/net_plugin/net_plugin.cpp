@@ -389,6 +389,8 @@ namespace eosio {
 
    constexpr uint16_t net_version = proto_explicit_sync;
 
+   constexpr uint16_t pbft_checkpoint_granularity = 100;
+
    struct transaction_state {
       transaction_id_type id;
       uint32_t            block_num = 0; ///< the block number the transaction was included in
@@ -684,7 +686,6 @@ namespace eosio {
       bool enqueue_sync_block();
       void request_sync_blocks(uint32_t start, uint32_t end);
 
-      void request_sync_checkpoints(uint32_t start, uint32_t end);
       void cancel_wait();
       void sync_wait();
       void fetch_wait();
@@ -783,6 +784,7 @@ namespace eosio {
       uint32_t       sync_last_requested_num;
       uint32_t       sync_next_expected_num;
       uint32_t       sync_req_span;
+      uint32_t       last_req_scp_num;
       connection_ptr source;
       stages         state;
 
@@ -807,6 +809,7 @@ namespace eosio {
       void recv_notice(const connection_ptr& c, const notice_message& msg);
       bool is_syncing();
       void set_in_sync();
+      void sync_stable_checkpoints(const connection_ptr& c, uint32_t target);
    };
 
    class dispatch_manager {
@@ -1371,13 +1374,6 @@ namespace eosio {
       sync_wait();
    }
 
-   void connection::request_sync_checkpoints(uint32_t start, uint32_t end) {
-       fc_dlog(logger, "request sync checkpoints");
-       checkpoint_request_message crm = {start,end};
-       enqueue( net_message(crm));
-       sync_wait();
-   }
-
    bool connection::process_next_message(net_plugin_impl& impl, uint32_t message_length) {
       try {
          auto ds = pending_message_buffer.create_datastream();
@@ -1604,6 +1600,22 @@ namespace eosio {
       request_next_chunk(c);
    }
 
+   void sync_manager::sync_stable_checkpoints(const connection_ptr& c, uint32_t target) {
+       controller& cc = chain_plug->chain();
+       uint32_t lscb_num = cc.last_stable_checkpoint_block_num();
+       if (last_req_scp_num < lscb_num || last_req_scp_num == 0) last_req_scp_num = lscb_num;
+       auto end = target;
+       auto max_target_scp_num = last_req_scp_num + pbft_checkpoint_granularity * 10;
+       if (target >  max_target_scp_num) end = max_target_scp_num;
+
+       checkpoint_request_message crm = {last_req_scp_num+1,end};
+       c->enqueue( net_message(crm));
+       fc_dlog(logger, "request sync stable checkpoints from ${s} to ${e}",
+               ("s", last_req_scp_num+1)("e", max_target_scp_num));
+       last_req_scp_num = max_target_scp_num;
+       c->sync_wait();
+   }
+
    void sync_manager::reassign_fetch(const connection_ptr& c, go_away_reason reason) {
       fc_ilog(logger, "reassign_fetch, our last req is ${cc}, next expected is ${ne} peer ${p}",
               ( "cc",sync_last_requested_num)("ne",sync_next_expected_num)("p",c->peer_name()));
@@ -1638,10 +1650,13 @@ namespace eosio {
       uint32_t head = cc.fork_db_head_block_num();
       block_id_type head_id = cc.fork_db_head_block_id();
       auto upgraded = cc.is_pbft_enabled();
-      if (peer_lib > lscb_num && upgraded) {
+      if (upgraded
+          && peer_lib > lscb_num
+          && head - lscb_num >= pbft_checkpoint_granularity * 2)
+      {
          //there might be a better way to sync checkpoints, yet we do not want to modify the existing handshake msg.
          fc_dlog(logger, "request sync checkpoints");
-         c->request_sync_checkpoints(lscb_num, peer_lib);
+         sync_stable_checkpoints(c, peer_lib);
       }
 
       if (head_id == msg.head_id) {
