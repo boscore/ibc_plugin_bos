@@ -1436,9 +1436,11 @@ namespace eosio {
 
             if (prepare_watermarks.empty()) return 0;
 
-            auto cw = *std::upper_bound(prepare_watermarks.begin(), prepare_watermarks.end(), lib);
+            auto cw = std::upper_bound(prepare_watermarks.begin(), prepare_watermarks.end(), lib);
 
-            if (cw > lib) return cw; else return 0;
+            if (cw == prepare_watermarks.end() || *cw <= lib) return 0;
+
+            return *cw;
         }
 
         void pbft_database::update_fork_schedules() {
