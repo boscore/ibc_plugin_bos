@@ -92,7 +92,7 @@ namespace eosio {
 
     const char* pbft_plugin::get_pbft_status() const {
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
-        return pbft_ctrl.state_machine.get_current()->get_name();
+        return pbft_ctrl.state_machine->get_current()->get_name();
     }
 
     block_id_type pbft_plugin::get_pbft_prepared_id() const {
@@ -108,7 +108,7 @@ namespace eosio {
     void pbft_plugin::set_pbft_current_view(const pbft_view_type view) {
         //this is used to boost the recovery from a disaster, do not set this unless you have to do so.
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
-        pbft_ctrl.state_machine.manually_set_current_view(view);
+        pbft_ctrl.state_machine->manually_set_current_view(view);
     }
 
     void pbft_plugin_impl::prepare_timer_tick() {
