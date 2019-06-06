@@ -187,6 +187,40 @@ void push_blocks( tester& from, tester& to ) {
     }
 }
 
+BOOST_AUTO_TEST_CASE(view_change_validation) {
+    tester tester;
+    controller &ctrl = *tester.control;
+    pbft_controller pbft_ctrl{ctrl};
+
+    auto msp = make_signature_provider();
+    ctrl.set_my_signature_providers(msp);
+
+    ctrl.set_upo(48);
+
+    tester.create_accounts( {N(alice),N(bob),N(carol),N(deny)} );
+    tester.set_producers({N(alice),N(bob),N(carol),N(deny)});
+    tester.produce_blocks(100);
+
+    pbft_ctrl.maybe_pbft_prepare();
+    pbft_ctrl.maybe_pbft_commit();
+    tester.produce_blocks(1);
+
+    BOOST_CHECK_EQUAL(ctrl.is_pbft_enabled(), true);
+    BOOST_CHECK_EQUAL(ctrl.head_block_num(), 101);
+
+
+    for(int i = 0; i< pbft_ctrl.config.view_change_timeout; i++){
+        pbft_ctrl.maybe_pbft_view_change();
+    }
+    pbft_ctrl.state_machine.send_pbft_view_change();
+    auto new_view = pbft_ctrl.pbft_db.get_proposed_new_view_num();
+    auto vcc = pbft_ctrl.pbft_db.generate_view_changed_certificate(new_view);
+    auto nv_msg = pbft_ctrl.pbft_db.send_pbft_new_view(vcc, new_view);
+
+    nv_msg.msg_header.public_key = tester::get_public_key( N(bob), "active");
+    BOOST_CHECK_EQUAL(pbft_ctrl.pbft_db.is_valid_new_view(nv_msg), false);
+}
+
 BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_on_short_fork) {
     tester short_prepared_fork, long_non_prepared_fork, new_view_generator;
     controller &ctrl_short_prepared_fork = *short_prepared_fork.control.get();

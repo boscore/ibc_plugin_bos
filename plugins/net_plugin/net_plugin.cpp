@@ -28,6 +28,10 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/device/back_inserter.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+
 using namespace eosio::chain::plugin_interface::compat;
 
 namespace fc {
@@ -109,7 +113,9 @@ namespace eosio {
    };
    class net_plugin_impl {
    private:
-      std::shared_ptr<std::vector<char>> encode_pbft_message(const net_message &msg)const;
+      std::vector<char> compress_pbft(const std::shared_ptr<std::vector<char>>& m)const;
+      std::vector<char> decompress_pbft(const std::shared_ptr<std::vector<char>>& m)const;
+      std::shared_ptr<std::vector<char>> encode_pbft_message(const net_message &msg, bool compress = false)const;
    public:
       net_plugin_impl();
 
@@ -240,8 +246,8 @@ namespace eosio {
       void handle_message( connection_ptr c, const response_p2p_message &msg);
 
       //pbft messages
-      bool maybe_add_pbft_cache(const string &uuid);
-      void clean_expired_pbft_cache();
+      bool maybe_add_to_pbft_cache(const string &uuid);
+      void clean_expired_pbft_messages();
       template<typename M>
       bool is_pbft_msg_outdated(M const & msg);
       template<typename M>
@@ -264,6 +270,7 @@ namespace eosio {
       void handle_message( connection_ptr c, const pbft_checkpoint &msg);
       void handle_message( connection_ptr c, const pbft_stable_checkpoint &msg);
       void handle_message( connection_ptr c, const checkpoint_request_message &msg);
+      void handle_message( connection_ptr c, const compressed_pbft_message &msg);
 
       void start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection);
       void start_txn_timer();
@@ -679,6 +686,7 @@ namespace eosio {
                            bool trigger_send, go_away_reason close_after_send,
                            bool to_sync_queue = false);
       void enqueue_pbft( const std::shared_ptr<std::vector<char>>& m, const time_point_sec deadline);
+
       bool pbft_read_to_send();
 
       void cancel_sync(go_away_reason);
@@ -1158,7 +1166,7 @@ namespace eosio {
                 break;
             }
         }
-        if (drop_pbft_count) wlog("dropped ${n} outdated pbft messages", ("n",drop_pbft_count));
+
         //drop timeout messages in mem, init send buffer only when actual send happens
         //copied from a previous version of  connection::enqueue
         connection_wptr weak_this = shared_from_this();
@@ -2050,7 +2058,52 @@ namespace eosio {
    }
 
    //------------------------------------------------------------------------
-   std::shared_ptr<std::vector<char>> net_plugin_impl::encode_pbft_message(const net_message &msg) const {
+
+   namespace bio = boost::iostreams;
+   template<size_t Limit>
+   struct read_limiter {
+      using char_type = char;
+      using category = bio::multichar_output_filter_tag;
+
+      template<typename Sink>
+      size_t write(Sink &sink, const char* s, size_t count)
+      {
+         EOS_ASSERT(_total + count <= Limit, tx_decompression_error, "Exceeded maximum decompressed transaction size");
+         _total += count;
+         return bio::write(sink, s, count);
+      }
+      size_t _total = 0;
+   };
+
+   std::vector<char> net_plugin_impl::compress_pbft(const std::shared_ptr<std::vector<char>>& m) const {
+      std::vector<char> out;
+      bio::filtering_ostream comp;
+      comp.push(bio::zlib_compressor(bio::zlib::best_compression));
+      comp.push(bio::back_inserter(out));
+      bio::write(comp, m->data(), m->size());
+      bio::close(comp);
+      return out;
+   }
+
+   std::vector<char> net_plugin_impl::decompress_pbft(const std::shared_ptr<std::vector<char>>& m) const {
+      try {
+         std::vector<char> out;
+         bio::filtering_ostream decomp;
+         decomp.push(bio::zlib_decompressor());
+         decomp.push(read_limiter<1*1024*1024>()); // limit to 10 megs decompressed for zip bomb protections
+         decomp.push(bio::back_inserter(out));
+         bio::write(decomp, m->data(), m->size());
+         bio::close(decomp);
+         return out;
+      } catch( fc::exception& er ) {
+         throw;
+      } catch( ... ) {
+         fc::unhandled_exception er( FC_LOG_MESSAGE( warn, "internal decompression error"), std::current_exception() );
+         throw er;
+      }
+   }
+
+   std::shared_ptr<std::vector<char>> net_plugin_impl::encode_pbft_message(const net_message &msg, bool compress) const {
 
        uint32_t payload_size = fc::raw::pack_size( msg );
 
@@ -2062,8 +2115,24 @@ namespace eosio {
        fc::datastream<char*> ds( send_buffer->data(), buffer_size);
        ds.write( header, header_size );
        fc::raw::pack( ds, msg );
+       auto out_buffer = send_buffer;
 
-       return send_buffer;
+       if (compress) {
+           auto compressed_msg = std::make_shared<vector<char>>(compress_pbft(send_buffer));
+           auto cpnv = compressed_pbft_message{compressed_msg};
+           payload_size = fc::raw::pack_size( cpnv );
+
+           header = reinterpret_cast<char*>(&payload_size);
+           header_size = sizeof(payload_size);
+           buffer_size = header_size + payload_size;
+
+           auto compressed_buffer = std::make_shared<vector<char>>(buffer_size);
+           fc::datastream<char*> ds( compressed_buffer->data(), buffer_size);
+           ds.write( header, header_size );
+           fc::raw::pack( ds, &cpnv );
+           out_buffer = compressed_buffer;
+       }
+       return out_buffer;
    }
 
    void net_plugin_impl::connect(const connection_ptr& c) {
@@ -2917,17 +2986,13 @@ namespace eosio {
 
     template<typename M>
     bool net_plugin_impl::is_pbft_msg_outdated(M const & msg) {
-        if (time_point_sec(time_point::now()) > time_point_sec(msg.timestamp) + pbft_message_TTL) {
-            wlog("received a outdated pbft message ${m}", ("m", msg));
-            return true;
-        }
-        return false;
+        return (time_point_sec(time_point::now()) > time_point_sec(msg.msg_header.timestamp) + pbft_message_TTL);
     }
 
     template<typename M>
     bool net_plugin_impl::is_pbft_msg_valid(M const & msg) {
         // Do some basic validations of an incoming pbft msg, bad msgs should be quickly discarded without affecting state.
-        return  chain_id == msg.chain_id
+        return  chain_id == msg.msg_header.chain_id
                 && !is_pbft_msg_outdated(msg)
                 && !sync_master->is_syncing();
     }
@@ -2955,61 +3020,61 @@ namespace eosio {
     }
 
     void net_plugin_impl::pbft_outgoing_prepare(const pbft_prepare &msg) {
-        auto added = maybe_add_pbft_cache(msg.uuid);
+        auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
         if (!added) return;
 
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_prepare(msg)) return;
 
         bcast_pbft_msg(msg, pbft_message_TTL);
-        fc_ilog( logger, "sent prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_num)("v", msg.view)("k", msg.public_key));
+        fc_dlog( logger, "sent prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num)("v", msg.view)("k", msg.msg_header.public_key));
     }
 
     void net_plugin_impl::pbft_outgoing_commit(const pbft_commit &msg) {
-        auto added = maybe_add_pbft_cache(msg.uuid);
+        auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
         if (!added) return;
 
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_commit(msg)) return;
 
         bcast_pbft_msg(msg, pbft_message_TTL);
-        fc_ilog( logger, "sent commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_num)("v", msg.view)("k", msg.public_key));
+        fc_dlog( logger, "sent commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num)("v", msg.view)("k", msg.msg_header.public_key));
     }
 
     void net_plugin_impl::pbft_outgoing_view_change(const pbft_view_change &msg) {
-        auto added = maybe_add_pbft_cache(msg.uuid);
+        auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
         if (!added) return;
 
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_view_change(msg)) return;
 
         bcast_pbft_msg(msg, pbft_message_TTL);
-        fc_ilog( logger, "sent view change {cv: ${cv}, tv: ${tv}} from ${v}", ("cv", msg.current_view)("tv", msg.target_view)("v", msg.public_key));
+        fc_dlog( logger, "sent view change {cv: ${cv}, tv: ${tv}} from ${v}", ("cv", msg.current_view)("tv", msg.target_view)("v", msg.msg_header.public_key));
     }
 
     void net_plugin_impl::pbft_outgoing_new_view(const pbft_new_view &msg) {
-        auto added = maybe_add_pbft_cache(msg.uuid);
+        auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
         if (!added) return;
 
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_new_view(msg)) return;
 
         bcast_pbft_msg(msg, INT_MAX);
-        fc_ilog( logger, "sent new view at view: ${v}, from ${k}, ", ("v", msg.view)("k", msg.public_key));
+        fc_dlog( logger, "sent new view at view: ${v}, from ${k}, ", ("v", msg.new_view)("k", msg.msg_header.public_key));
     }
 
     void net_plugin_impl::pbft_outgoing_checkpoint(const pbft_checkpoint &msg) {
-        auto added = maybe_add_pbft_cache(msg.uuid);
+        auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
         if (!added) return;
 
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
         if (!pcc.pbft_db.is_valid_checkpoint(msg)) return;
 
         bcast_pbft_msg(msg, pbft_message_TTL);
-        fc_ilog( logger, "sent checkpoint at height: ${n}, from ${k}, ", ("n", msg.block_num)("k", msg.public_key));
+        fc_dlog( logger, "sent checkpoint at height: ${n}, from ${k}, ", ("n", msg.block_info.block_num)("k", msg.msg_header.public_key));
     }
 
-    bool net_plugin_impl::maybe_add_pbft_cache(const string &uuid){
+    bool net_plugin_impl::maybe_add_to_pbft_cache(const string &uuid){
        auto itr = pbft_message_cache.find(uuid);
        if (itr == pbft_message_cache.end()) {
            //add to cache
@@ -3019,7 +3084,7 @@ namespace eosio {
        return false;
     }
 
-    void net_plugin_impl::clean_expired_pbft_cache(){
+    void net_plugin_impl::clean_expired_pbft_messages(){
        auto itr = pbft_message_cache.begin();
        auto now = time_point::now();
 
@@ -3035,14 +3100,14 @@ namespace eosio {
 
        if (!is_pbft_msg_valid(msg)) return;
 
-       auto added = maybe_add_pbft_cache(msg.uuid);
+       auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
        if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_prepare(msg)) return;
 
        forward_pbft_msg(c, msg, pbft_message_TTL);
-       fc_ilog( logger, "received prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_num)("v", msg.view)("k", msg.public_key));
+       fc_dlog( logger, "received prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num)("v", msg.view)("k", msg.msg_header.public_key));
 
        pbft_incoming_prepare_channel.publish(msg);
 
@@ -3052,14 +3117,14 @@ namespace eosio {
 
        if (!is_pbft_msg_valid(msg)) return;
 
-       auto added = maybe_add_pbft_cache(msg.uuid);
+       auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
        if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_commit(msg)) return;
 
        forward_pbft_msg(c, msg, pbft_message_TTL);
-       fc_ilog( logger, "received commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_num)("v", msg.view)("k", msg.public_key));
+       fc_dlog( logger, "received commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num)("v", msg.view)("k", msg.msg_header.public_key));
 
        pbft_incoming_commit_channel.publish(msg);
     }
@@ -3068,57 +3133,73 @@ namespace eosio {
 
        if (!is_pbft_msg_valid(msg)) return;
 
-       auto added = maybe_add_pbft_cache(msg.uuid);
+       auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
        if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_view_change(msg)) return;
 
        forward_pbft_msg(c, msg, pbft_message_TTL);
-       fc_ilog( logger, "received view change {cv: ${cv}, tv: ${tv}} from ${v}", ("cv", msg.current_view)("tv", msg.target_view)("v", msg.public_key));
+       fc_dlog( logger, "received view change {cv: ${cv}, tv: ${tv}} from ${v}", ("cv", msg.current_view)("tv", msg.target_view)("v", msg.msg_header.public_key));
 
        pbft_incoming_view_change_channel.publish(msg);
     }
 
     void net_plugin_impl::handle_message( connection_ptr c, const pbft_new_view &msg) {
 
-       if (chain_id != msg.chain_id) return;
+       if (chain_id != msg.msg_header.chain_id) return;
 
-       auto added = maybe_add_pbft_cache(msg.uuid);
+       auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
        if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
-       if (!(msg.public_key == pcc.pbft_db.get_new_view_primary_key(msg.view) && msg.is_signature_valid())) return;
+       if (!(msg.msg_header.public_key == pcc.pbft_db.get_new_view_primary_key(msg.new_view) && msg.is_signature_valid())) return;
 
        forward_pbft_msg(c, msg, INT_MAX);
-       fc_ilog( logger, "received new view: ${n}, from ${v}", ("n", msg)("v", msg.public_key));
+       fc_dlog( logger, "received new view: ${n}, from ${v}", ("n", msg)("v", msg.msg_header.public_key));
 
        pbft_incoming_new_view_channel.publish(msg);
+    }
+
+    void net_plugin_impl::handle_message( connection_ptr c, const compressed_pbft_message &msg) {
+
+        auto decompressed_msg = decompress_pbft(msg.content);
+
+        net_message message;
+        fc::datastream<const char *> ds(decompressed_msg.data(), decompressed_msg.size());
+        fc::raw::unpack(ds, message);
+
+        try {
+            msg_handler m(*this, c);
+            message.visit( m );
+        } catch(  const fc::exception& e ) {
+            edump((e.to_detail_string() ));
+        }
     }
 
     void net_plugin_impl::handle_message( connection_ptr c, const pbft_checkpoint &msg) {
 
        if (!is_pbft_msg_valid(msg)) return;
 
-       auto added = maybe_add_pbft_cache(msg.uuid);
+       auto added = maybe_add_to_pbft_cache(msg.msg_header.uuid);
        if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_checkpoint(msg)) return;
 
        forward_pbft_msg(c, msg, pbft_message_TTL);
-       fc_ilog( logger, "received checkpoint at ${n}, from ${v}", ("n", msg.block_num)("v", msg.public_key));
+       fc_dlog( logger, "received checkpoint at ${n}, from ${v}", ("n", msg.block_info.block_num)("v", msg.msg_header.public_key));
 
        pbft_incoming_checkpoint_channel.publish(msg);
     }
 
     void net_plugin_impl::handle_message( connection_ptr c, const pbft_stable_checkpoint &msg) {
-       if (chain_id != msg.chain_id) return;
+       //TODO: if (chain_id != msg.msg_header.chain_id) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
 
        if (pcc.pbft_db.is_valid_stable_checkpoint(msg)) {
-           fc_ilog(logger, "received stable checkpoint at ${n}, from ${v}", ("n", msg.block_num)("v", c->peer_name()));
+           fc_ilog(logger, "received stable checkpoint at ${n}, from ${v}", ("n", msg.block_info.block_num)("v", c->peer_name()));
            for (auto cp: msg.checkpoints) {
                pbft_incoming_checkpoint_channel.publish(cp);
            }
@@ -3158,7 +3239,7 @@ namespace eosio {
             if (ec) {
                 wlog ("pbft message cache ticker error: ${m}", ("m", ec.message()));
             }
-            clean_expired_pbft_cache();
+            clean_expired_pbft_messages();
         });
     }
 

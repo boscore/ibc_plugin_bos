@@ -1,3 +1,5 @@
+#include <utility>
+
 #pragma once
 
 #include <eosio/chain/pbft_database.hpp>
@@ -13,24 +15,26 @@ namespace eosio {
             vector<pbft_prepare> prepares_cache;
             vector<pbft_commit> commits_cache;
             vector<pbft_view_change> view_changes_cache;
-            vector<pbft_prepared_certificate> prepared_certificate;
-            vector<vector<pbft_committed_certificate>> committed_certificate;
-            vector<pbft_view_changed_certificate> view_changed_certificate;
+            pbft_prepared_certificate prepared_certificate;
+            vector<pbft_committed_certificate> committed_certificate;
+            pbft_view_changed_certificate view_changed_certificate;
         };
 
-        class psm_machine {
-            class psm_state *current;
+        class psm_state;
+        using psm_state_ptr = std::shared_ptr<psm_state>;
+
+        class psm_machine : public std::enable_shared_from_this<psm_machine> {
 
         public:
             explicit psm_machine(pbft_database& pbft_db);
             ~psm_machine();
 
-            void set_current(psm_state *s) {
-                current = s;
+            void set_current(psm_state_ptr s) {
+                current = std::move(s);
             }
 
-            psm_state* get_current() {
-                return this->current;
+            psm_state_ptr get_current() {
+                return current;
             }
 
             void on_prepare(pbft_prepare &e);
@@ -44,19 +48,17 @@ namespace eosio {
 
             void on_new_view(pbft_new_view &e);
 
-            template<typename T>
-            void transit_to_committed_state(T const & s, bool to_new_view);
+            void transit_to_committed_state(psm_state_ptr s, bool to_new_view);
 
-            template<typename T>
-            void transit_to_prepared_state(T const & s);
+            void transit_to_prepared_state(psm_state_ptr s);
 
             void send_pbft_view_change();
 
-            template<typename T>
-            void transit_to_view_change_state(T const & s);
+            void transit_to_view_change_state(psm_state_ptr s);
 
-            template<typename T>
-            void transit_to_new_view(const pbft_new_view &new_view, T const &s);
+            bool maybe_new_view(psm_state_ptr s);
+
+            void transit_to_new_view(const pbft_new_view &new_view, psm_state_ptr s);
 
             const vector<pbft_prepare> &get_prepares_cache() const;
 
@@ -74,17 +76,17 @@ namespace eosio {
 
             void set_current_view(const uint32_t &cv);
 
-            const vector<pbft_prepared_certificate> &get_prepared_certificate() const;
+            const pbft_prepared_certificate &get_prepared_certificate() const;
 
-            void set_prepared_certificate(const vector<pbft_prepared_certificate> &pcert);
+            void set_prepared_certificate(const pbft_prepared_certificate &pcert);
 
-            const vector<vector<pbft_committed_certificate>> &get_committed_certificate() const;
+            const vector<pbft_committed_certificate> &get_committed_certificate() const;
 
-            void set_committed_certificate(const vector<vector<pbft_committed_certificate>> &ccert);
+            void set_committed_certificate(const vector<pbft_committed_certificate> &ccert);
 
-            const vector<pbft_view_changed_certificate> &get_view_changed_certificate() const;
+            const pbft_view_changed_certificate &get_view_changed_certificate() const;
 
-            void set_view_changed_certificate(const vector<pbft_view_changed_certificate> &vc_cert);
+            void set_view_changed_certificate(const pbft_view_changed_certificate &vc_cert);
 
             const uint32_t &get_target_view_retries() const;
 
@@ -108,34 +110,35 @@ namespace eosio {
             uint32_t view_change_timer;
 
         private:
+            psm_state_ptr current;
             pbft_database &pbft_db;
-
         };
 
-        class psm_state {
+        using psm_machine_ptr = std::shared_ptr<psm_machine>;
+
+        class psm_state : public std::enable_shared_from_this<psm_state> {
 
         public:
             psm_state();
             ~psm_state();
 
-            virtual void on_prepare(psm_machine *m, pbft_prepare &e, pbft_database &pbft_db) = 0;
+            virtual void on_prepare(psm_machine_ptr m, pbft_prepare &e, pbft_database &pbft_db) = 0;
 
-            virtual void send_prepare(psm_machine *m, pbft_database &pbft_db) = 0;
+            virtual void send_prepare(psm_machine_ptr m, pbft_database &pbft_db) = 0;
 
-            virtual void on_commit(psm_machine *m, pbft_commit &e, pbft_database &pbft_db) = 0;
+            virtual void on_commit(psm_machine_ptr m, pbft_commit &e, pbft_database &pbft_db) = 0;
 
-            virtual void send_commit(psm_machine *m, pbft_database &pbft_db) = 0;
+            virtual void send_commit(psm_machine_ptr m, pbft_database &pbft_db) = 0;
 
-            virtual void on_view_change(psm_machine *m, pbft_view_change &e, pbft_database &pbft_db) = 0;
+            virtual void on_view_change(psm_machine_ptr m, pbft_view_change &e, pbft_database &pbft_db) = 0;
 
-            virtual void send_view_change(psm_machine *m, pbft_database &pbft_db) = 0;
+            virtual void send_view_change(psm_machine_ptr m, pbft_database &pbft_db) = 0;
 
-            virtual void on_new_view(psm_machine *m, pbft_new_view &e, pbft_database &pbft_db) = 0;
-
-            virtual void manually_set_view(psm_machine *m, const uint32_t &view) = 0;
+            virtual void on_new_view(psm_machine_ptr m, pbft_new_view &e, pbft_database &pbft_db) = 0;
 
             virtual const char* get_name() = 0;
 
+            std::shared_ptr<psm_state> get_self()  { return shared_from_this(); };
         };
 
         class psm_prepared_state final: public psm_state {
@@ -144,25 +147,23 @@ namespace eosio {
             psm_prepared_state();
             ~psm_prepared_state();
 
-            void on_prepare(psm_machine *m, pbft_prepare &e, pbft_database &pbft_db) override;
+            void on_prepare(psm_machine_ptr m, pbft_prepare &e, pbft_database &pbft_db) override;
 
-            void send_prepare(psm_machine *m, pbft_database &pbft_db) override;
+            void send_prepare(psm_machine_ptr m, pbft_database &pbft_db) override;
 
-            void on_commit(psm_machine *m, pbft_commit &e, pbft_database &pbft_db) override;
+            void on_commit(psm_machine_ptr m, pbft_commit &e, pbft_database &pbft_db) override;
 
-            void send_commit(psm_machine *m, pbft_database &pbft_db) override;
+            void send_commit(psm_machine_ptr m, pbft_database &pbft_db) override;
 
-            void on_view_change(psm_machine *m, pbft_view_change &e, pbft_database &pbft_db) override;
+            void on_view_change(psm_machine_ptr m, pbft_view_change &e, pbft_database &pbft_db) override;
 
-            void send_view_change(psm_machine *m, pbft_database &pbft_db) override;
+            void send_view_change(psm_machine_ptr m, pbft_database &pbft_db) override;
 
-            void on_new_view(psm_machine *m, pbft_new_view &e, pbft_database &pbft_db) override;
-
-            void manually_set_view(psm_machine *m, const uint32_t &view) override;
+            void on_new_view(psm_machine_ptr m, pbft_new_view &e, pbft_database &pbft_db) override;
 
             bool pending_commit_local;
 
-            const char* get_name() override { return "prepared"; }
+            const char* get_name() override { return "{==== PREPARED ====}"; }
         };
 
         class psm_committed_state final: public psm_state {
@@ -170,44 +171,40 @@ namespace eosio {
             psm_committed_state();
             ~psm_committed_state();
 
-            void on_prepare(psm_machine *m, pbft_prepare &e, pbft_database &pbft_db) override;
+            void on_prepare(psm_machine_ptr m, pbft_prepare &e, pbft_database &pbft_db) override;
 
-            void send_prepare(psm_machine *m, pbft_database &pbft_db) override;
+            void send_prepare(psm_machine_ptr m, pbft_database &pbft_db) override;
 
-            void on_commit(psm_machine *m, pbft_commit &e, pbft_database &pbft_db) override;
+            void on_commit(psm_machine_ptr m, pbft_commit &e, pbft_database &pbft_db) override;
 
-            void send_commit(psm_machine *m, pbft_database &pbft_db) override;
+            void send_commit(psm_machine_ptr m, pbft_database &pbft_db) override;
 
-            void on_view_change(psm_machine *m, pbft_view_change &e, pbft_database &pbft_db) override;
+            void on_view_change(psm_machine_ptr m, pbft_view_change &e, pbft_database &pbft_db) override;
 
-            void send_view_change(psm_machine *m, pbft_database &pbft_db) override;
+            void send_view_change(psm_machine_ptr m, pbft_database &pbft_db) override;
 
-            void on_new_view(psm_machine *m, pbft_new_view &e, pbft_database &pbft_db) override;
+            void on_new_view(psm_machine_ptr m, pbft_new_view &e, pbft_database &pbft_db) override;
 
-            void manually_set_view(psm_machine *m, const uint32_t &view) override;
-
-            const char* get_name() override { return "committed"; }
+            const char* get_name() override { return "{==== COMMITTED ====}"; }
         };
 
         class psm_view_change_state final: public psm_state {
         public:
-            void on_prepare(psm_machine *m, pbft_prepare &e, pbft_database &pbft_db) override;
+            void on_prepare(psm_machine_ptr m, pbft_prepare &e, pbft_database &pbft_db) override;
 
-            void send_prepare(psm_machine *m, pbft_database &pbft_db) override;
+            void send_prepare(psm_machine_ptr m, pbft_database &pbft_db) override;
 
-            void on_commit(psm_machine *m, pbft_commit &e, pbft_database &pbft_db) override;
+            void on_commit(psm_machine_ptr m, pbft_commit &e, pbft_database &pbft_db) override;
 
-            void send_commit(psm_machine *m, pbft_database &pbft_db) override;
+            void send_commit(psm_machine_ptr m, pbft_database &pbft_db) override;
 
-            void on_view_change(psm_machine *m, pbft_view_change &e, pbft_database &pbft_db) override;
+            void on_view_change(psm_machine_ptr m, pbft_view_change &e, pbft_database &pbft_db) override;
 
-            void send_view_change(psm_machine *m, pbft_database &pbft_db) override;
+            void send_view_change(psm_machine_ptr m, pbft_database &pbft_db) override;
 
-            void on_new_view(psm_machine *m, pbft_new_view &e, pbft_database &pbft_db) override;
+            void on_new_view(psm_machine_ptr m, pbft_new_view &e, pbft_database &pbft_db) override;
 
-            void manually_set_view(psm_machine *m, const uint32_t &view) override;
-
-            const char* get_name() override { return "view change"; }
+            const char* get_name() override { return "{==== VIEW CHANGE ====}"; }
         };
 
         struct pbft_config {
@@ -217,11 +214,11 @@ namespace eosio {
 
         class pbft_controller {
         public:
-            pbft_controller(controller& ctrl);
+            explicit pbft_controller(controller& ctrl);
             ~pbft_controller();
 
             pbft_database pbft_db;
-            psm_machine state_machine;
+            std::shared_ptr<class psm_machine> state_machine;
             pbft_config config;
 
             void maybe_pbft_prepare();

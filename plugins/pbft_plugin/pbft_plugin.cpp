@@ -73,11 +73,11 @@ namespace eosio {
         if (!records.empty()) return records;
         return vector<pbft_checkpoint_state>();
     }
-    pbft_view_state pbft_plugin::get_view_change_record(const pbft_view_type& view) const {
+    pbft_view_change_state pbft_plugin::get_view_change_record(const pbft_view_type& view) const {
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         auto record = pbft_ctrl.pbft_db.get_view_changes_by_target_view(view);
         if (record) return *record;
-        return pbft_view_state();
+        return pbft_view_change_state();
     }
 
     vector<block_num_type> pbft_plugin::get_watermarks() const {
@@ -92,7 +92,7 @@ namespace eosio {
 
     const char* pbft_plugin::get_pbft_status() const {
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
-        return pbft_ctrl.state_machine.get_current()->get_name();
+        return pbft_ctrl.state_machine->get_current()->get_name();
     }
 
     block_id_type pbft_plugin::get_pbft_prepared_id() const {
@@ -108,7 +108,7 @@ namespace eosio {
     void pbft_plugin::set_pbft_current_view(const pbft_view_type view) {
         //this is used to boost the recovery from a disaster, do not set this unless you have to do so.
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
-        pbft_ctrl.state_machine.manually_set_current_view(view);
+        pbft_ctrl.state_machine->manually_set_current_view(view);
     }
 
     void pbft_plugin_impl::prepare_timer_tick() {
