@@ -148,7 +148,7 @@ struct request_p2p_message{
    };
 
    struct compressed_pbft_message {
-      std::shared_ptr<std::vector<char> > content;
+      std::vector<char> content;
    };
 
    using net_message = static_variant<handshake_message,

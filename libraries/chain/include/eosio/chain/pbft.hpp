@@ -207,19 +207,14 @@ namespace eosio {
             const char* get_name() override { return "{==== VIEW CHANGE ====}"; }
         };
 
-        struct pbft_config {
-            uint32_t view_change_timeout = 6;
-            bool     bp_candidate = false;
-        };
-
         class pbft_controller {
         public:
             explicit pbft_controller(controller& ctrl);
             ~pbft_controller();
+            const uint16_t view_change_timeout = 6;
 
-            pbft_database pbft_db;
-            std::shared_ptr<class psm_machine> state_machine;
-            pbft_config config;
+            pbft_database                       pbft_db;
+            std::shared_ptr<class psm_machine>  state_machine;
 
             void maybe_pbft_prepare();
             void maybe_pbft_commit();
@@ -233,11 +228,9 @@ namespace eosio {
             void on_pbft_checkpoint(pbft_checkpoint &cp);
 
         private:
-            fc::path datadir;
-
-
+            fc::path    datadir;
         };
     }
 } /// namespace eosio::chain
 
-FC_REFLECT(eosio::chain::pbft_controller, (pbft_db)(state_machine)(config))
+FC_REFLECT(eosio::chain::pbft_controller, (pbft_db)(state_machine))

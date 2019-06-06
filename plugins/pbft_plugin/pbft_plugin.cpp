@@ -18,7 +18,7 @@ namespace eosio {
 
         boost::asio::steady_timer::duration prepare_timeout{std::chrono::milliseconds{1000}};
         boost::asio::steady_timer::duration commit_timeout{std::chrono::milliseconds{1000}};
-        boost::asio::steady_timer::duration view_change_timeout{std::chrono::seconds{5}};
+        boost::asio::steady_timer::duration view_change_check_interval{std::chrono::seconds{5}};
         boost::asio::steady_timer::duration checkpoint_timeout{std::chrono::seconds{50}};
 
         void prepare_timer_tick();
@@ -144,7 +144,7 @@ namespace eosio {
         } catch (boost::system::system_error &e) {
             elog("view change timer cancel error: ${e}", ("e", e.what()));
         }
-        view_change_timer->expires_from_now(view_change_timeout);
+        view_change_timer->expires_from_now(view_change_check_interval);
         view_change_timer->async_wait([&](boost::system::error_code ec) {
             view_change_timer_tick();
             if (ec) {

@@ -8,8 +8,6 @@ namespace eosio {
         pbft_controller::pbft_controller(controller &ctrl) : 
         pbft_db(ctrl), 
         state_machine(new psm_machine(pbft_db)) {
-            config.view_change_timeout = 6;
-            config.bp_candidate = true;
             datadir = ctrl.state_dir();
 
             if (!fc::is_directory(datadir))
@@ -24,7 +22,6 @@ namespace eosio {
                 uint32_t current_view;
                 fc::raw::unpack(ds, current_view);
                 state_machine->set_current_view(current_view);
-
                 state_machine->set_target_view(state_machine->get_current_view() + 1);
                 ilog("current view: ${cv}", ("cv", current_view));
             }
@@ -53,7 +50,7 @@ namespace eosio {
 
         void pbft_controller::maybe_pbft_view_change() {
             if (!pbft_db.should_send_pbft_msg()) return;
-            if (state_machine->get_view_change_timer() <= config.view_change_timeout) {
+            if (state_machine->get_view_change_timer() <= view_change_timeout) {
                 if (!state_machine->get_view_changes_cache().empty()) {
                     pbft_db.send_and_add_pbft_view_change(state_machine->get_view_changes_cache());
                 }
@@ -65,22 +62,18 @@ namespace eosio {
         }
 
         void pbft_controller::on_pbft_prepare(pbft_prepare &p) {
-            if (!config.bp_candidate) return;
             state_machine->on_prepare(p);
         }
 
         void pbft_controller::on_pbft_commit(pbft_commit &c) {
-            if (!config.bp_candidate) return;
             state_machine->on_commit(c);
         }
 
         void pbft_controller::on_pbft_view_change(pbft_view_change &vc) {
-            if (!config.bp_candidate) return;
             state_machine->on_view_change(vc);
         }
 
         void pbft_controller::on_pbft_new_view(pbft_new_view &nv) {
-            if (!config.bp_candidate) return;
             state_machine->on_new_view(nv);
         }
 
@@ -437,7 +430,7 @@ namespace eosio {
                         get_view_changed_certificate(),
                         new_view);
 
-                if (nv_msg == pbft_new_view{}) return false;
+                if (nv_msg.empty()) return false;
 
                 try {
                     transit_to_new_view(nv_msg, s);
@@ -469,7 +462,7 @@ namespace eosio {
 
             pbft_db.prune_pbft_index();
 
-            if (!(new_view.stable_checkpoint == pbft_stable_checkpoint{})) {
+            if (!(new_view.stable_checkpoint.empty())) {
                 for (auto cp :new_view.stable_checkpoint.checkpoints) {
                     try {
                         pbft_db.add_pbft_checkpoint(cp);
