@@ -505,6 +505,14 @@ namespace eosio {
 
         void psm_machine::send_pbft_view_change() {
 
+            if (get_target_view_retries() < pow(2,get_target_view() - get_current_view() - 1)) {
+                set_target_view_retries(get_target_view_retries() + 1);
+            } else {
+                set_target_view_retries(0);
+                set_target_view(get_target_view() + 1);
+                set_view_changes_cache(vector<pbft_view_change>{});
+            }
+
             if (get_target_view_retries() == 0) {
                 set_view_changes_cache(vector<pbft_view_change>{});
                 set_prepared_certificate(pbft_db.generate_prepared_certificate());
@@ -513,14 +521,6 @@ namespace eosio {
 
             EOS_ASSERT((get_target_view() > get_current_view()), pbft_exception,
                        "target view should be always greater than current view");
-
-            if (get_target_view_retries() < pow(2,get_target_view() - get_current_view() - 1)) {
-                set_target_view_retries(get_target_view_retries() + 1);
-            } else {
-                set_target_view_retries(0);
-                set_target_view(get_target_view() + 1);
-                set_view_changes_cache(vector<pbft_view_change>{});
-            }
 
             auto view_changes = pbft_db.send_and_add_pbft_view_change(
                     get_view_changes_cache(),

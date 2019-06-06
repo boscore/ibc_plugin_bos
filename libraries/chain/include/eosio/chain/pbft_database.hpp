@@ -578,7 +578,7 @@ namespace eosio {
             vector<block_num_type> prepare_watermarks;
             flat_map<public_key_type, uint32_t> fork_schedules;
 
-            bool is_valid_pbft_message_header(const pbft_message_common &common);
+            bool is_valid_pbft_message(const pbft_message_common &common);
 
             bool is_valid_prepared_certificate(const pbft_prepared_certificate &certificate);
 
@@ -595,6 +595,8 @@ namespace eosio {
                     unsigned long non_fork_bp_count);
 
             producer_schedule_type lscb_active_producers() const;
+
+            vector<block_num_type>& get_updated_watermarks();
 
             template<typename Signal, typename Arg>
             void emit(const Signal &s, Arg &&a);

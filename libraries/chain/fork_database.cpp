@@ -195,7 +195,7 @@ namespace eosio { namespace chain {
       }
    }
 
-   block_state_ptr fork_database::add( const block_state_ptr& n, bool skip_validate_previous, bool new_version ) {
+   block_state_ptr fork_database::add( const block_state_ptr& n, bool skip_validate_previous, bool pbft_enabled ) {
       EOS_ASSERT( n, fork_database_exception, "attempt to add null block state" );
       EOS_ASSERT( my->head, fork_db_block_not_found, "no head block set" );
 
@@ -224,7 +224,7 @@ namespace eosio { namespace chain {
 
       auto should_prune_oldest = oldest->block_num < lib;
 
-      if (new_version) {
+      if (pbft_enabled) {
           should_prune_oldest = should_prune_oldest && oldest->block_num < checkpoint;
       }
 
@@ -235,7 +235,7 @@ namespace eosio { namespace chain {
       return n;
    }
 
-   block_state_ptr fork_database::add( signed_block_ptr b, bool skip_validate_signee, bool new_version ) {
+   block_state_ptr fork_database::add( signed_block_ptr b, bool skip_validate_signee, bool pbft_enabled ) {
       EOS_ASSERT( b, fork_database_exception, "attempt to add null block" );
       EOS_ASSERT( my->head, fork_db_block_not_found, "no head block set" );
       const auto& by_id_idx = my->index.get<by_block_id>();
@@ -245,9 +245,9 @@ namespace eosio { namespace chain {
       auto prior = by_id_idx.find( b->previous );
       EOS_ASSERT( prior != by_id_idx.end(), unlinkable_block_exception, "unlinkable block", ("id", string(b->id()))("previous", string(b->previous)) );
 
-      auto result = std::make_shared<block_state>( **prior, move(b), skip_validate_signee, new_version);
+      auto result = std::make_shared<block_state>( **prior, move(b), skip_validate_signee, pbft_enabled);
       EOS_ASSERT( result, fork_database_exception , "fail to add new block state" );
-      return add(result, true, new_version);
+      return add(result, true, pbft_enabled);
    }
 
    const block_state_ptr& fork_database::head()const { return my->head; }
@@ -612,7 +612,7 @@ namespace eosio { namespace chain {
        vector<block_num_type> watermarks;
        auto& pidx = my->index.get<by_watermark>();
        auto pitr  = pidx.begin();
-       while (pitr != pidx.end() && (*pitr)->pbft_watermark) {
+       while (pitr != pidx.end() && (*pitr)->pbft_watermark && (*pitr)->in_current_chain) {
            watermarks.emplace_back((*pitr)->block_num);
            ++pitr;
        }

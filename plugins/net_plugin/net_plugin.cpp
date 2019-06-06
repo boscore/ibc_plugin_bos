@@ -1621,7 +1621,6 @@ namespace eosio {
        fc_dlog(logger, "request sync stable checkpoints from ${s} to ${e}",
                ("s", last_req_scp_num+1)("e", max_target_scp_num));
        last_req_scp_num = max_target_scp_num;
-       c->sync_wait();
    }
 
    void sync_manager::reassign_fetch(const connection_ptr& c, go_away_reason reason) {

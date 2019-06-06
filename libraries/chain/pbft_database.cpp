@@ -24,9 +24,8 @@ namespace eosio {
 
                 fc::datastream<const char *> ds(content.data(), content.size());
 
-                // keep these unused variables.
-                pbft_view_type current_view;
-                fc::raw::unpack(ds, current_view);
+                //skip current_view in pbftdb.dat.
+                ds.seekp(ds.tellp() + 4);
 
                 unsigned_int size;
                 fc::raw::unpack(ds, size);
@@ -35,7 +34,6 @@ namespace eosio {
                     fc::raw::unpack(ds, s);
                     set(std::make_shared<pbft_state>(move(s)));
                 }
-
             } else {
                 pbft_state_index = pbft_state_multi_index_type{};
             }
@@ -239,7 +237,7 @@ namespace eosio {
         }
 
         bool pbft_database::is_valid_prepare(const pbft_prepare &p) {
-            if (!is_valid_pbft_message_header(p.common)) return false;
+            if (!is_valid_pbft_message(p.common)) return false;
             // a prepare msg under lscb (which is no longer in fork_db), can be treated as null, thus true.
             if (p.block_info.block_num <= ctrl.last_stable_checkpoint_block_num()) return true;
             if (!p.is_signature_valid()) return false;
@@ -392,7 +390,7 @@ namespace eosio {
         }
 
         bool pbft_database::is_valid_commit(const pbft_commit &c) {
-            if (!is_valid_pbft_message_header(c.common)) return false;
+            if (!is_valid_pbft_message(c.common)) return false;
             if (c.block_info.block_num <= ctrl.last_stable_checkpoint_block_num()) return true;
             if (!c.is_signature_valid()) return false;
             return should_recv_pbft_msg(c.common.sender);
@@ -622,7 +620,7 @@ namespace eosio {
                 if (valid_prepares.empty()) return pbft_prepared_certificate{};
 
                 auto pc = pbft_prepared_certificate{};
-                pc.block_info.block_id=psp->block_id; pc.block_info.block_num=psp->block_num; pc.prepares=valid_prepares;
+                pc.block_info={psp->block_id, psp->block_num}; pc.prepares=valid_prepares;
                 return pc;
             } else return pbft_prepared_certificate{};
         }
@@ -642,14 +640,17 @@ namespace eosio {
             vector<block_num_type> ccb;
 
             //adding my highest committed cert.
-            if ( highest_committed_block_num > ctrl.last_stable_checkpoint_block_num() ) {
+            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
+            if ( highest_committed_block_num > lscb_num ) {
                 ccb.emplace_back(highest_committed_block_num);
             }
 
-            update_fork_schedules();
-            for (auto i = 0; i < prepare_watermarks.size() && prepare_watermarks[i] < highest_committed_block_num; ++i) {
+            auto watermarks = get_updated_watermarks();
+            for (auto i = 0; i < watermarks.size(); ++i) {
                 //adding committed cert on every water mark.
-                ccb.emplace_back(prepare_watermarks[i]);
+                if (watermarks[i] < highest_committed_block_num && watermarks[i] > lscb_num) {
+                    ccb.emplace_back(watermarks[i]);
+                }
             }
 
             const auto &by_id_index = pbft_state_index.get<by_block_id>();
@@ -692,10 +693,8 @@ namespace eosio {
                 if (valid_commits.empty()) return vector<pbft_committed_certificate>{};
 
                 auto cc = pbft_committed_certificate{};
-                cc.block_info.block_id=cbs->id; cc.block_info.block_num=cbs->block_num; cc.commits=valid_commits;
+                cc.block_info={cbs->id, cbs->block_num}; cc.commits=valid_commits;
                 pcc.emplace_back(cc);
-
-
             }
             return pcc;
         }
@@ -1146,9 +1145,10 @@ namespace eosio {
                 const auto& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
                 if (!ctrl.is_pbft_enabled()) return false;
                 if (in <= ucb) return false;
+                auto watermarks = get_updated_watermarks();
                 return in == ucb + 1 // checkpoint on first pbft block;
                 || in % 100 == 1 // checkpoint on every 100 block;
-                || std::find(prepare_watermarks.begin(), prepare_watermarks.end(), in) != prepare_watermarks.end(); // checkpoint on bp schedule change;
+                || std::find(watermarks.begin(), watermarks.end(), in) != watermarks.end(); // checkpoint on bp schedule change;
             };
 
             update_fork_schedules();
@@ -1309,7 +1309,7 @@ namespace eosio {
         }
 
         bool pbft_database::is_valid_checkpoint(const pbft_checkpoint &cp) {
-            if (!(is_valid_pbft_message_header(cp.common) && cp.is_signature_valid())) return false;
+            if (!(is_valid_pbft_message(cp.common) && cp.is_signature_valid())) return false;
 
             if (cp.block_info.block_num > ctrl.head_block_num()
                 || cp.block_info.block_num <= ctrl.last_stable_checkpoint_block_num()
@@ -1353,7 +1353,7 @@ namespace eosio {
             return valid;
         }
 
-        bool pbft_database::is_valid_pbft_message_header(const pbft_message_common &common) {
+        bool pbft_database::is_valid_pbft_message(const pbft_message_common &common) {
             return common.chain_id == chain_id;
         }
 
@@ -1403,14 +1403,14 @@ namespace eosio {
         }
 
         block_num_type pbft_database::get_current_pbft_watermark() {
-            update_fork_schedules();
             auto lib = ctrl.last_irreversible_block_num();
 
-            if (prepare_watermarks.empty()) return 0;
+            auto watermarks = get_updated_watermarks();
+            if (watermarks.empty()) return 0;
 
-            auto cw = std::upper_bound(prepare_watermarks.begin(), prepare_watermarks.end(), lib);
+            auto cw = std::upper_bound(watermarks.begin(), watermarks.end(), lib);
 
-            if (cw == prepare_watermarks.end() || *cw <= lib) return 0;
+            if (cw == watermarks.end() || *cw <= lib) return 0;
 
             return *cw;
         }
@@ -1466,7 +1466,11 @@ namespace eosio {
                     fork_schedules[bp.block_signing_key] = lscb_num;
                 }
             }
+        }
 
+        vector<block_num_type>& pbft_database::get_updated_watermarks() {
+            update_fork_schedules();
+            return prepare_watermarks;
         }
 
         pbft_state_ptr pbft_database::get_pbft_state_by_id(const block_id_type& id) const {

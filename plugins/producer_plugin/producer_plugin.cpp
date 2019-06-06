@@ -225,12 +225,12 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
          new_block_header.timestamp = new_block_header.timestamp.next();
          new_block_header.previous = bsp->id;
 
-         auto new_version = chain.is_pbft_enabled();
+         auto pbft_enabled = chain.is_pbft_enabled();
 
-         auto new_bs = bsp->generate_next(new_block_header.timestamp, new_version);
+         auto new_bs = bsp->generate_next(new_block_header.timestamp, pbft_enabled);
 
          // for newly installed producers we can set their watermarks to the block they became active
-         if (new_bs.maybe_promote_pending(new_version) && bsp->active_schedule.version != new_bs.active_schedule.version) {
+         if (new_bs.maybe_promote_pending(pbft_enabled) && bsp->active_schedule.version != new_bs.active_schedule.version) {
             flat_set<account_name> new_producers;
             new_producers.reserve(new_bs.active_schedule.producers.size());
             for( const auto& p: new_bs.active_schedule.producers) {
@@ -1098,9 +1098,9 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
       _pending_block_mode = pending_block_mode::speculating;
    }
 
-   auto new_version = chain.is_pbft_enabled();
+   auto pbft_enabled = chain.is_pbft_enabled();
 
-    if (_pending_block_mode == pending_block_mode::producing && !new_version) {
+   if (_pending_block_mode == pending_block_mode::producing && !pbft_enabled) {
       // determine if our watermark excludes us from producing at this point
       if (currrent_watermark_itr != _producer_watermarks.end()) {
          if (currrent_watermark_itr->second >= hbs->block_num + 1) {
@@ -1122,7 +1122,7 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
    try {
       uint16_t blocks_to_confirm = 0;
 
-      if (_pending_block_mode == pending_block_mode::producing && !new_version) {
+      if (_pending_block_mode == pending_block_mode::producing && !pbft_enabled) {
          // determine how many blocks this producer can confirm
          // 1) if it is not a producer from this node, assume no confirmations (we will discard this block anyway)
          // 2) if it is a producer on this node that has never produced, the conservative approach is to assume no
