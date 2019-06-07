@@ -135,8 +135,6 @@ namespace eosio { namespace chain {
 
              my->head = get_block( head_id );
          }
-
-
          fc::remove( fork_db_dat );
       }
    }
@@ -612,8 +610,8 @@ namespace eosio { namespace chain {
        vector<block_num_type> watermarks;
        auto& pidx = my->index.get<by_watermark>();
        auto pitr  = pidx.begin();
-       while (pitr != pidx.end() && (*pitr)->pbft_watermark && (*pitr)->in_current_chain) {
-           watermarks.emplace_back((*pitr)->block_num);
+       while (pitr != pidx.end() && (*pitr)->pbft_watermark) {
+           watermarks.emplace_back((*pitr)->block_num); //should consider only current_chain?
            ++pitr;
        }
        return watermarks;

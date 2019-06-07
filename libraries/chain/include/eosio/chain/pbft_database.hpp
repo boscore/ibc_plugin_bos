@@ -598,6 +598,8 @@ namespace eosio {
 
             vector<block_num_type>& get_updated_watermarks();
 
+            flat_map<public_key_type, uint32_t>& get_updated_fork_schedules();
+
             template<typename Signal, typename Arg>
             void emit(const Signal &s, Arg &&a);
 
