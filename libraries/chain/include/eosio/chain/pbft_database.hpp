@@ -12,6 +12,7 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <fc/bitutil.hpp>
 
 namespace eosio {
     namespace chain {
@@ -32,10 +33,13 @@ namespace eosio {
 
         struct block_info_type {
             block_id_type   block_id;
-            block_num_type  block_num = 0;
+
+            block_num_type  block_num() const {
+                return fc::endian_reverse_u32(block_id._hash[0]);
+            }
 
             bool operator==(const block_info_type &rhs) const {
-                return block_id == rhs.block_id && block_num == rhs.block_num;
+                return block_id == rhs.block_id;
             }
 
             bool operator!=(const block_info_type &rhs) const {
@@ -59,7 +63,7 @@ namespace eosio {
             }
 
             bool empty() const {
-                return uuid == string()
+                return uuid.empty()
                 && sender == public_key_type()
                 && chain_id == chain_id_type("");
             }
@@ -82,9 +86,9 @@ namespace eosio {
             }
 
             bool operator<(const pbft_prepare &rhs) const {
-                if (block_info.block_num < rhs.block_info.block_num) {
+                if (block_info.block_num() < rhs.block_info.block_num()) {
                     return true;
-                } else if (block_info.block_num == rhs.block_info.block_num) {
+                } else if (block_info.block_num() == rhs.block_info.block_num()) {
                     return view < rhs.view;
                 } else {
                     return false;
@@ -124,9 +128,9 @@ namespace eosio {
             }
 
             bool operator<(const pbft_commit &rhs) const {
-                if (block_info.block_num < rhs.block_info.block_num) {
+                if (block_info.block_num() < rhs.block_info.block_num()) {
                     return true;
-                } else if (block_info.block_num == rhs.block_info.block_num) {
+                } else if (block_info.block_num() == rhs.block_info.block_num()) {
                     return view < rhs.view;
                 } else {
                     return false;
@@ -168,7 +172,7 @@ namespace eosio {
             }
 
             bool operator<(const pbft_checkpoint &rhs) const {
-                return block_info.block_num < rhs.block_info.block_num;
+                return block_info.block_num() < rhs.block_info.block_num();
             }
 
             digest_type digest() const {
@@ -195,7 +199,7 @@ namespace eosio {
             vector<pbft_checkpoint> checkpoints;
 
             bool operator<(const pbft_stable_checkpoint &rhs) const {
-                return block_info.block_num < rhs.block_info.block_num;
+                return block_info.block_num() < rhs.block_info.block_num();
             }
 
             bool empty() const {
@@ -208,10 +212,11 @@ namespace eosio {
             explicit pbft_prepared_certificate() = default;
 
             block_info_type      block_info;
+            set<block_id_type>   pre_prepares;
             vector<pbft_prepare> prepares;
 
             bool operator<(const pbft_prepared_certificate &rhs) const {
-                return block_info.block_num < rhs.block_info.block_num;
+                return block_info.block_num() < rhs.block_info.block_num();
             }
 
             bool empty() const {
@@ -227,7 +232,7 @@ namespace eosio {
             vector<pbft_commit> commits;
 
             bool operator<(const pbft_committed_certificate &rhs) const {
-                return block_info.block_num < rhs.block_info.block_num;
+                return block_info.block_num() < rhs.block_info.block_num();
             }
 
             bool empty() const {
@@ -344,15 +349,15 @@ namespace eosio {
             block_id_type block_id;
             block_num_type block_num = 0;
             vector<pbft_prepare> prepares;
-            bool should_prepared = false;
+            bool is_prepared = false;
             vector<pbft_commit> commits;
-            bool should_committed = false;
+            bool is_committed = false;
         };
 
         struct pbft_view_change_state {
             pbft_view_type view;
             vector<pbft_view_change> view_changes;
-            bool should_view_changed = false;
+            bool is_view_changed = false;
         };
 
         struct pbft_checkpoint_state {
@@ -387,7 +392,7 @@ namespace eosio {
                                 tag<by_prepare_and_num>,
                                 composite_key<
                                         pbft_state,
-                                        member<pbft_state, bool, &pbft_state::should_prepared>,
+                                        member<pbft_state, bool, &pbft_state::is_prepared>,
                                         member<pbft_state, uint32_t, &pbft_state::block_num>
                                 >,
                                 composite_key_compare< greater<>, greater<> >
@@ -396,7 +401,7 @@ namespace eosio {
                                 tag<by_commit_and_num>,
                                 composite_key<
                                         pbft_state,
-                                        member<pbft_state, bool, &pbft_state::should_committed>,
+                                        member<pbft_state, bool, &pbft_state::is_committed>,
                                         member<pbft_state, uint32_t, &pbft_state::block_num>
                                 >,
                                 composite_key_compare< greater<>, greater<> >
@@ -418,7 +423,7 @@ namespace eosio {
                                 tag<by_count_and_view>,
                                 composite_key<
                                         pbft_view_change_state,
-                                        member<pbft_view_change_state, bool, &pbft_view_change_state::should_view_changed>,
+                                        member<pbft_view_change_state, bool, &pbft_view_change_state::is_view_changed>,
                                         member<pbft_view_change_state, pbft_view_type, &pbft_view_change_state::view>
                                 >,
                                 composite_key_compare<greater<>, greater<>>
@@ -466,7 +471,11 @@ namespace eosio {
 
             void add_pbft_prepare(pbft_prepare &p);
 
+            void mark_as_prepared(const block_id_type &bid);
+
             void add_pbft_commit(pbft_commit &c);
+
+            void mark_as_committed(const block_id_type &bid);
 
             void add_pbft_view_change(pbft_view_change &vc);
 
@@ -567,16 +576,16 @@ namespace eosio {
             signal<void(const pbft_checkpoint &)> pbft_incoming_checkpoint;
 
         private:
-            controller &ctrl;
-            pbft_state_multi_index_type pbft_state_index;
-            pbft_view_state_multi_index_type view_state_index;
-            pbft_checkpoint_state_multi_index_type checkpoint_index;
-            chain_id_type chain_id = ctrl.get_chain_id();
-            fc::path pbft_db_dir;
-            fc::path checkpoints_dir;
-            boost::uuids::random_generator uuid_generator;
-            vector<block_num_type> prepare_watermarks;
-            flat_map<public_key_type, uint32_t> fork_schedules;
+            controller                                  &ctrl;
+            pbft_state_multi_index_type                 pbft_state_index;
+            pbft_view_state_multi_index_type            view_state_index;
+            pbft_checkpoint_state_multi_index_type      checkpoint_index;
+            chain_id_type                               chain_id = ctrl.get_chain_id();
+            fc::path                                    pbft_db_dir;
+            fc::path                                    checkpoints_dir;
+            boost::uuids::random_generator              uuid_generator;
+            vector<block_num_type>                      prepare_watermarks;
+            flat_map<public_key_type, block_num_type>   fork_schedules;
 
             bool is_valid_pbft_message(const pbft_message_common &common);
 
@@ -614,7 +623,7 @@ namespace eosio {
     }
 } /// namespace eosio::chain
 
-FC_REFLECT(eosio::chain::block_info_type, (block_id)(block_num))
+FC_REFLECT(eosio::chain::block_info_type, (block_id))
 FC_REFLECT_ENUM(eosio::chain::pbft_message_type, (prepare)(commit)(checkpoint)(view_change)(new_view))
 
 FC_REFLECT(eosio::chain::pbft_message_common, (type)(uuid)(sender)(chain_id)(timestamp))
@@ -630,6 +639,6 @@ FC_REFLECT(eosio::chain::pbft_committed_certificate,(block_info)(commits))
 FC_REFLECT(eosio::chain::pbft_view_changed_certificate, (target_view)(view_changes))
 FC_REFLECT(eosio::chain::pbft_stable_checkpoint, (block_info)(checkpoints))
 
-FC_REFLECT(eosio::chain::pbft_state, (block_id)(block_num)(prepares)(should_prepared)(commits)(should_committed))
-FC_REFLECT(eosio::chain::pbft_view_change_state, (view)(view_changes)(should_view_changed))
+FC_REFLECT(eosio::chain::pbft_state, (block_id)(block_num)(prepares)(is_prepared)(commits)(is_committed))
+FC_REFLECT(eosio::chain::pbft_view_change_state, (view)(view_changes)(is_view_changed))
 FC_REFLECT(eosio::chain::pbft_checkpoint_state, (block_id)(block_num)(checkpoints)(is_stable))

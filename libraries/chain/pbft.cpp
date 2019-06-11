@@ -444,7 +444,7 @@ namespace eosio {
 
         void psm_machine::transit_to_new_view(const pbft_new_view &new_view, psm_state_ptr s) {
 
-            auto valid_nv = false;
+            bool valid_nv;
             try {
                 valid_nv = pbft_db.is_valid_new_view(new_view);
             } catch (const fc::exception& ex) {
@@ -475,14 +475,15 @@ namespace eosio {
             if (!new_view.committed_cert.empty()) {
                 auto committed_certs = new_view.committed_cert;
                 std::sort(committed_certs.begin(), committed_certs.end());
-                for (auto cp :committed_certs) {
-                    for (auto c: cp.commits) {
+                for (auto cc :committed_certs) {
+                    for (auto c: cc.commits) {
                         try {
                             pbft_db.add_pbft_commit(c);
                         } catch (...) {
-                            wlog( "commit insertion failure: ${cp}", ("cp", cp));
+                            wlog( "commit insertion failure: ${c}", ("c", c));
                         }
                     }
+                    pbft_db.mark_as_committed(cc.block_info.block_id);
                 }
             }
 
@@ -494,6 +495,7 @@ namespace eosio {
                         wlog("prepare insertion failure: ${p}", ("p", p));
                     }
                 }
+                pbft_db.mark_as_prepared(new_view.prepared_cert.block_info.block_id);
                 if (pbft_db.should_prepared()) {
                     transit_to_prepared_state(s);
                     return;
@@ -534,7 +536,7 @@ namespace eosio {
             }
         }
 
-        const vector<pbft_prepare> &psm_machine::get_prepares_cache() const {
+        const vector<pbft_prepare>& psm_machine::get_prepares_cache() const {
             return cache.prepares_cache;
         }
 
@@ -542,7 +544,7 @@ namespace eosio {
             cache.prepares_cache = pcache;
         }
 
-        const vector<pbft_commit> &psm_machine::get_commits_cache() const {
+        const vector<pbft_commit>& psm_machine::get_commits_cache() const {
             return cache.commits_cache;
         }
 
@@ -550,7 +552,7 @@ namespace eosio {
             cache.commits_cache = ccache;
         }
 
-        const vector<pbft_view_change> &psm_machine::get_view_changes_cache() const {
+        const vector<pbft_view_change>& psm_machine::get_view_changes_cache() const {
             return cache.view_changes_cache;
         }
 
@@ -558,7 +560,7 @@ namespace eosio {
             cache.view_changes_cache = vc_cache;
         }
 
-        const uint32_t &psm_machine::get_current_view() const {
+        const uint32_t& psm_machine::get_current_view() const {
             return current_view;
         }
 
@@ -566,7 +568,7 @@ namespace eosio {
             current_view = cv;
         }
 
-        const pbft_prepared_certificate &psm_machine::get_prepared_certificate() const {
+        const pbft_prepared_certificate& psm_machine::get_prepared_certificate() const {
             return cache.prepared_certificate;
         }
 
@@ -574,7 +576,7 @@ namespace eosio {
             cache.prepared_certificate = pcert;
         }
 
-        const vector<pbft_committed_certificate> &psm_machine::get_committed_certificate() const {
+        const vector<pbft_committed_certificate>& psm_machine::get_committed_certificate() const {
             return cache.committed_certificate;
         }
 
@@ -582,7 +584,7 @@ namespace eosio {
             cache.committed_certificate = ccert;
         }
 
-        const pbft_view_changed_certificate &psm_machine::get_view_changed_certificate() const {
+        const pbft_view_changed_certificate& psm_machine::get_view_changed_certificate() const {
             return cache.view_changed_certificate;
         }
 
@@ -590,7 +592,7 @@ namespace eosio {
             cache.view_changed_certificate = vc_cert;
         }
 
-        const uint32_t &psm_machine::get_target_view_retries() const {
+        const uint32_t& psm_machine::get_target_view_retries() const {
             return target_view_retries;
         }
 
@@ -598,7 +600,7 @@ namespace eosio {
             target_view_retries = tv_reties;
         }
 
-        const uint32_t &psm_machine::get_target_view() const {
+        const uint32_t& psm_machine::get_target_view() const {
             return target_view;
         }
 
@@ -606,7 +608,7 @@ namespace eosio {
             target_view = tv;
         }
 
-        const uint32_t &psm_machine::get_view_change_timer() const {
+        const uint32_t& psm_machine::get_view_change_timer() const {
             return view_change_timer;
         }
 

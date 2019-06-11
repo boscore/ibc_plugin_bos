@@ -2783,11 +2783,11 @@ namespace eosio {
    }
 
    void net_plugin_impl::handle_message(const connection_ptr& c, const request_message& msg) {
-      if( msg.req_blocks.ids.size() > 1 ) {
-         elog( "Invalid request_message, req_blocks.ids.size ${s}", ("s", msg.req_blocks.ids.size()) );
-         close(c);
-         return;
-      }
+//      if( msg.req_blocks.ids.size() > 1 ) {
+//         elog( "Invalid request_message, req_blocks.ids.size ${s}", ("s", msg.req_blocks.ids.size()) );
+//         close(c);
+//         return;
+//      }  // we should enable requesting multiple blocks
 
       switch (msg.req_blocks.mode) {
       case catch_up :
@@ -2797,7 +2797,9 @@ namespace eosio {
       case normal :
          peer_ilog(c, "received request_message:normal");
          if( !msg.req_blocks.ids.empty() ) {
-            c->blk_send(msg.req_blocks.ids.back());
+            for (auto const &bid: msg.req_blocks.ids) {
+                c->blk_send(bid);
+            }
          }
          break;
       default:;
@@ -3025,7 +3027,7 @@ namespace eosio {
         if (!pcc.pbft_db.is_valid_prepare(msg)) return;
 
         bcast_pbft_msg(msg, pbft_message_TTL);
-        fc_dlog( logger, "sent prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num)("v", msg.view)("k", msg.common.sender));
+        fc_dlog( logger, "sent prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num())("v", msg.view)("k", msg.common.sender));
     }
 
     void net_plugin_impl::pbft_outgoing_commit(const pbft_commit &msg) {
@@ -3036,7 +3038,7 @@ namespace eosio {
         if (!pcc.pbft_db.is_valid_commit(msg)) return;
 
         bcast_pbft_msg(msg, pbft_message_TTL);
-        fc_dlog( logger, "sent commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num)("v", msg.view)("k", msg.common.sender));
+        fc_dlog( logger, "sent commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num())("v", msg.view)("k", msg.common.sender));
     }
 
     void net_plugin_impl::pbft_outgoing_view_change(const pbft_view_change &msg) {
@@ -3069,7 +3071,7 @@ namespace eosio {
         if (!pcc.pbft_db.is_valid_checkpoint(msg)) return;
 
         bcast_pbft_msg(msg, pbft_message_TTL);
-        fc_dlog( logger, "sent checkpoint at height: ${n}, from ${k}, ", ("n", msg.block_info.block_num)("k", msg.common.sender));
+        fc_dlog( logger, "sent checkpoint at height: ${n}, from ${k}, ", ("n", msg.block_info.block_num())("k", msg.common.sender));
     }
 
     bool net_plugin_impl::maybe_add_to_pbft_cache(const string &uuid){
@@ -3105,7 +3107,7 @@ namespace eosio {
        if (!pcc.pbft_db.is_valid_prepare(msg)) return;
 
        forward_pbft_msg(c, msg, pbft_message_TTL);
-       fc_dlog( logger, "received prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num)("v", msg.view)("k", msg.common.sender));
+       fc_dlog( logger, "received prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num())("v", msg.view)("k", msg.common.sender));
 
        pbft_incoming_prepare_channel.publish(msg);
 
@@ -3122,7 +3124,7 @@ namespace eosio {
        if (!pcc.pbft_db.is_valid_commit(msg)) return;
 
        forward_pbft_msg(c, msg, pbft_message_TTL);
-       fc_dlog( logger, "received commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num)("v", msg.view)("k", msg.common.sender));
+       fc_dlog( logger, "received commit at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num())("v", msg.view)("k", msg.common.sender));
 
        pbft_incoming_commit_channel.publish(msg);
     }
@@ -3135,7 +3137,22 @@ namespace eosio {
        if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
+       controller &ctrl = my_impl->chain_plug->chain();
        if (!pcc.pbft_db.is_valid_view_change(msg)) return;
+       auto missing_blocks = set<block_id_type>{};
+       for (auto const &b: msg.prepared_cert.pre_prepares) {
+           if (!ctrl.fetch_block_by_id(b)) missing_blocks.emplace(b);
+       }
+
+       if (!missing_blocks.empty()) {
+           request_message req;
+           for (auto const &b: missing_blocks) {
+               req.req_blocks.ids.push_back(b);
+           }
+           req.req_trx.mode = normal;
+           req.req_blocks.mode = normal;
+           c->enqueue(req);
+       }
 
        forward_pbft_msg(c, msg, pbft_message_TTL);
        fc_dlog( logger, "received view change {cv: ${cv}, tv: ${tv}} from ${v}", ("cv", msg.current_view)("tv", msg.target_view)("v", msg.common.sender));
@@ -3186,7 +3203,7 @@ namespace eosio {
        if (!pcc.pbft_db.is_valid_checkpoint(msg)) return;
 
        forward_pbft_msg(c, msg, pbft_message_TTL);
-       fc_dlog( logger, "received checkpoint at ${n}, from ${v}", ("n", msg.block_info.block_num)("v", msg.common.sender));
+       fc_dlog( logger, "received checkpoint at ${n}, from ${v}", ("n", msg.block_info.block_num())("v", msg.common.sender));
 
        pbft_incoming_checkpoint_channel.publish(msg);
     }
@@ -3196,7 +3213,7 @@ namespace eosio {
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
 
        if (pcc.pbft_db.is_valid_stable_checkpoint(msg)) {
-           fc_ilog(logger, "received stable checkpoint at ${n}, from ${v}", ("n", msg.block_info.block_num)("v", c->peer_name()));
+           fc_ilog(logger, "received stable checkpoint at ${n}, from ${v}", ("n", msg.block_info.block_num())("v", c->peer_name()));
            for (auto cp: msg.checkpoints) {
                pbft_incoming_checkpoint_channel.publish(cp);
            }

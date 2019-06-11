@@ -60,15 +60,15 @@ namespace eosio {
 
             void transit_to_new_view(const pbft_new_view &new_view, psm_state_ptr s);
 
-            const vector<pbft_prepare> &get_prepares_cache() const;
+            const vector<pbft_prepare>& get_prepares_cache() const;
 
             void set_prepares_cache(const vector<pbft_prepare> &pcache);
 
-            const vector<pbft_commit> &get_commits_cache() const;
+            const vector<pbft_commit>& get_commits_cache() const;
 
             void set_commits_cache(const vector<pbft_commit> &ccache);
 
-            const vector<pbft_view_change> &get_view_changes_cache() const;
+            const vector<pbft_view_change>& get_view_changes_cache() const;
 
             void set_view_changes_cache(const vector<pbft_view_change> &vc_cache);
 
@@ -76,27 +76,27 @@ namespace eosio {
 
             void set_current_view(const uint32_t &cv);
 
-            const pbft_prepared_certificate &get_prepared_certificate() const;
+            const pbft_prepared_certificate& get_prepared_certificate() const;
 
             void set_prepared_certificate(const pbft_prepared_certificate &pcert);
 
-            const vector<pbft_committed_certificate> &get_committed_certificate() const;
+            const vector<pbft_committed_certificate>& get_committed_certificate() const;
 
             void set_committed_certificate(const vector<pbft_committed_certificate> &ccert);
 
-            const pbft_view_changed_certificate &get_view_changed_certificate() const;
+            const pbft_view_changed_certificate& get_view_changed_certificate() const;
 
             void set_view_changed_certificate(const pbft_view_changed_certificate &vc_cert);
 
-            const uint32_t &get_target_view_retries() const;
+            const uint32_t& get_target_view_retries() const;
 
             void set_target_view_retries(const uint32_t &tv_reties);
 
-            const uint32_t &get_target_view() const;
+            const uint32_t& get_target_view() const;
 
             void set_target_view(const uint32_t &tv);
 
-            const uint32_t &get_view_change_timer() const;
+            const uint32_t& get_view_change_timer() const;
 
             void set_view_change_timer(const uint32_t &vc_timer);
 
