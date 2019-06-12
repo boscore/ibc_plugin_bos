@@ -3110,7 +3110,6 @@ namespace eosio {
        fc_dlog( logger, "received prepare at height: ${n}, view: ${v}, from ${k}, ", ("n", msg.block_info.block_num())("v", msg.view)("k", msg.common.sender));
 
        pbft_incoming_prepare_channel.publish(msg);
-
     }
 
     void net_plugin_impl::handle_message( connection_ptr c, const pbft_commit &msg) {

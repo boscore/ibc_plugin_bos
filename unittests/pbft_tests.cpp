@@ -212,7 +212,7 @@ BOOST_AUTO_TEST_CASE(view_change_validation) {
     for(int i = 0; i< pbft_ctrl.view_change_timeout; i++){
         pbft_ctrl.maybe_pbft_view_change();
     }
-    pbft_ctrl.state_machine->send_pbft_view_change();
+        pbft_ctrl.state_machine->do_send_view_change();
     auto new_view = pbft_ctrl.pbft_db.get_proposed_new_view_num();
     auto vcc = pbft_ctrl.pbft_db.generate_view_changed_certificate(new_view);
     auto nv_msg = pbft_ctrl.pbft_db.send_pbft_new_view(vcc, new_view);
@@ -304,7 +304,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     for(int i = 0; i<pbft_new_view_generator.view_change_timeout; i++){
         pbft_new_view_generator.maybe_pbft_view_change();
     }
-    pbft_new_view_generator.state_machine->send_pbft_view_change();
+        pbft_new_view_generator.state_machine->do_send_view_change();
     auto new_view = pbft_new_view_generator.pbft_db.get_proposed_new_view_num();
     auto vcc = pbft_new_view_generator.pbft_db.generate_view_changed_certificate(new_view);
     auto nv_msg = pbft_new_view_generator.pbft_db.send_pbft_new_view(

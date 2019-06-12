@@ -52,7 +52,7 @@ namespace eosio {
 
             void transit_to_prepared_state(psm_state_ptr s);
 
-            void send_pbft_view_change();
+            void do_send_view_change();
 
             void transit_to_view_change_state(psm_state_ptr s);
 

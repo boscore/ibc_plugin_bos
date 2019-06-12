@@ -353,7 +353,7 @@ namespace eosio {
                 return;
             }
 
-            m->send_pbft_view_change();
+            m->do_send_view_change();
 
             m->maybe_new_view(shared_from_this());
         }
@@ -409,7 +409,7 @@ namespace eosio {
 
             set_current(std::make_shared<psm_view_change_state>());
             if (pbft_db.should_send_pbft_msg()) {
-                send_pbft_view_change();
+                do_send_view_change();
                 auto nv = maybe_new_view(s);
                 if (nv) return;
             }
@@ -475,7 +475,7 @@ namespace eosio {
             if (!new_view.committed_cert.empty()) {
                 auto committed_certs = new_view.committed_cert;
                 std::sort(committed_certs.begin(), committed_certs.end());
-                for (auto cc :committed_certs) {
+                for (auto const &cc :committed_certs) {
                     for (auto c: cc.commits) {
                         try {
                             pbft_db.add_pbft_commit(c);
@@ -505,20 +505,21 @@ namespace eosio {
             transit_to_committed_state(s, true);
         }
 
-        void psm_machine::send_pbft_view_change() {
+        void psm_machine::do_send_view_change() {
+
+            auto reset_view_change_state = [&]() {
+                set_view_changes_cache(vector<pbft_view_change>{});
+                set_prepared_certificate(pbft_db.generate_prepared_certificate());
+                set_committed_certificate(pbft_db.generate_committed_certificate());
+            };
 
             if (get_target_view_retries() < pow(2,get_target_view() - get_current_view() - 1)) {
+                if (get_target_view_retries() == 0) reset_view_change_state();
                 set_target_view_retries(get_target_view_retries() + 1);
             } else {
                 set_target_view_retries(0);
                 set_target_view(get_target_view() + 1);
-                set_view_changes_cache(vector<pbft_view_change>{});
-            }
-
-            if (get_target_view_retries() == 0) {
-                set_view_changes_cache(vector<pbft_view_change>{});
-                set_prepared_certificate(pbft_db.generate_prepared_certificate());
-                set_committed_certificate(pbft_db.generate_committed_certificate());
+                reset_view_change_state();
             }
 
             EOS_ASSERT((get_target_view() > get_current_view()), pbft_exception,

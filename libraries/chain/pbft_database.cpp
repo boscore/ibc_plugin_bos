@@ -153,10 +153,15 @@ namespace eosio {
             }
         }
 
-        void  pbft_database::mark_as_prepared(const block_id_type &bid) {
+        void pbft_database::mark_as_prepared(const block_id_type &bid) {
             auto &by_block_id_index = pbft_state_index.get<by_block_id>();
             auto itr = by_block_id_index.find(bid);
-            if (itr == by_block_id_index.end()) return;
+            if (itr == by_block_id_index.end()) {
+                auto ps = pbft_state{bid, block_info_type{bid}.block_num(), .is_prepared = true};
+                auto psp = make_shared<pbft_state>(ps);
+                pbft_state_index.insert(psp);
+                return;
+            }
             by_block_id_index.modify(itr, [&](const pbft_state_ptr &p) { p->is_prepared = true; });
         }
 
@@ -615,7 +620,7 @@ namespace eosio {
             if (!prepared_block_state) return pbft_prepared_certificate();
 
             auto as = prepared_block_state->active_schedule.producers;
-            if (psp->is_prepared && (psp->block_num > (ctrl.last_irreversible_block_num()))) {
+            if (psp->is_prepared && psp->block_num > ctrl.last_irreversible_block_num()) {
                 auto prepares = psp->prepares;
                 auto valid_prepares = vector<pbft_prepare>{};
 

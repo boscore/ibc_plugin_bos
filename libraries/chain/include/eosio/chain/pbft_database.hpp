@@ -634,7 +634,7 @@ FC_REFLECT(eosio::chain::pbft_view_change, (common)(current_view)(target_view)(p
 FC_REFLECT(eosio::chain::pbft_new_view, (common)(new_view)(prepared_cert)(committed_cert)(stable_checkpoint)(view_changed_cert)(sender_signature))
 
 
-FC_REFLECT(eosio::chain::pbft_prepared_certificate, (block_info)(prepares))
+FC_REFLECT(eosio::chain::pbft_prepared_certificate, (block_info)(pre_prepares)(prepares))
 FC_REFLECT(eosio::chain::pbft_committed_certificate,(block_info)(commits))
 FC_REFLECT(eosio::chain::pbft_view_changed_certificate, (target_view)(view_changes))
 FC_REFLECT(eosio::chain::pbft_stable_checkpoint, (block_info)(checkpoints))
