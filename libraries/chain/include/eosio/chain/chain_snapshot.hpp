@@ -29,16 +29,11 @@ struct chain_snapshot_header {
    }
 };
 
-struct batch_pbft_snapshot_migration{
-  bool migrated = true;
-};
+struct batch_pbft_snapshot_migrated{};
 
-struct batch_pbft_enabled {
-  bool enabled = true;
-};
+struct batch_pbft_enabled{};
 
+struct batch_pbft_lscb_branch{};
 } }
 
 FC_REFLECT(eosio::chain::chain_snapshot_header,(version))
-FC_REFLECT(eosio::chain::batch_pbft_snapshot_migration,(migrated))
-FC_REFLECT(eosio::chain::batch_pbft_enabled,(enabled))

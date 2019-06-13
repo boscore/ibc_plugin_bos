@@ -17,6 +17,7 @@ namespace eosio { namespace chain {
    struct by_block_id;
    struct by_block_num;
    struct by_lib_block_num;
+   struct by_watermark;
    struct by_prev;
    typedef multi_index_container<
       block_state_ptr,
@@ -32,13 +33,20 @@ namespace eosio { namespace chain {
          >,
          ordered_non_unique< tag<by_lib_block_num>,
             composite_key< block_state,
-                member<block_header_state,uint32_t,&block_header_state::dpos_irreversible_blocknum>,
-                member<block_header_state,uint32_t,&block_header_state::bft_irreversible_blocknum>,
-                member<block_state,bool,&block_state::pbft_prepared>,
-                member<block_state,bool,&block_state::pbft_my_prepare>,
-                member<block_header_state,uint32_t,&block_header_state::block_num>
+               member<block_header_state,uint32_t,&block_header_state::dpos_irreversible_blocknum>,
+               member<block_header_state,uint32_t,&block_header_state::bft_irreversible_blocknum>,
+               member<block_state,bool,&block_state::pbft_prepared>,
+               member<block_state,bool,&block_state::pbft_my_prepare>,
+               member<block_header_state,uint32_t,&block_header_state::block_num>
             >,
             composite_key_compare< std::greater<uint32_t>, std::greater<uint32_t>, std::greater<bool>, std::greater<bool>, std::greater<uint32_t> >
+         >,
+         ordered_non_unique< tag<by_watermark>,
+            composite_key< block_state,
+               member<block_state,bool,&block_state::pbft_watermark>,
+               member<block_header_state,uint32_t,&block_header_state::block_num>
+            >,
+            composite_key_compare< std::greater<>, std::less<> >
          >
       >
    > fork_multi_index_type;
@@ -127,8 +135,6 @@ namespace eosio { namespace chain {
 
              my->head = get_block( head_id );
          }
-
-
          fc::remove( fork_db_dat );
       }
    }
@@ -187,7 +193,7 @@ namespace eosio { namespace chain {
       }
    }
 
-   block_state_ptr fork_database::add( const block_state_ptr& n, bool skip_validate_previous, bool new_version ) {
+   block_state_ptr fork_database::add( const block_state_ptr& n, bool skip_validate_previous, bool pbft_enabled ) {
       EOS_ASSERT( n, fork_database_exception, "attempt to add null block state" );
       EOS_ASSERT( my->head, fork_db_block_not_found, "no head block set" );
 
@@ -202,7 +208,6 @@ namespace eosio { namespace chain {
 
       auto prior = my->index.find( n->block->previous );
 
-      //TODO: to be optimised.
       if (prior !=  my->index.end()) {
           if ((*prior)->pbft_prepared) mark_pbft_prepared_fork(*prior);
           if ((*prior)->pbft_my_prepare) mark_pbft_my_prepare_fork(*prior);
@@ -217,7 +222,7 @@ namespace eosio { namespace chain {
 
       auto should_prune_oldest = oldest->block_num < lib;
 
-      if (new_version) {
+      if (pbft_enabled) {
           should_prune_oldest = should_prune_oldest && oldest->block_num < checkpoint;
       }
 
@@ -228,7 +233,7 @@ namespace eosio { namespace chain {
       return n;
    }
 
-   block_state_ptr fork_database::add( signed_block_ptr b, bool skip_validate_signee, bool new_version ) {
+   block_state_ptr fork_database::add( signed_block_ptr b, bool skip_validate_signee, bool pbft_enabled ) {
       EOS_ASSERT( b, fork_database_exception, "attempt to add null block" );
       EOS_ASSERT( my->head, fork_db_block_not_found, "no head block set" );
       const auto& by_id_idx = my->index.get<by_block_id>();
@@ -238,9 +243,9 @@ namespace eosio { namespace chain {
       auto prior = by_id_idx.find( b->previous );
       EOS_ASSERT( prior != by_id_idx.end(), unlinkable_block_exception, "unlinkable block", ("id", string(b->id()))("previous", string(b->previous)) );
 
-      auto result = std::make_shared<block_state>( **prior, move(b), skip_validate_signee, new_version);
+      auto result = std::make_shared<block_state>( **prior, move(b), skip_validate_signee, pbft_enabled);
       EOS_ASSERT( result, fork_database_exception , "fail to add new block state" );
-      return add(result, true, new_version);
+      return add(result, true, pbft_enabled);
    }
 
    const block_state_ptr& fork_database::head()const { return my->head; }
@@ -601,5 +606,24 @@ namespace eosio { namespace chain {
        }
    }
 
+   vector<block_num_type> fork_database::get_watermarks_in_forkdb() {
+       vector<block_num_type> watermarks;
+       auto& pidx = my->index.get<by_watermark>();
+       auto pitr  = pidx.begin();
+       while (pitr != pidx.end() && (*pitr)->pbft_watermark) {
+           watermarks.emplace_back((*pitr)->block_num); //should consider only current_chain?
+           ++pitr;
+       }
+       return watermarks;
+   }
 
-    } } /// eosio::chain
+   void fork_database::mark_as_pbft_watermark( const block_state_ptr& h) {
+       auto& by_id_idx = my->index.get<by_block_id>();
+       auto itr = by_id_idx.find( h->id );
+       EOS_ASSERT( itr != by_id_idx.end(), fork_db_block_not_found, "could not find block in fork database" );
+       by_id_idx.modify( itr, [&]( auto& bsp ) { bsp->pbft_watermark = true; });
+   }
+
+
+
+   } } /// eosio::chain

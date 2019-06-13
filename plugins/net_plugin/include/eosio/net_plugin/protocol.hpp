@@ -146,6 +146,11 @@ struct request_p2p_message{
      bool discoverable;
      string p2p_peer_list;
    };
+
+   struct compressed_pbft_message {
+      std::vector<char> content;
+   };
+
    using net_message = static_variant<handshake_message,
                                       chain_size_message,
                                       go_away_message,
@@ -163,7 +168,9 @@ struct request_p2p_message{
                                       pbft_new_view,
                                       pbft_checkpoint,
                                       pbft_stable_checkpoint,
-                                      checkpoint_request_message>;
+                                      checkpoint_request_message,
+                                      compressed_pbft_message>;
+
 } // namespace eosio
 
 FC_REFLECT( eosio::select_ids<fc::sha256>, (mode)(pending)(ids) )
@@ -184,6 +191,7 @@ FC_REFLECT( eosio::sync_request_message, (start_block)(end_block) )
 FC_REFLECT( eosio::request_p2p_message, (discoverable) )
 FC_REFLECT( eosio::response_p2p_message, (discoverable)(p2p_peer_list) )
 FC_REFLECT( eosio::checkpoint_request_message, (start_block)(end_block) )
+FC_REFLECT( eosio::compressed_pbft_message, (content))
 
 
 /**
