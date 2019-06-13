@@ -99,6 +99,8 @@ namespace eosio {
 
             auto current = ctrl.fetch_block_state_by_id(p.block_info.block_id);
 
+            auto current_watermark = get_current_pbft_watermark();
+
             while ((current) && (current->block_num > ctrl.last_irreversible_block_num())) {
                 auto curr_itr = by_block_id_index.find(current->id);
 
@@ -131,12 +133,11 @@ namespace eosio {
                 auto prepares = cpsp->prepares;
                 auto as = current->active_schedule.producers;
                 auto threshold = as.size()* 2 / 3 + 1;
-                if (prepares.size() >= threshold && !cpsp->is_prepared) {
+                if (prepares.size() >= threshold && !cpsp->is_prepared && !(cpsp->block_num > current_watermark && current_watermark > 0)) {
                     flat_map<pbft_view_type, uint32_t> prepare_count;
                     for (auto const &pre: prepares) {
                         if (prepare_count.find(pre.view) == prepare_count.end()) prepare_count[pre.view] = 0;
                     }
-
 
                     for (auto const &sp: as) {
                         for (auto const &pp: prepares) {
@@ -156,8 +157,10 @@ namespace eosio {
         void pbft_database::mark_as_prepared(const block_id_type &bid) {
             auto &by_block_id_index = pbft_state_index.get<by_block_id>();
             auto itr = by_block_id_index.find(bid);
+            auto bnum = block_info_type{bid}.block_num();
+
             if (itr == by_block_id_index.end()) {
-                auto ps = pbft_state{bid, block_info_type{bid}.block_num(), .is_prepared = true};
+                auto ps = pbft_state{bid, bnum, .is_prepared = true};
                 auto psp = make_shared<pbft_state>(ps);
                 pbft_state_index.insert(psp);
                 return;
