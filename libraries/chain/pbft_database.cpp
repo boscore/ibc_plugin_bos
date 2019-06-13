@@ -1182,7 +1182,8 @@ namespace eosio {
             pbft_state_ptr psp = (*itr);
 
             flat_map<block_num_type, bool> pending_checkpoint_block_num; // block_height and retry_flag
-            for (auto i = psp->block_num; i > ctrl.last_stable_checkpoint_block_num() && i > 1; --i) {
+            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
+            for (auto i = psp->block_num; i > lscb_num && i > 1; --i) {
                 if (checkpoint(i)) {
                     auto &by_block = checkpoint_index.get<by_block_id>();
 
@@ -1221,6 +1222,14 @@ namespace eosio {
                             new_pc.emplace_back(cp);
                         }
                     }
+                }
+            } else if (lscb_num > 0) { //retry sending my lscb
+                for (auto const &my_sp : ctrl.my_signature_providers()) {
+                    auto uuid = boost::uuids::to_string(uuid_generator());
+                    pbft_checkpoint cp;
+                    cp.common.uuid=uuid; cp.block_info={ctrl.last_stable_checkpoint_block_id()}; cp.common.sender=my_sp.first; cp.common.chain_id=chain_id;
+                    cp.sender_signature = my_sp.second(cp.digest());
+                    new_pc.emplace_back(cp);
                 }
             }
             return new_pc;
