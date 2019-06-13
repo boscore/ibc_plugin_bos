@@ -2797,6 +2797,7 @@ namespace eosio {
       case normal :
          peer_ilog(c, "received request_message:normal");
          if( !msg.req_blocks.ids.empty() ) {
+            wlog("received request_message, sending ${num} blocks from my node", ("num", msg.req_blocks.ids.size()));
             for (auto const &bid: msg.req_blocks.ids) {
                 c->blk_send(bid);
             }
@@ -3144,6 +3145,7 @@ namespace eosio {
        }
 
        if (!missing_blocks.empty()) {
+           wlog( "requesting ${num} missing blocks from view change", ("num", missing_blocks.size()));
            request_message req;
            for (auto const &b: missing_blocks) {
                req.req_blocks.ids.push_back(b);
