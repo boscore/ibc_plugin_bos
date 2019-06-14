@@ -2797,7 +2797,7 @@ namespace eosio {
       case normal :
          peer_ilog(c, "received request_message:normal");
          if( !msg.req_blocks.ids.empty() ) {
-            wlog("received request_message, sending ${num} blocks from my node", ("num", msg.req_blocks.ids.size()));
+            fc_dlog( logger, "received request_message, sending ${num} blocks from my node", ("num", msg.req_blocks.ids.size()));
             for (auto const &bid: msg.req_blocks.ids) {
                 c->blk_send(bid);
             }
@@ -2987,7 +2987,11 @@ namespace eosio {
 
     template<typename M>
     bool net_plugin_impl::is_pbft_msg_outdated(M const & msg) {
-        return (time_point_sec(time_point::now()) > time_point_sec(msg.common.timestamp) + pbft_message_TTL);
+        if (time_point_sec(time_point::now()) > time_point_sec(msg.common.timestamp) + pbft_message_TTL) {
+            fc_dlog( logger, "received an outdated pbft message ${m}", ("m", msg));
+            return true;
+        }
+        return false;
     }
 
     template<typename M>
@@ -3145,7 +3149,7 @@ namespace eosio {
        }
 
        if (!missing_blocks.empty()) {
-           wlog( "requesting ${num} missing blocks from view change", ("num", missing_blocks.size()));
+           fc_dlog( logger, "requesting ${num} missing blocks from view change", ("num", missing_blocks.size()));
            request_message req;
            for (auto const &b: missing_blocks) {
                req.req_blocks.ids.push_back(b);

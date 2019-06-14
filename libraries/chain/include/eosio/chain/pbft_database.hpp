@@ -589,6 +589,8 @@ namespace eosio {
 
             bool is_valid_pbft_message(const pbft_message_common &common);
 
+            bool is_less_than_high_watermark(const block_num_type &bnum);
+
             bool is_valid_prepared_certificate(const pbft_prepared_certificate &certificate);
 
             bool is_valid_committed_certificate(const pbft_committed_certificate &certificate);
