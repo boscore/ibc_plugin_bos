@@ -496,8 +496,10 @@ namespace eosio {
                     }
                 }
                 pbft_db.mark_as_prepared(new_view.prepared_cert.block_info.block_id);
-                transit_to_prepared_state(s);
-                return;
+                if (pbft_db.should_prepared()) {
+                    transit_to_prepared_state(s);
+                    return;
+                }
             }
 
             transit_to_committed_state(s, true);
