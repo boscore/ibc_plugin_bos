@@ -973,8 +973,8 @@ namespace eosio {
 
         bool pbft_database::should_stop_view_change(const pbft_view_change &vc) {
             auto lscb_num = ctrl.last_stable_checkpoint_block_num();
-            return lscb_num > vc.prepared_cert.block_info.block_num()
-                   && lscb_num > vc.stable_checkpoint.block_info.block_num();
+            auto vc_lscb = vc.stable_checkpoint.block_info.block_num();
+            return vc_lscb > 0 && lscb_num > vc_lscb;
         }
 
         vector<vector<block_info_type>> pbft_database::fetch_fork_from(vector<block_info_type> &block_infos) {
