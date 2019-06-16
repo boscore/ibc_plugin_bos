@@ -206,7 +206,7 @@ BOOST_AUTO_TEST_CASE(view_change_validation) {
     tester.produce_blocks(1);
 
     BOOST_CHECK_EQUAL(ctrl.is_pbft_enabled(), true);
-    BOOST_CHECK_EQUAL(ctrl.head_block_num(), 101);
+    BOOST_CHECK_EQUAL(ctrl.head_block_num(), 102);
 
 
     for(int i = 0; i< pbft_ctrl.view_change_timeout; i++){
@@ -217,8 +217,14 @@ BOOST_AUTO_TEST_CASE(view_change_validation) {
     auto vcc = pbft_ctrl.pbft_db.generate_view_changed_certificate(new_view);
     auto nv_msg = pbft_ctrl.pbft_db.send_pbft_new_view(vcc, new_view);
 
-    nv_msg.common.sender = tester::get_public_key( N(bob), "active");
-    BOOST_CHECK_EQUAL(pbft_ctrl.pbft_db.is_valid_new_view(nv_msg), false);
+    nv_msg.common.sender = tester::get_public_key( N(carol), "active");
+    auto nv_flag = false;
+    try {
+        nv_flag = pbft_ctrl.pbft_db.is_valid_new_view(nv_msg);
+    } catch (fc::exception) {
+        nv_flag = false;
+    }
+    BOOST_CHECK_EQUAL(nv_flag, false);
 }
 
 BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_on_short_fork) {
