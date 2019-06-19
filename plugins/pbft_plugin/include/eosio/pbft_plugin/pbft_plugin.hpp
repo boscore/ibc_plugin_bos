@@ -22,7 +22,7 @@ public:
  
    void plugin_initialize(const variables_map& options);
    void plugin_startup();
-   static void plugin_shutdown();
+   void plugin_shutdown();
 
 
    pbft_state get_pbft_record( const block_id_type& bid )const;
@@ -34,7 +34,7 @@ public:
    block_id_type get_pbft_prepared_id()const;
    block_id_type get_pbft_my_prepare_id()const;
 
-   static void set_pbft_current_view(pbft_view_type view);
+   void set_pbft_current_view(const pbft_view_type &view);
 
 
 private:

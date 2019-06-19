@@ -105,7 +105,7 @@ namespace eosio {
         return ctrl.get_pbft_my_prepare();
     }
 
-    void pbft_plugin::set_pbft_current_view(const pbft_view_type view) {
+    void pbft_plugin::set_pbft_current_view(const pbft_view_type& view) {
         //this is used to boost the recovery from a disaster, do not set this unless you have to do so.
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         pbft_ctrl.state_machine->manually_set_current_view(view);
