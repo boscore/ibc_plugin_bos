@@ -21,6 +21,9 @@ namespace eosio {
         using namespace std;
         using boost::uuids::uuid;
 
+        constexpr uint16_t pbft_checkpoint_granularity = 100;
+        constexpr uint16_t oldest_stable_checkpoint = 10000;
+
         using pbft_view_type = uint32_t;
 
         enum class pbft_message_type : uint16_t {
@@ -520,7 +523,7 @@ namespace eosio {
 
             pbft_view_changed_certificate generate_view_changed_certificate(pbft_view_type target_view);
 
-            pbft_stable_checkpoint get_stable_checkpoint_by_id(const block_id_type &block_id);
+            pbft_stable_checkpoint get_stable_checkpoint_by_id(const block_id_type &block_id, bool incl_blk_extn = true);
 
             pbft_stable_checkpoint fetch_stable_checkpoint_from_blk_extn(const signed_block_ptr &b);
 
