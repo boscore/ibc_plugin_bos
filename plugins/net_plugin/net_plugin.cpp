@@ -246,7 +246,7 @@ namespace eosio {
       void handle_message( connection_ptr c, const response_p2p_message &msg);
 
       //pbft messages
-      bool maybe_add_to_pbft_cache(const string &uuid);
+      bool maybe_add_to_pbft_cache(const string &key);
       void clean_expired_pbft_messages();
       template<typename M>
       bool is_pbft_msg_outdated(M const & msg);
@@ -1635,7 +1635,6 @@ namespace eosio {
    void sync_manager::recv_handshake(const connection_ptr& c, const handshake_message& msg) {
       controller& cc = chain_plug->chain();
       uint32_t lib_num = cc.last_irreversible_block_num();
-      uint32_t lscb_num = cc.last_stable_checkpoint_block_num();
       uint32_t peer_lib = msg.last_irreversible_block_num;
       reset_lib_num(c);
       c->syncing = false;
@@ -1654,16 +1653,6 @@ namespace eosio {
 
       uint32_t head = cc.fork_db_head_block_num();
       block_id_type head_id = cc.fork_db_head_block_id();
-      auto upgraded = cc.is_pbft_enabled();
-      if (upgraded
-          && peer_lib > lscb_num
-          && (head - lscb_num) / pbft_checkpoint_granularity > 1)
-      {
-         //there might be a better way to sync checkpoints, yet we do not want to modify the existing handshake msg.
-         fc_dlog(logger, "request sync checkpoints");
-         sync_stable_checkpoints(c, peer_lib);
-      }
-
       if (head_id == msg.head_id) {
          fc_dlog(logger, "sync check state 0");
          // notify peer of our pending transactions
@@ -2845,7 +2834,7 @@ namespace eosio {
 
        if ( msg.end_block == 0 || msg.end_block < msg.start_block) return;
 
-       fc_dlog(logger, "received checkpoint request message");
+       fc_dlog(logger, "received checkpoint request message ${m}", ("m", msg));
        vector<pbft_stable_checkpoint> scp_stack;
        controller &cc = my_impl->chain_plug->chain();
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
@@ -3071,11 +3060,11 @@ namespace eosio {
         fc_dlog( logger, "sent checkpoint at height: ${n} ", ("n", msg.block_info.block_num()));
     }
 
-    bool net_plugin_impl::maybe_add_to_pbft_cache(const string &uuid){
-       auto itr = pbft_message_cache.find(uuid);
+    bool net_plugin_impl::maybe_add_to_pbft_cache(const string &key){
+       auto itr = pbft_message_cache.find(key);
        if (itr == pbft_message_cache.end()) {
            //add to cache
-           pbft_message_cache[uuid] = time_point_sec(time_point::now()) + pbft_message_cache_TTL;
+           pbft_message_cache[key] = time_point_sec(time_point::now()) + pbft_message_cache_TTL;
            return true;
        }
        return false;
@@ -3854,9 +3843,25 @@ namespace eosio {
       return result;
    }
 
-    bool net_plugin::is_syncing()const {
-       return my->sync_master->is_syncing();
+   bool net_plugin::is_syncing()const {
+      return my->sync_master->is_syncing();
    }
+
+   void net_plugin::maybe_sync_stable_checkpoints() {
+       controller& cc = my->chain_plug->chain();
+       if (!cc.is_pbft_enabled()) return;
+       //there might be a better way to sync checkpoints, yet we do not want to modify the existing handshake msg.
+       uint32_t head = cc.fork_db_head_block_num();
+
+       //TODO: shuffle connections to avoid being stuck on some bad peers.
+       for (auto const &c: my->connections) {
+           if (c->current()) {
+               my->sync_master->sync_stable_checkpoints(c, head);
+           }
+       }
+
+   }
+
 
    net_plugin_impl::net_plugin_impl():
    pbft_incoming_prepare_channel(app().get_channel<eosio::chain::plugin_interface::pbft::incoming::prepare_channel>()),

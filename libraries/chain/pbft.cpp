@@ -63,6 +63,12 @@ namespace eosio {
             }
         }
 
+        void pbft_controller::maybe_pbft_checkpoint() {
+            if (!pbft_db.should_send_pbft_msg()) return;
+            pbft_db.send_pbft_checkpoint();
+            pbft_db.checkpoint_local();
+        }
+
         void pbft_controller::on_pbft_prepare(pbft_metadata_ptr<pbft_prepare> p) {
             state_machine->on_prepare(std::move(p));
         }
@@ -79,12 +85,6 @@ namespace eosio {
             state_machine->on_new_view(nv);
         }
 
-        void pbft_controller::send_pbft_checkpoint() {
-            if (!pbft_db.should_send_pbft_msg()) return;
-            pbft_db.send_pbft_checkpoint();
-            pbft_db.checkpoint_local();
-        }
-
         void pbft_controller::on_pbft_checkpoint(const pbft_metadata_ptr<pbft_checkpoint> &cp) {
             if (!pbft_db.is_valid_checkpoint(cp->msg, cp->sender_key)) return;
             pbft_db.add_pbft_checkpoint(cp->msg, cp->sender_key);
@@ -92,9 +92,7 @@ namespace eosio {
         }
 
         psm_state::psm_state() = default;
-
         psm_state::~psm_state() = default;
-
 
         psm_machine::psm_machine(pbft_database &pbft_db) : pbft_db(pbft_db) {
             set_current(std::make_shared<psm_committed_state>());
@@ -198,10 +196,10 @@ namespace eosio {
 
             if (pending_commit_local && !pbft_db.pending_pbft_lib()) {
                 pbft_db.send_pbft_checkpoint();
+                pbft_db.checkpoint_local();
                 m->transit_to_committed_state(shared_from_this(), false);
             }
         }
-
 
         void psm_prepared_state::send_commit(psm_machine_ptr m, pbft_database &pbft_db) {
             auto commits = pbft_db.send_and_add_pbft_commit(m->get_commits_cache(), m->get_current_view());
@@ -217,6 +215,7 @@ namespace eosio {
 
             if (pending_commit_local && !pbft_db.pending_pbft_lib()) {
                 pbft_db.send_pbft_checkpoint();
+                pbft_db.checkpoint_local();
                 m->transit_to_committed_state(shared_from_this(), false);
             }
         }
@@ -307,6 +306,7 @@ namespace eosio {
 
         psm_view_change_state::psm_view_change_state() = default;
         psm_view_change_state::~psm_view_change_state() = default;
+
         /**
          * psm_view_change_state
          */

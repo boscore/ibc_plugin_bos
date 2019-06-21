@@ -182,7 +182,7 @@ namespace eosio {
             void maybe_pbft_prepare();
             void maybe_pbft_commit();
             void maybe_pbft_view_change();
-            void send_pbft_checkpoint();
+            void maybe_pbft_checkpoint();
 
             void on_pbft_prepare(pbft_metadata_ptr<pbft_prepare> p);
             void on_pbft_commit(pbft_metadata_ptr<pbft_commit> c);
