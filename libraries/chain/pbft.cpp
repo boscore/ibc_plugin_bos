@@ -306,7 +306,6 @@ namespace eosio {
 
         psm_view_change_state::psm_view_change_state() = default;
         psm_view_change_state::~psm_view_change_state() = default;
-
         /**
          * psm_view_change_state
          */

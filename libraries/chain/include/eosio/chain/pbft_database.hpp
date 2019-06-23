@@ -436,7 +436,7 @@ namespace eosio {
             bool should_committed();
             pbft_view_type should_view_change();
             bool should_new_view(pbft_view_type target_view);
-            
+
             //new view
             bool has_new_primary(const public_key_type &pk);
             pbft_view_type get_proposed_new_view_num();
@@ -466,7 +466,7 @@ namespace eosio {
 
             bool pending_pbft_lib();
             chain_id_type get_chain_id() {return chain_id;}
-            pbft_stable_checkpoint get_stable_checkpoint_by_id(const block_id_type &block_id);
+            pbft_stable_checkpoint get_stable_checkpoint_by_id(const block_id_type &block_id, bool incl_blk_extn = true);
             pbft_stable_checkpoint fetch_stable_checkpoint_from_blk_extn(const signed_block_ptr &b);
             block_info_type cal_pending_stable_checkpoint() const;
 

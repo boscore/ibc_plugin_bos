@@ -2905,9 +2905,23 @@ namespace eosio {
       fc_dlog(logger, "canceling wait on ${p}", ("p",c->peer_name()));
       c->cancel_wait();
 
+      auto accept_pbft_stable_checkpoint = [&]() {
+          auto &pcc = chain_plug->pbft_ctrl();
+          auto scp = pcc.pbft_db.fetch_stable_checkpoint_from_blk_extn(msg);
+
+          if (!scp.empty() && scp.block_info.block_num() > cc.last_stable_checkpoint_block_num()) {
+              if (pcc.pbft_db.get_stable_checkpoint_by_id(msg->id(), false).empty()) {
+                  handle_message(c, scp);
+              } else {
+                  pcc.pbft_db.checkpoint_local();
+              }
+          }
+      };
+
       try {
          if( cc.fetch_block_by_id(blk_id)) {
             sync_master->recv_block(c, blk_id, blk_num);
+            accept_pbft_stable_checkpoint();
             return;
          }
       } catch( ...) {
@@ -2923,14 +2937,8 @@ namespace eosio {
       go_away_reason reason = fatal_other;
       try {
          chain_plug->accept_block(msg); //, sync_master->is_active(c));
+         accept_pbft_stable_checkpoint();
          reason = no_reason;
-         auto blk = msg;
-         auto &pcc = chain_plug->pbft_ctrl();
-         auto scp = pcc.pbft_db.fetch_stable_checkpoint_from_blk_extn(blk);
-
-         if (!scp.empty()) {
-             handle_message(c, scp);
-         }
       } catch( const unlinkable_block_exception &ex) {
          peer_elog(c, "bad signed_block : ${m}", ("m",ex.what()));
          reason = unlinkable;
@@ -3853,7 +3861,6 @@ namespace eosio {
        //there might be a better way to sync checkpoints, yet we do not want to modify the existing handshake msg.
        uint32_t head = cc.fork_db_head_block_num();
 
-       //TODO: shuffle connections to avoid being stuck on some bad peers.
        for (auto const &c: my->connections) {
            if (c->current()) {
                my->sync_master->sync_stable_checkpoints(c, head);

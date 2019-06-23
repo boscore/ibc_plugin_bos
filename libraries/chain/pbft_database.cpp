@@ -1098,12 +1098,15 @@ namespace eosio {
             return pbft_stable_checkpoint();
         }
 
-        pbft_stable_checkpoint pbft_database::get_stable_checkpoint_by_id(const block_id_type &block_id) {
+        pbft_stable_checkpoint pbft_database::get_stable_checkpoint_by_id(const block_id_type &block_id, bool incl_blk_extn ) {
             auto const &by_block = checkpoint_index.get<by_block_id>();
             auto itr = by_block.find(block_id);
             if (itr == by_block.end()) {
-                auto blk = ctrl.fetch_block_by_id(block_id);
-                return fetch_stable_checkpoint_from_blk_extn(blk);
+                if (incl_blk_extn) {
+                    auto blk = ctrl.fetch_block_by_id(block_id);
+                    return fetch_stable_checkpoint_from_blk_extn(blk);
+                }
+                return pbft_stable_checkpoint();
             }
 
             auto cpp = *itr;
@@ -1129,36 +1132,39 @@ namespace eosio {
             if (itr == by_blk_num.end()) return pending_scb_info;
 
             while (itr != by_blk_num.end()) {
-                if ((*itr)->is_stable && ctrl.fetch_block_state_by_id((*itr)->block_id)) {
-                    auto lscb = ctrl.fetch_block_state_by_number(pending_scb_num);
+                if (auto bs = ctrl.fetch_block_state_by_id((*itr)->block_id)) {
+                    auto scb = ctrl.fetch_block_state_by_number(pending_scb_num);
 
-                    auto head_checkpoint_schedule = ctrl.fetch_block_state_by_id((*itr)->block_id)->active_schedule;
+                    auto head_checkpoint_schedule = bs->active_schedule;
 
                     producer_schedule_type current_schedule;
                     producer_schedule_type new_schedule;
 
                     if (pending_scb_num == 0) {
-                        auto const& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
+                        auto const &ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
                         if (ucb == 0) {
                             current_schedule = ctrl.initial_schedule();
                             new_schedule = ctrl.initial_schedule();
                         } else {
-                            auto bs = ctrl.fetch_block_state_by_number(ucb);
-                            if (!bs) return pending_scb_info;
-                            current_schedule = bs->active_schedule;
-                            new_schedule = bs->pending_schedule;
+                            auto ucb_state = ctrl.fetch_block_state_by_number(ucb);
+                            if (!ucb_state) return pending_scb_info;
+                            current_schedule = ucb_state->active_schedule;
+                            new_schedule = ucb_state->pending_schedule;
                         }
-                    } else if (lscb) {
-                        current_schedule = lscb->active_schedule;
-                        new_schedule = lscb->pending_schedule;
+                    } else if (scb) {
+                        current_schedule = scb->active_schedule;
+                        new_schedule = scb->pending_schedule;
                     } else {
                         return pending_scb_info;
                     }
 
-                    if ((*itr)->is_stable
-                        && (head_checkpoint_schedule == current_schedule || head_checkpoint_schedule == new_schedule)) {
-                        pending_scb_info = block_info_type{(*itr)->block_id};
-                        pending_scb_num = pending_scb_info.block_num();
+                    if ((*itr)->is_stable) {
+                        if (head_checkpoint_schedule == current_schedule || head_checkpoint_schedule == new_schedule) {
+                            pending_scb_info = block_info_type{(*itr)->block_id};
+                            pending_scb_num = pending_scb_info.block_num();
+                        } else {
+                            return pending_scb_info;
+                        }
                     }
                 }
                 ++itr;
@@ -1308,7 +1314,7 @@ namespace eosio {
             if (pending_num > lscb_num) {
                 ctrl.set_pbft_latest_checkpoint(pending_id);
                 if (ctrl.last_irreversible_block_num() < pending_num) ctrl.pbft_commit_local(pending_id);
-                auto const &by_block_id_index = pbft_state_index.get<by_block_id>();
+                auto &by_block_id_index = pbft_state_index.get<by_block_id>();
                 auto pitr = by_block_id_index.find(pending_id);
                 if (pitr != by_block_id_index.end()) {
                     prune(*pitr);
@@ -1316,11 +1322,10 @@ namespace eosio {
             }
             auto &bni = checkpoint_index.get<by_num>();
             auto oldest = bni.begin();
-            if (oldest != bni.end() && lscb_num - (*oldest)->block_num > oldest_stable_checkpoint) {
-                auto it = bni.lower_bound(lscb_num - oldest_stable_checkpoint);
-                if (it != bni.end() && (*it)->is_stable) {
-                    prune(*it);
-                }
+            if ( oldest != bni.end()
+                 && (*oldest)->is_stable
+                 && (*oldest)->block_num < lscb_num - oldest_stable_checkpoint ) {
+                prune(*oldest);
             }
         }
 
@@ -1514,9 +1519,8 @@ namespace eosio {
             auto &by_num_index = checkpoint_index.get<by_num>();
 
             auto pitr  = by_num_index.lower_bound( num );
-            auto epitr = by_num_index.upper_bound( num );
-            while( pitr != epitr ) {
-                if (pitr != by_num_index.end() && (*pitr)) results.emplace_back(*(*pitr));
+            while(pitr != by_num_index.end() && (*pitr)->block_num == num ) {
+                results.emplace_back(*(*pitr));
                 ++pitr;
             }
 
