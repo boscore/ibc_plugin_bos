@@ -220,14 +220,14 @@ namespace eosio { namespace chain {
 
       auto oldest = *my->index.get<by_block_num>().begin();
 
-      auto should_prune_oldest = oldest->block_num < lib;
-
-      if (pbft_enabled) {
-          should_prune_oldest = should_prune_oldest && oldest->block_num < checkpoint;
-      }
-
-      if (  should_prune_oldest  ) {
+      if (!pbft_enabled && oldest->block_num < lib) {
           prune( oldest );
+      } else {
+          // prune all blocks below lscb
+          while (oldest->block_num < lib && oldest->block_num < checkpoint ) {
+              prune( oldest );
+              oldest = *my->index.get<by_block_num>().begin();
+          }
       }
 
       return n;
