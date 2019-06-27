@@ -106,7 +106,10 @@ namespace eosio {
                     try {
                         flat_map<std::pair<pbft_view_type, public_key_type>, pbft_prepare> prepares;
                         prepares[std::make_pair(p.view, pk)] = p;
-                        auto curr_ps = pbft_state{current->id, current->block_num, prepares};
+                        pbft_state curr_ps;
+                        curr_ps.block_id = current->id;
+                        curr_ps.block_num = current->block_num;
+                        curr_ps.prepares = prepares;
                         auto curr_psp = std::make_shared<pbft_state>(move(curr_ps));
                         pbft_state_index.insert(curr_psp);
                     } catch (...) {
@@ -154,7 +157,10 @@ namespace eosio {
             auto bnum = block_info_type{bid}.block_num();
 
             if (itr == by_block_id_index.end()) {
-                auto ps = pbft_state{bid, bnum, .is_prepared=true};
+                pbft_state ps;
+                ps.block_id = bid;
+                ps.block_num = bnum;
+                ps.is_prepared = true;
                 auto psp = std::make_shared<pbft_state>(move(ps));
                 pbft_state_index.insert(psp);
                 return;
@@ -263,7 +269,10 @@ namespace eosio {
                     try {
                         flat_map<std::pair<pbft_view_type, public_key_type>, pbft_commit> commits;
                         commits[std::make_pair(c.view, pk)] = c;
-                        auto curr_ps = pbft_state{current->id, current->block_num, .commits=commits};
+                        pbft_state curr_ps;
+                        curr_ps.block_id = current->id;
+                        curr_ps.block_num = current->block_num;
+                        curr_ps.commits = commits;
                         auto curr_psp = std::make_shared<pbft_state>(move(curr_ps));
                         pbft_state_index.insert(curr_psp);
                     } catch (...) {
@@ -428,7 +437,9 @@ namespace eosio {
             if (itr == by_view_index.end()) {
                 flat_map<public_key_type, pbft_view_change> view_changes;
                 view_changes[pk] = vc;
-                auto vcs = pbft_view_change_state{vc.target_view, view_changes};
+                pbft_view_change_state vcs;
+                vcs.view = vc.target_view;
+                vcs.view_changes = view_changes;
                 auto vcsp = std::make_shared<pbft_view_change_state>(move(vcs));
                 view_state_index.insert(vcsp);
             } else {
@@ -1255,7 +1266,10 @@ namespace eosio {
             if (itr == by_block.end()) {
                 flat_map<public_key_type, pbft_checkpoint> checkpoints;
                 checkpoints[pk] = cp;
-                auto cs = pbft_checkpoint_state{cp.block_info.block_id, cp.block_info.block_num(), checkpoints};
+                pbft_checkpoint_state cs;
+                cs.block_id = cp.block_info.block_id;
+                cs.block_num = cp.block_info.block_num();
+                cs.checkpoints = checkpoints;
                 auto csp = std::make_shared<pbft_checkpoint_state>(move(cs));
                 checkpoint_index.insert(csp);
                 itr = by_block.find(cp.block_info.block_id);
