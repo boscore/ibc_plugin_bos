@@ -2318,7 +2318,7 @@ namespace eosio {
    void net_plugin_impl::start_read_message(const connection_ptr& conn) {
 
       try {
-         if(!conn->socket) {
+         if(!conn->socket || !conn->socket->is_open()) {
             return;
          }
          connection_wptr weak_conn = conn;
@@ -2848,7 +2848,8 @@ namespace eosio {
                scp_stack.push_back(scp);
            }
        }
-       fc_dlog(logger, "sent ${n} stable checkpoints on my node",("n",scp_stack.size()));
+
+       if (!scp_stack.empty()) fc_dlog(logger, "sending ${n} stable checkpoints on my node",("n",scp_stack.size()));
 
        while (scp_stack.size()) {
            c->enqueue(scp_stack.back());
