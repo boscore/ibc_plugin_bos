@@ -168,8 +168,7 @@ namespace eosio { namespace chain {
 
          bool pending_pbft_lib();
 
-         vector<uint32_t> proposed_schedule_block_nums()const;
-         vector<uint32_t> promoted_schedule_block_nums()const;
+         vector<uint32_t> get_watermarks() const;
 
          void set_pbft_latest_checkpoint( const block_id_type& id );
          uint32_t last_stable_checkpoint_block_num()const;
@@ -291,6 +290,7 @@ namespace eosio { namespace chain {
 
          void set_pbft_prepared(const block_id_type& id);
          void set_pbft_my_prepare(const block_id_type& id);
+         block_id_type get_pbft_prepared()const;
          block_id_type get_pbft_my_prepare()const;
          void reset_pbft_my_prepare();
          void reset_pbft_prepared();

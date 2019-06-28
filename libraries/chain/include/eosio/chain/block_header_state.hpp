@@ -29,13 +29,13 @@ struct block_header_state {
     vector<header_confirmation>       confirmations;
     uint32_t                          pbft_stable_checkpoint_blocknum = 0;
 
-    block_header_state   next( const signed_block_header& h, bool trust = false, bool new_version = false)const;
-    block_header_state   generate_next( block_timestamp_type when, bool new_version = false )const;
+    block_header_state   next( const signed_block_header& h, bool trust = false, bool pbft_enabled = false )const;
+    block_header_state   generate_next( block_timestamp_type when, bool pbft_enabled = false )const;
 
     void set_new_producers( producer_schedule_type next_pending );
-    void set_confirmed( uint16_t num_prev_blocks, bool new_version = false );
+    void set_confirmed( uint16_t num_prev_blocks, bool pbft_enabled = false );
     void add_confirmation( const header_confirmation& c );
-    bool maybe_promote_pending( bool new_version = false);
+    bool maybe_promote_pending( bool pbft_enabled = false );
 
 
     bool                 has_pending_producers()const { return pending_schedule.producers.size(); }
