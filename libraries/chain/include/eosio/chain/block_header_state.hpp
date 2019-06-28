@@ -16,6 +16,7 @@ struct block_header_state {
     uint32_t                          dpos_proposed_irreversible_blocknum = 0;
     uint32_t                          dpos_irreversible_blocknum = 0;
     uint32_t                          bft_irreversible_blocknum = 0;
+
     uint32_t                          pending_schedule_lib_num = 0; /// last irr block num
     digest_type                       pending_schedule_hash;
     producer_schedule_type            pending_schedule;
@@ -26,14 +27,15 @@ struct block_header_state {
     public_key_type                   block_signing_key;
     vector<uint8_t>                   confirm_count;
     vector<header_confirmation>       confirmations;
+    uint32_t                          pbft_stable_checkpoint_blocknum = 0;
 
-    block_header_state   next( const signed_block_header& h, bool trust = false )const;
-    block_header_state   generate_next( block_timestamp_type when )const;
+    block_header_state   next( const signed_block_header& h, bool trust = false, bool pbft_enabled = false )const;
+    block_header_state   generate_next( block_timestamp_type when, bool pbft_enabled = false )const;
 
     void set_new_producers( producer_schedule_type next_pending );
-    void set_confirmed( uint16_t num_prev_blocks );
+    void set_confirmed( uint16_t num_prev_blocks, bool pbft_enabled = false );
     void add_confirmation( const header_confirmation& c );
-    bool maybe_promote_pending();
+    bool maybe_promote_pending( bool pbft_enabled = false );
 
 
     bool                 has_pending_producers()const { return pending_schedule.producers.size(); }
@@ -61,7 +63,9 @@ struct block_header_state {
 
 FC_REFLECT( eosio::chain::block_header_state,
             (id)(block_num)(header)(dpos_proposed_irreversible_blocknum)(dpos_irreversible_blocknum)(bft_irreversible_blocknum)
+
             (pending_schedule_lib_num)(pending_schedule_hash)
             (pending_schedule)(active_schedule)(blockroot_merkle)
             (producer_to_last_produced)(producer_to_last_implied_irb)(block_signing_key)
-            (confirm_count)(confirmations) )
+            (confirm_count)(confirmations)
+            (pbft_stable_checkpoint_blocknum))
