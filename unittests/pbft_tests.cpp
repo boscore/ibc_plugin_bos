@@ -217,11 +217,11 @@ BOOST_AUTO_TEST_CASE(view_change_validation) {
     auto vcc = pbft_ctrl.pbft_db.generate_view_changed_certificate(new_view);
     auto nv_msg = pbft_ctrl.pbft_db.send_pbft_new_view(vcc, new_view);
 
-    nv_msg.common.sender = tester::get_public_key( N(carol), "active");
-    auto nv_flag = false;
+    bool nv_flag;
     try {
-        nv_flag = pbft_ctrl.pbft_db.is_valid_new_view(nv_msg);
-    } catch (fc::exception) {
+        pbft_ctrl.pbft_db.validate_new_view(nv_msg, tester::get_public_key(N(carol), "active"));
+        nv_flag = true;
+    } catch (fc::exception &e) {
         nv_flag = false;
     }
     BOOST_CHECK_EQUAL(nv_flag, false);
@@ -302,7 +302,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.last_irreversible_block_num(), 101);
 
     //generate new view with short fork prepare certificate
-    pbft_new_view_generator.state_machine->set_prepares_cache({});
+    pbft_new_view_generator.state_machine->set_prepares_cache(pbft_prepare());
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_send_pbft_msg(), true);
     pbft_new_view_generator.maybe_pbft_prepare();
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_prepared(), true);
@@ -310,7 +310,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     for(int i = 0; i<pbft_new_view_generator.view_change_timeout; i++){
         pbft_new_view_generator.maybe_pbft_view_change();
     }
-        pbft_new_view_generator.state_machine->do_send_view_change();
+    pbft_new_view_generator.state_machine->do_send_view_change();
     auto new_view = pbft_new_view_generator.pbft_db.get_proposed_new_view_num();
     auto vcc = pbft_new_view_generator.pbft_db.generate_view_changed_certificate(new_view);
     auto nv_msg = pbft_new_view_generator.pbft_db.send_pbft_new_view(
@@ -330,7 +330,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 137);
 
     //can switch fork after apply prepare certificate in new view
-    pbft_short_prepared_fork.state_machine->on_new_view(nv_msg);
+    pbft_short_prepared_fork.state_machine->on_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(nv_msg, ctrl_new_view_generator.get_chain_id()));
 
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 136);
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 101);

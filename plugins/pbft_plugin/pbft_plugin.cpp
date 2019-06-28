@@ -105,7 +105,7 @@ namespace eosio {
         return ctrl.get_pbft_my_prepare();
     }
 
-    void pbft_plugin::set_pbft_current_view(const pbft_view_type view) {
+    void pbft_plugin::set_pbft_current_view(const pbft_view_type& view) {
         //this is used to boost the recovery from a disaster, do not set this unless you have to do so.
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         pbft_ctrl.state_machine->manually_set_current_view(view);
@@ -118,8 +118,8 @@ namespace eosio {
             prepare_timer_tick();
             if (ec) {
                 wlog ("pbft plugin prepare timer tick error: ${m}", ("m", ec.message()));
-            } else {
-                if (pbft_ready()) pbft_ctrl.maybe_pbft_prepare();
+            } else if (pbft_ready()) {
+                pbft_ctrl.maybe_pbft_prepare();
             }
         });
     }
@@ -131,8 +131,8 @@ namespace eosio {
             commit_timer_tick();
             if (ec) {
                 wlog ("pbft plugin commit timer tick error: ${m}", ("m", ec.message()));
-            } else {
-                if (pbft_ready()) pbft_ctrl.maybe_pbft_commit();
+            } else if (pbft_ready()) {
+                pbft_ctrl.maybe_pbft_commit();
             }
         });
     }
@@ -149,8 +149,8 @@ namespace eosio {
             view_change_timer_tick();
             if (ec) {
                 wlog ("pbft plugin view change timer tick error: ${m}", ("m", ec.message()));
-            } else {
-                if (pbft_ready()) pbft_ctrl.maybe_pbft_view_change();
+            } else if (pbft_ready()) {
+                pbft_ctrl.maybe_pbft_view_change();
             }
         });
     }
@@ -162,8 +162,14 @@ namespace eosio {
             checkpoint_timer_tick();
             if (ec) {
                 wlog ("pbft plugin checkpoint timer tick error: ${m}", ("m", ec.message()));
-            } else {
-                if (pbft_ready()) pbft_ctrl.send_pbft_checkpoint();
+            } else if (pbft_ready()) {
+                pbft_ctrl.maybe_pbft_checkpoint();
+
+                    chain::controller &ctrl = app().get_plugin<chain_plugin>().chain();
+                    if ( ctrl.head_block_num() - ctrl.last_stable_checkpoint_block_num() / pbft_checkpoint_granularity > 1) {
+                        //perhaps we need to sync stable checkpoints from other peers
+                        app().get_plugin<net_plugin>().maybe_sync_stable_checkpoints();
+                    }
             }
         });
     }

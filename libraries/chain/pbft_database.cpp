@@ -8,8 +8,8 @@ namespace eosio {
 
         pbft_database::pbft_database(controller &ctrl) :
                 ctrl(ctrl) {
-            checkpoint_index = pbft_checkpoint_state_multi_index_type{};
-            view_state_index = pbft_view_state_multi_index_type{};
+            checkpoint_index = pbft_checkpoint_state_multi_index_type();
+            view_state_index = pbft_view_state_multi_index_type();
             prepare_watermarks = vector<block_num_type>{};
             pbft_db_dir = ctrl.state_dir();
             checkpoints_dir = ctrl.blocks_dir();
@@ -35,7 +35,7 @@ namespace eosio {
                     set(std::make_shared<pbft_state>(move(s)));
                 }
             } else {
-                pbft_state_index = pbft_state_multi_index_type{};
+                pbft_state_index = pbft_state_multi_index_type();
             }
 
             if (!fc::is_directory(checkpoints_dir)) fc::create_directories(checkpoints_dir);
@@ -56,7 +56,7 @@ namespace eosio {
                 }
                 ilog("checkpoint index size: ${cs}", ("cs", checkpoint_index.size()));
             } else {
-                checkpoint_index = pbft_checkpoint_state_multi_index_type{};
+                checkpoint_index = pbft_checkpoint_state_multi_index_type();
             }
 
             fc::remove(checkpoints_db);
@@ -93,9 +93,7 @@ namespace eosio {
             close();
         }
 
-        void pbft_database::add_pbft_prepare(pbft_prepare &p) {
-
-            if (!is_valid_prepare(p)) return;
+        void pbft_database::add_pbft_prepare(pbft_prepare &p, const public_key_type &pk) {
 
             auto &by_block_id_index = pbft_state_index.get<by_block_id>();
 
@@ -106,23 +104,22 @@ namespace eosio {
 
                 if (curr_itr == by_block_id_index.end()) {
                     try {
-                        auto curr_ps = pbft_state{current->id, current->block_num, {p}};
-                        auto curr_psp = make_shared<pbft_state>(curr_ps);
+                        flat_map<std::pair<pbft_view_type, public_key_type>, pbft_prepare> prepares;
+                        prepares[std::make_pair(p.view, pk)] = p;
+                        pbft_state curr_ps;
+                        curr_ps.block_id = current->id;
+                        curr_ps.block_num = current->block_num;
+                        curr_ps.prepares = prepares;
+                        auto curr_psp = std::make_shared<pbft_state>(move(curr_ps));
                         pbft_state_index.insert(curr_psp);
                     } catch (...) {
                         elog( "prepare insert failure: ${p}", ("p", p));
                     }
                 } else {
                     auto prepares = (*curr_itr)->prepares;
-                    auto p_itr = find_if(prepares.begin(), prepares.end(),
-                                         [&](const pbft_prepare &prep) {
-                                             return prep.common.sender == p.common.sender
-                                             && prep.view == p.view;
-                                         });
-                    if (p_itr == prepares.end()) {
+                    if (prepares.find(std::make_pair(p.view, pk)) == prepares.end()) {
                         by_block_id_index.modify(curr_itr, [&](const pbft_state_ptr &psp) {
-                            psp->prepares.emplace_back(p);
-                            std::sort(psp->prepares.begin(), psp->prepares.end(), less<>());
+                            psp->prepares[std::make_pair(p.view, pk)] = p;
                         });
                     }
                 }
@@ -136,12 +133,12 @@ namespace eosio {
                 if (prepares.size() >= threshold && !cpsp->is_prepared && is_less_than_high_watermark(cpsp->block_num)) {
                     flat_map<pbft_view_type, uint32_t> prepare_count;
                     for (auto const &pre: prepares) {
-                        if (prepare_count.find(pre.view) == prepare_count.end()) prepare_count[pre.view] = 0;
+                        if (prepare_count.find(pre.second.view) == prepare_count.end()) prepare_count[pre.second.view] = 0;
                     }
 
-                    for (auto const &sp: as) {
+                    for (auto const &bp: as) {
                         for (auto const &pp: prepares) {
-                            if (sp.block_signing_key == pp.common.sender) prepare_count[pp.view] += 1;
+                            if (bp.block_signing_key == pp.first.second) prepare_count[pp.first.first] += 1;
                         }
                     }
                     for (auto const &e: prepare_count) {
@@ -160,18 +157,22 @@ namespace eosio {
             auto bnum = block_info_type{bid}.block_num();
 
             if (itr == by_block_id_index.end()) {
-                auto ps = pbft_state{bid, bnum, .is_prepared = true};
-                auto psp = make_shared<pbft_state>(ps);
+                pbft_state ps;
+                ps.block_id = bid;
+                ps.block_num = bnum;
+                ps.is_prepared = true;
+                auto psp = std::make_shared<pbft_state>(move(ps));
                 pbft_state_index.insert(psp);
                 return;
             }
             by_block_id_index.modify(itr, [&](const pbft_state_ptr &p) { p->is_prepared = true; });
         }
 
-        vector<pbft_prepare> pbft_database::send_and_add_pbft_prepare(const vector<pbft_prepare> &pv, pbft_view_type current_view) {
+        pbft_prepare pbft_database::send_and_add_pbft_prepare(const pbft_prepare &cached_prepare, pbft_view_type current_view) {
+            auto prepare_to_be_cached = pbft_prepare();
 
             auto head_block_num = ctrl.head_block_num();
-            if (head_block_num <= 1) return vector<pbft_prepare>{};
+            if (head_block_num <= 1) return prepare_to_be_cached;
             auto my_prepare = ctrl.get_pbft_my_prepare();
 
             auto reserve_prepare = [&](const block_id_type &in) {
@@ -182,28 +183,25 @@ namespace eosio {
                 return !forks.first.empty() && forks.second.empty();
             };
 
-            vector<pbft_prepare> new_pv;
-            new_pv.reserve(ctrl.my_signature_providers().size());
-            if (!pv.empty()) {
-                for (auto p : pv) {
-                    //change uuid, sign again, update cache, then emit
-                    auto uuid = boost::uuids::to_string(uuid_generator());
-                    p.common.uuid = uuid;
-                    p.common.timestamp = time_point::now();
-                    p.sender_signature = ctrl.my_signature_providers()[p.common.sender](p.digest());
-                    emit(pbft_outgoing_prepare, p);
+
+            if (!cached_prepare.empty()) {
+                for (auto const &sp : ctrl.my_signature_providers()) {
+                    //sign again, update cache, then emit
+                    auto retry_p = cached_prepare;
+                    retry_p.common.timestamp = time_point::now();
+                    retry_p.sender_signature = sp.second(retry_p.digest(chain_id));
+                    emit(pbft_outgoing_prepare, retry_p);
                 }
-                return vector<pbft_prepare>{};
+                return prepare_to_be_cached;
             } else if (reserve_prepare(my_prepare)) {
                 for (auto const &sp : ctrl.my_signature_providers()) {
-                    auto uuid = boost::uuids::to_string(uuid_generator());
-                    pbft_prepare p;
-                    p.common.uuid=uuid; p.view=current_view; p.block_info={my_prepare}; p.common.sender=sp.first; p.common.chain_id=chain_id;
-                    p.sender_signature = sp.second(p.digest());
-                    emit(pbft_outgoing_prepare, p);
-                    new_pv.emplace_back(p);
+                    pbft_prepare reserve_p;
+                    reserve_p.view=current_view; reserve_p.block_info={my_prepare};
+                    reserve_p.sender_signature = sp.second(reserve_p.digest(chain_id));
+                    emit(pbft_outgoing_prepare, reserve_p);
+                    if (prepare_to_be_cached.empty()) prepare_to_be_cached = reserve_p;
                 }
-                return new_pv;
+                return prepare_to_be_cached;
             } else {
 
                 auto current_watermark = get_current_pbft_watermark();
@@ -215,22 +213,24 @@ namespace eosio {
                     high_watermark_block_num = std::min(head_block_num, current_watermark);
                 }
 
-                if (high_watermark_block_num <= lib) return vector<pbft_prepare>{};
+                if (high_watermark_block_num <= lib) return prepare_to_be_cached;
 
                 if (auto hwbs = ctrl.fork_db().get_block_in_current_chain_by_num(high_watermark_block_num)) {
-
+                    auto sent = false;
                     for (auto const &sp : ctrl.my_signature_providers()) {
-                        auto uuid = boost::uuids::to_string(uuid_generator());
-                        pbft_prepare p;
-                        p.common.uuid=uuid; p.view=current_view; p.block_info={hwbs->id}; p.common.sender=sp.first; p.common.chain_id=chain_id;
-                        p.sender_signature = sp.second(p.digest());
-                        add_pbft_prepare(p);
-                        emit(pbft_outgoing_prepare, p);
-                        new_pv.emplace_back(p);
+                        pbft_prepare new_p;
+                        new_p.view=current_view; new_p.block_info={hwbs->id};
+                        new_p.sender_signature = sp.second(new_p.digest(chain_id));
+                        if (is_valid_prepare(new_p, sp.first)) {
+                            emit(pbft_outgoing_prepare, new_p);
+                            add_pbft_prepare(new_p, sp.first);
+                            sent = true;
+                            if (prepare_to_be_cached.empty()) prepare_to_be_cached = new_p;
+                        }
                     }
-                    ctrl.set_pbft_my_prepare(hwbs->id);
+                    if (sent) ctrl.set_pbft_my_prepare(hwbs->id);
                 }
-                return new_pv;
+                return prepare_to_be_cached;
             }
         }
 
@@ -249,17 +249,14 @@ namespace eosio {
             return false;
         }
 
-        bool pbft_database::is_valid_prepare(const pbft_prepare &p) {
-            if (!is_valid_pbft_message(p.common)) return false;
+        bool pbft_database::is_valid_prepare(const pbft_prepare &p, const public_key_type &pk) {
             // a prepare msg under lscb (which is no longer in fork_db), can be treated as null, thus true.
             if (p.block_info.block_num() <= ctrl.last_stable_checkpoint_block_num()) return true;
-            if (!p.is_signature_valid()) return false;
-            return should_recv_pbft_msg(p.common.sender);
+            return should_recv_pbft_msg(pk);
         }
 
-        void pbft_database::add_pbft_commit(pbft_commit &c) {
+        void pbft_database::add_pbft_commit(pbft_commit &c, const public_key_type &pk) {
 
-            if (!is_valid_commit(c)) return;
             auto &by_block_id_index = pbft_state_index.get<by_block_id>();
 
             auto current = ctrl.fetch_block_state_by_id(c.block_info.block_id);
@@ -270,22 +267,22 @@ namespace eosio {
 
                 if (curr_itr == by_block_id_index.end()) {
                     try {
-                        auto curr_ps = pbft_state{current->id, current->block_num, .commits={c}};
-                        auto curr_psp = make_shared<pbft_state>(curr_ps);
+                        flat_map<std::pair<pbft_view_type, public_key_type>, pbft_commit> commits;
+                        commits[std::make_pair(c.view, pk)] = c;
+                        pbft_state curr_ps;
+                        curr_ps.block_id = current->id;
+                        curr_ps.block_num = current->block_num;
+                        curr_ps.commits = commits;
+                        auto curr_psp = std::make_shared<pbft_state>(move(curr_ps));
                         pbft_state_index.insert(curr_psp);
                     } catch (...) {
                         elog("commit insertion failure: ${c}", ("c", c));
                     }
                 } else {
                     auto commits = (*curr_itr)->commits;
-                    auto p_itr = find_if(commits.begin(), commits.end(),
-                                         [&](const pbft_commit &comm) {
-                                             return comm.common.sender == c.common.sender
-                                             && comm.view == c.view;
-                                         });
-                    if (p_itr == commits.end()) {
+                    if (commits.find(std::make_pair(c.view, pk)) == commits.end()) {
                         by_block_id_index.modify(curr_itr, [&](const pbft_state_ptr &psp) {
-                            psp->commits.emplace_back(c);
+                            psp->commits[std::make_pair(c.view, pk)] = c;
                             std::sort(psp->commits.begin(), psp->commits.end(), less<>());
                         });
                     }
@@ -302,13 +299,12 @@ namespace eosio {
                 if (commits.size() >= threshold && !cpsp->is_committed && is_less_than_high_watermark(cpsp->block_num)) {
                     flat_map<pbft_view_type, uint32_t> commit_count;
                     for (auto const &com: commits) {
-                        if (commit_count.find(com.view) == commit_count.end()) commit_count[com.view] = 0;
+                        if (commit_count.find(com.second.view) == commit_count.end()) commit_count[com.second.view] = 0;
                     }
 
-
-                    for (auto const &sp: as) {
+                    for (auto const &bp: as) {
                         for (auto const &pc: commits) {
-                            if (sp.block_signing_key == pc.common.sender) commit_count[pc.view] += 1;
+                            if (bp.block_signing_key == pc.first.second) commit_count[pc.first.first] += 1;
                         }
                     }
 
@@ -322,41 +318,43 @@ namespace eosio {
             }
         }
 
-        vector<pbft_commit> pbft_database::send_and_add_pbft_commit(const vector<pbft_commit> &cv, pbft_view_type current_view) {
-            if (!cv.empty()) {
-                for (auto c : cv) {
-                    //change uuid, sign again, update cache, then emit
-                    auto uuid = boost::uuids::to_string(uuid_generator());
-                    c.common.uuid = uuid;
-                    c.common.timestamp = time_point::now();
-                    c.sender_signature = ctrl.my_signature_providers()[c.common.sender](c.digest());
-                    emit(pbft_outgoing_commit, c);
+        pbft_commit pbft_database::send_and_add_pbft_commit(const pbft_commit &cached_commit, pbft_view_type current_view) {
+            auto commit_to_be_cached = pbft_commit();
+
+            if (!cached_commit.empty()) {
+                for (auto const &sp : ctrl.my_signature_providers()) {
+                    //sign again, update cache, then emit
+                    auto retry_c = cached_commit;
+                    retry_c.common.timestamp = time_point::now();
+                    retry_c.sender_signature = sp.second(retry_c.digest(chain_id));
+                    emit(pbft_outgoing_commit, retry_c);
                 }
-                return vector<pbft_commit>{};
+                return commit_to_be_cached;
             } else {
                 auto const &by_prepare_and_num_index = pbft_state_index.get<by_prepare_and_num>();
                 auto itr = by_prepare_and_num_index.begin();
-                if (itr == by_prepare_and_num_index.end()) return vector<pbft_commit>{};
+                if (itr == by_prepare_and_num_index.end()) return commit_to_be_cached;
 
                 pbft_state_ptr psp = *itr;
                 auto bs = ctrl.fork_db().get_block(psp->block_id);
-                if (!bs) return vector<pbft_commit>{};
+                if (!bs) return commit_to_be_cached;
 
-                vector<pbft_commit> new_cv;
-                new_cv.reserve(ctrl.my_signature_providers().size());
                 if (psp->is_prepared && (psp->block_num > ctrl.last_irreversible_block_num())) {
 
                     for (auto const &sp : ctrl.my_signature_providers()) {
-                        auto uuid = boost::uuids::to_string(uuid_generator());
-                        pbft_commit c;
-                        c.common.uuid=uuid; c.view=current_view; c.block_info={psp->block_id}; c.common.sender=sp.first; c.common.chain_id=chain_id;
-                        c.sender_signature = sp.second(c.digest());
-                        add_pbft_commit(c);
-                        emit(pbft_outgoing_commit, c);
-                        new_cv.emplace_back(c);
+                        pbft_commit new_c;
+                        new_c.view=current_view;
+                        new_c.block_info={psp->block_id};
+                        new_c.sender_signature = sp.second(new_c.digest(chain_id));
+
+                        if (is_valid_commit(new_c, sp.first)) {
+                            emit(pbft_outgoing_commit, new_c);
+                            add_pbft_commit(new_c, sp.first);
+                            if (commit_to_be_cached.empty()) commit_to_be_cached = new_c;
+                        }
                     }
                 }
-                return new_cv;
+                return commit_to_be_cached;
             }
         }
 
@@ -390,28 +388,30 @@ namespace eosio {
 
             auto commits = (*itr)->commits;
 
+            auto threshold = as.size() * 2 / 3 + 1;
+
             flat_map<pbft_view_type, uint32_t> commit_count;
             for (auto const &com: commits) {
-                if (commit_count.find(com.view) == commit_count.end()) {
-                    commit_count[com.view] = 1;
-                } else {
-                    commit_count[com.view] += 1;
+                if (commit_count.find(com.second.view) == commit_count.end()) commit_count[com.second.view] = 0;
+            }
+
+            for (auto const &bp: as) {
+                for (auto const &pc: commits) {
+                    if (bp.block_signing_key == pc.first.second) commit_count[pc.first.first] += 1;
                 }
             }
 
             for (auto const &e: commit_count) {
-                if (e.second >= as.size() * 2 / 3 + 1 && e.first > new_view) {
+                if (e.second >= threshold && e.first > new_view) {
                     new_view = e.first;
                 }
             }
             return new_view;
         }
 
-        bool pbft_database::is_valid_commit(const pbft_commit &c) {
-            if (!is_valid_pbft_message(c.common)) return false;
+        bool pbft_database::is_valid_commit(const pbft_commit &c, const public_key_type &pk) {
             if (c.block_info.block_num() <= ctrl.last_stable_checkpoint_block_num()) return true;
-            if (!c.is_signature_valid()) return false;
-            return should_recv_pbft_msg(c.common.sender);
+            return should_recv_pbft_msg(pk);
         }
 
         void pbft_database::commit_local() {
@@ -428,26 +428,27 @@ namespace eosio {
             return ctrl.pending_pbft_lib();
         }
 
-        void pbft_database::add_pbft_view_change(pbft_view_change &vc) {
-            if (!is_valid_view_change(vc)) return;
-            auto active_bps = lscb_active_producers().producers;
+        void pbft_database::add_pbft_view_change(pbft_view_change &vc, const public_key_type &pk) {
+
+            auto lscb_bps = lscb_active_producers().producers;
 
             auto &by_view_index = view_state_index.get<by_view>();
             auto itr = by_view_index.find(vc.target_view);
             if (itr == by_view_index.end()) {
-                auto vs = pbft_view_change_state{vc.target_view, .view_changes={vc}};
-                auto vsp = make_shared<pbft_view_change_state>(vs);
-                view_state_index.insert(vsp);
+                flat_map<public_key_type, pbft_view_change> view_changes;
+                view_changes[pk] = vc;
+                pbft_view_change_state vcs;
+                vcs.view = vc.target_view;
+                vcs.view_changes = view_changes;
+                auto vcsp = std::make_shared<pbft_view_change_state>(move(vcs));
+                view_state_index.insert(vcsp);
             } else {
                 auto pvs = (*itr);
                 auto view_changes = pvs->view_changes;
-                auto p_itr = find_if(view_changes.begin(), view_changes.end(),
-                                     [&](const pbft_view_change &existed) {
-                                         return existed.common.sender == vc.common.sender;
-                                     });
-                if (p_itr == view_changes.end()) {
+
+                if (view_changes.find(pk) == view_changes.end()) {
                     by_view_index.modify(itr, [&](const pbft_view_change_state_ptr &pvsp) {
-                        pvsp->view_changes.emplace_back(vc);
+                        pvsp->view_changes[pk] = vc;
                     });
                 }
             }
@@ -456,13 +457,13 @@ namespace eosio {
             if (itr == by_view_index.end()) return;
 
             auto vsp = *itr;
-            auto threshold = active_bps.size() * 2 / 3 + 1;
+            auto threshold = lscb_bps.size() * 2 / 3 + 1;
             if (vsp->view_changes.size() >= threshold && !vsp->is_view_changed) {
                 auto vc_count = 0;
 
-                for (auto const &sp: active_bps) {
-                    for (auto const &v: (*itr)->view_changes) {
-                        if (sp.block_signing_key == v.common.sender) vc_count += 1;
+                for (auto const &bp: lscb_bps) {
+                    for (auto const &v: vsp->view_changes) {
+                        if (bp.block_signing_key == v.first) vc_count += 1;
                     }
                 }
                 if (vc_count >= threshold) {
@@ -483,8 +484,8 @@ namespace eosio {
                 auto pvs = (*itr);
 
                 for (auto const &bp: active_bps) {
-                    for (auto const &pp: pvs->view_changes) {
-                        if (bp.block_signing_key == pp.common.sender) vc_count += 1;
+                    for (auto const &v: pvs->view_changes) {
+                        if (bp.block_signing_key == v.first) vc_count += 1;
                     }
                 }
                 //if contains self or view_change >= f+1, transit to view_change and send view change
@@ -497,37 +498,42 @@ namespace eosio {
             return nv;
         }
 
-        vector<pbft_view_change> pbft_database::send_and_add_pbft_view_change(
-                const vector<pbft_view_change> &vcv,
+        pbft_view_change pbft_database::send_and_add_pbft_view_change(
+                const pbft_view_change &cached_view_change,
                 const pbft_prepared_certificate &ppc,
                 const vector<pbft_committed_certificate> &pcc,
                 pbft_view_type current_view,
-                pbft_view_type new_view) {
-            if (!vcv.empty()) {
-                for (auto vc : vcv) {
-                    //change uuid, sign again, update cache, then emit
-                    auto uuid = boost::uuids::to_string(uuid_generator());
-                    vc.common.uuid = uuid;
-                    vc.common.timestamp = time_point::now();
-                    vc.sender_signature = ctrl.my_signature_providers()[vc.common.sender](vc.digest());
-                    emit(pbft_outgoing_view_change, vc);
+                pbft_view_type target_view) {
+
+            auto view_change_to_be_cached = pbft_view_change();
+            if (!cached_view_change.empty()) {
+                for (auto const &sp : ctrl.my_signature_providers()) {
+                    //sign again, update cache, then emit
+                    auto retry_vc = cached_view_change;
+                    retry_vc.common.timestamp = time_point::now();
+                    retry_vc.sender_signature = sp.second(retry_vc.digest(chain_id));
+                    emit(pbft_outgoing_view_change, retry_vc);
                 }
-                return vector<pbft_view_change>{};
+                return view_change_to_be_cached;
             } else {
-                vector<pbft_view_change> new_vcv;
-                new_vcv.reserve(ctrl.my_signature_providers().size());
                 for (auto const &my_sp : ctrl.my_signature_providers()) {
 
                     auto my_lsc = get_stable_checkpoint_by_id(ctrl.last_stable_checkpoint_block_id());
-                    auto uuid = boost::uuids::to_string(uuid_generator());
-                    pbft_view_change vc;
-                    vc.common.uuid=uuid; vc.current_view=current_view; vc.target_view=new_view; vc.prepared_cert=ppc; vc.committed_cert=pcc; vc.stable_checkpoint=my_lsc; vc.common.sender=my_sp.first; vc.common.chain_id=chain_id;
-                    vc.sender_signature = my_sp.second(vc.digest());
-                    emit(pbft_outgoing_view_change, vc);
-                    add_pbft_view_change(vc);
-                    new_vcv.emplace_back(vc);
+
+                    pbft_view_change new_vc;
+                    new_vc.current_view=current_view;
+                    new_vc.target_view=target_view;
+                    new_vc.prepared_cert=ppc;
+                    new_vc.committed_certs=pcc;
+                    new_vc.stable_checkpoint=my_lsc;
+                    new_vc.sender_signature = my_sp.second(new_vc.digest(chain_id));
+                    if (is_valid_view_change(new_vc, my_sp.first)) {
+                        emit(pbft_outgoing_view_change, new_vc);
+                        add_pbft_view_change(new_vc, my_sp.first);
+                        if (view_change_to_be_cached.empty()) view_change_to_be_cached = new_vc;
+                    }
                 }
-                return new_vcv;
+                return view_change_to_be_cached;
             }
         }
 
@@ -545,16 +551,15 @@ namespace eosio {
             return (*itr)->view;
         }
 
-        bool pbft_database::is_new_primary(const pbft_view_type target_view) {
+        bool pbft_database::has_new_primary(const public_key_type &pk) {
 
-            auto primary_key = get_new_view_primary_key(target_view);
-            if (primary_key == public_key_type()) return false;
+            if (pk == public_key_type()) return false;
             auto sps = ctrl.my_signature_providers();
-            auto sp_itr = sps.find(primary_key);
+            auto sp_itr = sps.find(pk);
             return sp_itr != sps.end();
         }
 
-        void pbft_database::prune_pbft_index() {
+        void pbft_database::cleanup_on_new_view() {
             view_state_index.clear();
             ctrl.reset_pbft_my_prepare();
         }
@@ -564,9 +569,9 @@ namespace eosio {
                 pbft_view_type current_view) {
 
             auto primary_key = get_new_view_primary_key(current_view);
-            if (!is_new_primary(current_view) || vcc.empty()) return pbft_new_view();
+            if (!has_new_primary(primary_key) || vcc.empty()) return pbft_new_view();
 
-            //`sp_itr` is not possible to be the end iterator, since it's already been checked in `is_new_primary`.
+            //`sp_itr` is not possible to be the end iterator, since it's already been checked in `has_new_primary`.
             auto my_sps = ctrl.my_signature_providers();
             auto sp_itr = my_sps.find(primary_key);
 
@@ -575,31 +580,28 @@ namespace eosio {
             auto highest_sc = pbft_stable_checkpoint();
 
             for (auto const &vc: vcc.view_changes) {
-                if (vc.prepared_cert.block_info.block_num() > highest_ppc.block_info.block_num()
-                    && is_valid_prepared_certificate(vc.prepared_cert)) {
+                if (vc.prepared_cert.block_info.block_num() > highest_ppc.block_info.block_num()) {
                     highest_ppc = vc.prepared_cert;
                 }
 
-                for (auto const &cc: vc.committed_cert) {
-                    if (is_valid_committed_certificate(cc)) {
-                        auto p_itr = find_if(highest_pcc.begin(), highest_pcc.end(),
-                                [&](const pbft_committed_certificate &ext) { return ext.block_info.block_id == cc.block_info.block_id; });
-                        if (p_itr == highest_pcc.end()) highest_pcc.emplace_back(cc);
-                    }
+                for (auto const &cc: vc.committed_certs) {
+                    auto p_itr = find_if(highest_pcc.begin(), highest_pcc.end(),
+                            [&](const pbft_committed_certificate &ext) { return ext.block_info.block_id == cc.block_info.block_id; });
+                    if (p_itr == highest_pcc.end()) highest_pcc.emplace_back(cc);
                 }
 
-                if (vc.stable_checkpoint.block_info.block_num() > highest_sc.block_info.block_num() &&
-                    is_valid_stable_checkpoint(vc.stable_checkpoint)) {
+                if (vc.stable_checkpoint.block_info.block_num() > highest_sc.block_info.block_num()) {
                     highest_sc = vc.stable_checkpoint;
                 }
             }
 
-            auto uuid = boost::uuids::to_string(uuid_generator());
-
             pbft_new_view nv;
-            nv.common.uuid=uuid; nv.new_view=current_view; nv.prepared_cert=highest_ppc; nv.committed_cert=highest_pcc; nv.stable_checkpoint=highest_sc, nv.view_changed_cert=vcc, nv.common.sender=sp_itr->first; nv.common.chain_id=chain_id;
-
-            nv.sender_signature = sp_itr->second(nv.digest());
+            nv.new_view=current_view;
+            nv.prepared_cert=highest_ppc;
+            nv.committed_certs=highest_pcc;
+            nv.stable_checkpoint=highest_sc;
+            nv.view_changed_cert=vcc;
+            nv.sender_signature = sp_itr->second(nv.digest(chain_id));
             emit(pbft_outgoing_new_view, nv);
             return nv;
         }
@@ -623,13 +625,13 @@ namespace eosio {
                 flat_map<pbft_view_type, vector<pbft_prepare>> prepare_msg;
 
                 for (auto const &pre: prepares) {
-                    if (prepare_count.find(pre.view) == prepare_count.end()) prepare_count[pre.view] = 0;
-                    prepare_msg[pre.view].emplace_back(pre);
+                    if (prepare_count.find(pre.first.first) == prepare_count.end()) prepare_count[pre.first.first] = 0;
+                    prepare_msg[pre.first.first].emplace_back(pre.second);
                 }
 
-                for (auto const &sp: as) {
+                for (auto const &bp: as) {
                     for (auto const &pp: prepares) {
-                        if (sp.block_signing_key == pp.common.sender) prepare_count[pp.view] += 1;
+                        if (bp.block_signing_key == pp.first.second) prepare_count[pp.first.first] += 1;
                     }
                 }
 
@@ -657,43 +659,47 @@ namespace eosio {
 
         vector<pbft_committed_certificate> pbft_database::generate_committed_certificate() {
 
+            auto pcc = vector<pbft_committed_certificate>{};
+
             auto const &by_commit_and_num_index = pbft_state_index.get<by_commit_and_num>();
             auto itr = by_commit_and_num_index.begin();
-            if (itr == by_commit_and_num_index.end()) return vector<pbft_committed_certificate>{};
+            if (itr == by_commit_and_num_index.end()) return pcc;
 
             pbft_state_ptr psp = *itr;
 
-            if (!psp->is_committed) return vector<pbft_committed_certificate>{};
+            if (!psp->is_committed) return pcc;
 
             auto highest_committed_block_num = psp->block_num;
 
             vector<block_num_type> ccb;
 
+            auto lib_num = ctrl.last_irreversible_block_num();
+
             //adding my highest committed cert.
             auto lscb_num = ctrl.last_stable_checkpoint_block_num();
-            if ( highest_committed_block_num > lscb_num ) {
+            if ( highest_committed_block_num <= lib_num && highest_committed_block_num > lscb_num ) {
                 ccb.emplace_back(highest_committed_block_num);
             }
 
             auto watermarks = get_updated_watermarks();
             for (auto& watermark : watermarks) {
                 //adding committed cert on every water mark.
-                if (watermark < highest_committed_block_num && watermark > lscb_num) {
+                if (watermark < lib_num && watermark > lscb_num) {
                     ccb.emplace_back(watermark);
                 }
             }
 
             auto const &by_id_index = pbft_state_index.get<by_block_id>();
 
-            auto pcc = vector<pbft_committed_certificate>{};
+            std::sort(ccb.begin(), ccb.end());
             pcc.reserve(ccb.size());
             for (auto const &committed_block_num: ccb) {
                 auto cbs = ctrl.fetch_block_state_by_number(committed_block_num);
-                if (!cbs) return vector<pbft_committed_certificate>{};
+                if (!cbs) return pcc;
 
                 auto it = by_id_index.find(cbs->id);
                 if (it == by_id_index.end() || !(*it)->is_committed) {
-                    return vector<pbft_committed_certificate>{};
+                    return pcc;
                 }
 
                 auto as = cbs->active_schedule.producers;
@@ -705,13 +711,13 @@ namespace eosio {
                 flat_map<pbft_view_type, vector<pbft_commit>> commit_msg;
 
                 for (auto const &com: commits) {
-                    if (commit_count.find(com.view) == commit_count.end()) commit_count[com.view] = 0;
-                    commit_msg[com.view].emplace_back(com);
+                    if (commit_count.find(com.first.first) == commit_count.end()) commit_count[com.first.first] = 0;
+                    commit_msg[com.first.first].emplace_back(com.second);
                 }
 
-                for (auto const &sp: as) {
+                for (auto const &bp: as) {
                     for (auto const &cc: commits) {
-                        if (sp.block_signing_key == cc.common.sender) commit_count[cc.view] += 1;
+                        if (bp.block_signing_key == cc.first.second) commit_count[cc.first.first] += 1;
                     }
                 }
 
@@ -722,7 +728,7 @@ namespace eosio {
                     }
                 }
 
-                if (valid_commits.empty()) return vector<pbft_committed_certificate>{};
+                if (valid_commits.empty()) return pcc;
 
                 pbft_committed_certificate cc;
                 cc.block_info={cbs->id}; cc.commits=valid_commits;
@@ -733,31 +739,42 @@ namespace eosio {
 
         pbft_view_changed_certificate pbft_database::generate_view_changed_certificate(pbft_view_type target_view) {
 
+            auto pvcc = pbft_view_changed_certificate();
+
             auto &by_view_index = view_state_index.get<by_view>();
             auto itr = by_view_index.find(target_view);
-            if (itr == by_view_index.end()) return pbft_view_changed_certificate();
+            if (itr == by_view_index.end()) return pvcc;
 
             auto pvs = *itr;
 
             if (pvs->is_view_changed) {
-                auto pvcc = pbft_view_changed_certificate();
-                pvcc.target_view=pvs->view; pvcc.view_changes=pvs->view_changes;
+
+                pvcc.target_view=pvs->view;
+                pvcc.view_changes.reserve(pvs->view_changes.size());
+                for(auto & view_change : pvs->view_changes) {
+                    pvcc.view_changes.emplace_back( view_change.second );
+                }
                 return pvcc;
-            } else return pbft_view_changed_certificate();
+            } else return pvcc;
         }
 
 
 
-        bool pbft_database::is_valid_prepared_certificate(const pbft_prepared_certificate &certificate) {
+        bool pbft_database::is_valid_prepared_certificate(const pbft_prepared_certificate &certificate, bool add_to_pbft_db) {
             // an empty certificate is valid since it acts as a null digest in pbft.
             if (certificate.empty()) return true;
             // a certificate under lscb (no longer in fork_db) is also treated as null.
             if (certificate.block_info.block_num() <= ctrl.last_stable_checkpoint_block_num()) return true;
 
-            auto valid = true;
-            for (auto const &p : certificate.prepares) {
-                valid = valid && is_valid_prepare(p);
-                if (!valid) return false;
+            auto prepares = certificate.prepares;
+            auto prepares_metadata = vector<pbft_message_metadata<pbft_prepare>>{};
+            prepares_metadata.reserve(prepares.size());
+
+            for (auto &p : prepares) {
+                auto pmm = pbft_message_metadata<pbft_prepare>(p, chain_id);
+                prepares_metadata.emplace_back(pmm);
+                if (!is_valid_prepare(p, pmm.sender_key)) return false;
+                if (add_to_pbft_db) add_pbft_prepare(p, pmm.sender_key);
             }
 
             auto cert_id = certificate.block_info.block_id;
@@ -768,16 +785,15 @@ namespace eosio {
             }
             auto bp_threshold = producer_schedule.producers.size() * 2 / 3 + 1;
 
-            auto prepares = certificate.prepares;
             flat_map<pbft_view_type, uint32_t> prepare_count;
 
-            for (auto const &pre: prepares) {
-                if (prepare_count.find(pre.view) == prepare_count.end()) prepare_count[pre.view] = 0;
+            for (auto const &pm: prepares_metadata) {
+                if (prepare_count.find(pm.msg.view) == prepare_count.end()) prepare_count[pm.msg.view] = 0;
             }
 
-            for (auto const &sp: producer_schedule.producers) {
-                for (auto const &pp: prepares) {
-                    if (sp.block_signing_key == pp.common.sender) prepare_count[pp.view] += 1;
+            for (auto const &bp: producer_schedule.producers) {
+                for (auto const &pm: prepares_metadata) {
+                    if (bp.block_signing_key == pm.sender_key) prepare_count[pm.msg.view] += 1;
                 }
             }
 
@@ -792,13 +808,13 @@ namespace eosio {
             if (!should_prepared) return false;
 
             //validate prepare
-            auto lscb = ctrl.last_stable_checkpoint_block_num();
+            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
             auto non_fork_bp_count = 0;
             vector<block_info_type> prepare_infos;
             prepare_infos.reserve(certificate.prepares.size());
             for (auto const &p : certificate.prepares) {
                 //only search in fork db
-                if (p.block_info.block_num() <= lscb) {
+                if (p.block_info.block_num() <= lscb_num) {
                     ++non_fork_bp_count;
                 } else {
                     prepare_infos.emplace_back(p.block_info);
@@ -807,17 +823,24 @@ namespace eosio {
             return is_valid_longest_fork(certificate.block_info, prepare_infos, bp_threshold, non_fork_bp_count);
         }
 
-        bool pbft_database::is_valid_committed_certificate(const pbft_committed_certificate &certificate) {
+        bool pbft_database::is_valid_committed_certificate(const pbft_committed_certificate &certificate, bool add_to_pbft_db) {
             // an empty certificate is valid since it acts as a null digest in pbft.
             if (certificate.empty()) return true;
             // a certificate under lscb (no longer in fork_db) is also treated as null.
             if (certificate.block_info.block_num() <= ctrl.last_stable_checkpoint_block_num()) return true;
 
-            auto valid = true;
-            for (auto const &c : certificate.commits) {
-                valid = valid && is_valid_commit(c);
-                if (!valid) return false;
+            auto commits = certificate.commits;
+            auto commits_metadata = vector<pbft_message_metadata<pbft_commit>>{};
+            commits_metadata.reserve(commits.size());
+
+            for (auto &c : commits) {
+                auto pmm = pbft_message_metadata<pbft_commit>(c, chain_id);
+                commits_metadata.emplace_back(pmm);
+                if (!is_valid_commit(c, pmm.sender_key)) return false;
+                if (add_to_pbft_db) add_pbft_commit(c, pmm.sender_key);
             }
+
+            if (add_to_pbft_db && should_committed()) commit_local();
 
             auto cert_id = certificate.block_info.block_id;
             auto cert_bs = ctrl.fetch_block_state_by_id(cert_id);
@@ -827,16 +850,15 @@ namespace eosio {
             }
             auto bp_threshold = producer_schedule.producers.size() * 2 / 3 + 1;
 
-            auto commits = certificate.commits;
             flat_map<pbft_view_type, uint32_t> commit_count;
 
-            for (auto const &pre: commits) {
-                if (commit_count.find(pre.view) == commit_count.end()) commit_count[pre.view] = 0;
+            for (auto const &cm: commits_metadata) {
+                if (commit_count.find(cm.msg.view) == commit_count.end()) commit_count[cm.msg.view] = 0;
             }
 
-            for (auto const &sp: producer_schedule.producers) {
-                for (auto const &pp: commits) {
-                    if (sp.block_signing_key == pp.common.sender) commit_count[pp.view] += 1;
+            for (auto const &bp: producer_schedule.producers) {
+                for (auto const &cm: commits_metadata) {
+                    if (bp.block_signing_key == cm.sender_key) commit_count[cm.msg.view] += 1;
                 }
             }
 
@@ -851,13 +873,13 @@ namespace eosio {
             if (!should_committed) return false;
 
             //validate commit
-            auto lscb = ctrl.last_stable_checkpoint_block_num();
+            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
             auto non_fork_bp_count = 0;
             vector<block_info_type> commit_infos;
             commit_infos.reserve(certificate.commits.size());
             for (auto const &c : certificate.commits) {
                 //only search in fork db
-                if (c.block_info.block_num() <= lscb) {
+                if (c.block_info.block_num() <= lscb_num) {
                     ++non_fork_bp_count;
                 } else {
                     commit_infos.emplace_back(c.block_info);
@@ -866,65 +888,67 @@ namespace eosio {
             return is_valid_longest_fork(certificate.block_info, commit_infos, bp_threshold, non_fork_bp_count);
         }
 
-        bool pbft_database::is_valid_view_change(const pbft_view_change &vc) {
-            if (vc.common.chain_id != chain_id) return false;
+        bool pbft_database::is_valid_view_change(const pbft_view_change &vc, const public_key_type &pk) {
 
-            return vc.is_signature_valid()
-                   && should_recv_pbft_msg(vc.common.sender);
+            return should_recv_pbft_msg(pk);
             // No need to check prepared cert and stable checkpoint, until generate or validate a new view msg
         }
 
 
-        bool pbft_database::is_valid_new_view(const pbft_new_view &nv) {
-            //all signatures should be valid
+        void pbft_database::validate_new_view(const pbft_new_view &nv, const public_key_type &pk) {
 
-            EOS_ASSERT(nv.common.chain_id == chain_id, pbft_exception, "wrong chain.");
+            EOS_ASSERT(pk == get_new_view_primary_key(nv.new_view), pbft_exception,
+                       "new view is not signed with expected key");
 
-            EOS_ASSERT(nv.is_signature_valid(), pbft_exception, "bad new view signature");
+            EOS_ASSERT(is_valid_prepared_certificate(nv.prepared_cert, true), pbft_exception,
+                       "bad prepared certificate: ${pc}", ("pc", nv.prepared_cert));
 
-            EOS_ASSERT(nv.common.sender == get_new_view_primary_key(nv.new_view), pbft_exception, "new view is not signed with expected key");
-
-            EOS_ASSERT(is_valid_prepared_certificate(nv.prepared_cert), pbft_exception,
-                    "bad prepared certificate: ${pc}", ("pc", nv.prepared_cert));
-
-            EOS_ASSERT(is_valid_stable_checkpoint(nv.stable_checkpoint), pbft_exception,
+            EOS_ASSERT(is_valid_stable_checkpoint(nv.stable_checkpoint, true), pbft_exception,
                        "bad stable checkpoint: ${scp}", ("scp", nv.stable_checkpoint));
 
-            for (auto const &c: nv.committed_cert) {
-                EOS_ASSERT(is_valid_committed_certificate(c), pbft_exception, "bad committed certificate: ${cc}", ("cc", c));
+            auto committed_certs = nv.committed_certs;
+            std::sort(committed_certs.begin(), committed_certs.end());
+            for (auto const &c: committed_certs) {
+                EOS_ASSERT(is_valid_committed_certificate(c, true), pbft_exception,
+                           "bad committed certificate: ${cc}", ("cc", c));
             }
-
-            EOS_ASSERT(nv.is_signature_valid(), pbft_exception, "bad new view signature");
 
             EOS_ASSERT(nv.view_changed_cert.target_view == nv.new_view, pbft_exception, "target view not match");
 
             vector<public_key_type> lscb_producers;
             lscb_producers.reserve(lscb_active_producers().producers.size());
-            for (auto const& pk: lscb_active_producers().producers) {
-                lscb_producers.emplace_back(pk.block_signing_key);
+            for (auto const &bp: lscb_active_producers().producers) {
+                lscb_producers.emplace_back(bp.block_signing_key);
             }
             auto schedule_threshold = lscb_producers.size() * 2 / 3 + 1;
 
+            auto view_changes = nv.view_changed_cert.view_changes;
+            auto view_changes_metadata = vector<pbft_message_metadata<pbft_view_change>>{};
+            view_changes_metadata.reserve(view_changes.size());
+
             vector<public_key_type> view_change_producers;
-            view_change_producers.reserve(nv.view_changed_cert.view_changes.size());
-            for (auto vc: nv.view_changed_cert.view_changes) {
-                if (is_valid_view_change(vc)) {
-                    add_pbft_view_change(vc);
-                    view_change_producers.emplace_back(vc.common.sender);
+            view_change_producers.reserve(view_changes.size());
+            for (auto &vc: view_changes) {
+                auto pmm = pbft_message_metadata<pbft_view_change>(vc, chain_id);
+                view_changes_metadata.emplace_back(pmm);
+                if (is_valid_view_change(vc, pmm.sender_key)) {
+                    add_pbft_view_change(vc, pmm.sender_key);
+                    view_change_producers.emplace_back(pmm.sender_key);
                 }
             }
 
             vector<public_key_type> intersection;
 
-            std::sort(lscb_producers.begin(),lscb_producers.end());
-            std::sort(view_change_producers.begin(),view_change_producers.end());
-            std::set_intersection(lscb_producers.begin(),lscb_producers.end(),
-                                  view_change_producers.begin(),view_change_producers.end(),
+            std::sort(lscb_producers.begin(), lscb_producers.end());
+            std::sort(view_change_producers.begin(), view_change_producers.end());
+            std::set_intersection(lscb_producers.begin(), lscb_producers.end(),
+                                  view_change_producers.begin(), view_change_producers.end(),
                                   back_inserter(intersection));
 
             EOS_ASSERT(intersection.size() >= schedule_threshold, pbft_exception, "view changes count not enough");
 
-            EOS_ASSERT(should_new_view(nv.new_view), pbft_exception, "should not enter new view: ${nv}", ("nv", nv.new_view));
+            EOS_ASSERT(should_new_view(nv.new_view), pbft_exception, "should not enter new view: ${nv}",
+                       ("nv", nv.new_view));
 
             auto highest_ppc = pbft_prepared_certificate();
             auto highest_pcc = vector<pbft_committed_certificate>{};
@@ -936,39 +960,38 @@ namespace eosio {
                     highest_ppc = vc.prepared_cert;
                 }
 
-                for (auto const &cc: vc.committed_cert) {
+                for (auto const &cc: vc.committed_certs) {
                     if (is_valid_committed_certificate(cc)) {
                         auto p_itr = find_if(highest_pcc.begin(), highest_pcc.end(),
-                                [&](const pbft_committed_certificate &ext) { return ext.block_info.block_id == cc.block_info.block_id; });
+                                             [&](const pbft_committed_certificate &ext) {
+                                                 return ext.block_info.block_id == cc.block_info.block_id;
+                                             });
                         if (p_itr == highest_pcc.end()) highest_pcc.emplace_back(cc);
                     }
                 }
 
                 if (vc.stable_checkpoint.block_info.block_num() > highest_scp.block_info.block_num()
-                    && is_valid_stable_checkpoint(vc.stable_checkpoint)) {
+                    && is_valid_stable_checkpoint(vc.stable_checkpoint, true)) {
                     highest_scp = vc.stable_checkpoint;
                 }
             }
 
             EOS_ASSERT(highest_ppc.block_info == nv.prepared_cert.block_info, pbft_exception,
-                    "prepared certificate does not match, should be ${hppc} but ${pc} given",
-                    ("hppc",highest_ppc)("pc", nv.prepared_cert));
+                       "prepared certificate does not match, should be ${hppc} but ${pc} given",
+                       ("hppc", highest_ppc)("pc", nv.prepared_cert));
 
             std::sort(highest_pcc.begin(), highest_pcc.end());
-            auto committed_certs = nv.committed_cert;
-            std::sort(committed_certs.begin(), committed_certs.end());
-            EOS_ASSERT(highest_pcc.size() == committed_certs.size(), pbft_exception, "wrong committed certificates size");
+            EOS_ASSERT(highest_pcc.size() == committed_certs.size(), pbft_exception,
+                       "wrong committed certificates size");
             for (auto i = 0; i < committed_certs.size(); ++i) {
                 EOS_ASSERT(highest_pcc[i].block_info == committed_certs[i].block_info, pbft_exception,
-                        "committed certificate does not match, should be ${hpcc} but ${cc} given",
-                        ("hpcc",highest_pcc[i])("cc", committed_certs[i]));
+                           "committed certificate does not match, should be ${hpcc} but ${cc} given",
+                           ("hpcc", highest_pcc[i])("cc", committed_certs[i]));
             }
 
             EOS_ASSERT(highest_scp.block_info == nv.stable_checkpoint.block_info, pbft_exception,
                        "stable checkpoint does not match, should be ${hscp} but ${scp} given",
-                       ("hpcc",highest_scp)("pc", nv.stable_checkpoint));
-
-            return true;
+                       ("hpcc", highest_scp)("pc", nv.stable_checkpoint));
         }
 
         bool pbft_database::should_stop_view_change(const pbft_view_change &vc) {
@@ -1062,20 +1085,20 @@ namespace eosio {
         pbft_stable_checkpoint pbft_database::fetch_stable_checkpoint_from_blk_extn(const signed_block_ptr &b) {
             try {
                 if (b) {
-                    auto &ext = b->block_extensions;
+                    auto &extn = b->block_extensions;
 
-                    for (auto it = ext.begin(); it != ext.end();) {
+                    for (auto it = extn.begin(); it != extn.end();) {
                         if (it->first == static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint)) {
-                            auto scp_v = it->second;
-                            fc::datastream<char *> ds_decode(scp_v.data(), scp_v.size());
+                            auto scp_ds = it->second;
+                            fc::datastream<char *> ds(scp_ds.data(), scp_ds.size());
 
-                            pbft_stable_checkpoint scp_decode;
-                            fc::raw::unpack(ds_decode, scp_decode);
+                            pbft_stable_checkpoint scp;
+                            fc::raw::unpack(ds, scp);
 
-                            if (is_valid_stable_checkpoint(scp_decode)) {
-                                return scp_decode;
+                            if (is_valid_stable_checkpoint(scp)) {
+                                return scp;
                             } else {
-                                it = ext.erase(it);
+                                it = extn.erase(it);
                             }
                         } else {
                             it++;
@@ -1088,70 +1111,78 @@ namespace eosio {
             return pbft_stable_checkpoint();
         }
 
-        pbft_stable_checkpoint pbft_database::get_stable_checkpoint_by_id(const block_id_type &block_id) {
+        pbft_stable_checkpoint pbft_database::get_stable_checkpoint_by_id(const block_id_type &block_id, bool incl_blk_extn ) {
             auto const &by_block = checkpoint_index.get<by_block_id>();
             auto itr = by_block.find(block_id);
             if (itr == by_block.end()) {
-                auto blk = ctrl.fetch_block_by_id(block_id);
-                return fetch_stable_checkpoint_from_blk_extn(blk);
+                if (incl_blk_extn) {
+                    auto blk = ctrl.fetch_block_by_id(block_id);
+                    return fetch_stable_checkpoint_from_blk_extn(blk);
+                }
+                return pbft_stable_checkpoint();
             }
 
             auto cpp = *itr;
 
             if (cpp->is_stable) {
-                if (ctrl.my_signature_providers().empty()) return pbft_stable_checkpoint();
                 pbft_stable_checkpoint psc;
-                psc.block_info={cpp->block_id}; psc.checkpoints=cpp->checkpoints;
+                psc.block_info={cpp->block_id};
+                psc.checkpoints.reserve(cpp->checkpoints.size());
+                for (auto & checkpoint : cpp->checkpoints) {
+                    psc.checkpoints.emplace_back(checkpoint.second) ;
+                }
                 return psc;
             } else return pbft_stable_checkpoint();
         }
 
         block_info_type pbft_database::cal_pending_stable_checkpoint() const {
 
-            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
-            auto lscb_id = ctrl.last_stable_checkpoint_block_id();
-            auto lscb_info = block_info_type{lscb_id};
+            auto pending_scb_num = ctrl.last_stable_checkpoint_block_num();
+            auto pending_scb_info = block_info_type{ctrl.last_stable_checkpoint_block_id()};
 
             auto const &by_blk_num = checkpoint_index.get<by_num>();
-            auto itr = by_blk_num.lower_bound(lscb_num);
-            if (itr == by_blk_num.end()) return lscb_info;
+            auto itr = by_blk_num.lower_bound(pending_scb_num);
+            if (itr == by_blk_num.end()) return pending_scb_info;
 
             while (itr != by_blk_num.end()) {
-                if ((*itr)->is_stable && ctrl.fetch_block_state_by_id((*itr)->block_id)) {
-                    auto lscb = ctrl.fetch_block_state_by_number(ctrl.last_stable_checkpoint_block_num());
+                if (auto bs = ctrl.fetch_block_state_by_id((*itr)->block_id)) {
+                    auto scb = ctrl.fetch_block_state_by_number(pending_scb_num);
 
-                    auto head_checkpoint_schedule = ctrl.fetch_block_state_by_id(
-                            (*itr)->block_id)->active_schedule;
+                    auto head_checkpoint_schedule = bs->active_schedule;
 
                     producer_schedule_type current_schedule;
                     producer_schedule_type new_schedule;
 
-                    if (lscb_num == 0) {
-                        auto const& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
+                    if (pending_scb_num == 0) {
+                        auto const &ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
                         if (ucb == 0) {
                             current_schedule = ctrl.initial_schedule();
                             new_schedule = ctrl.initial_schedule();
                         } else {
-                            auto bs = ctrl.fetch_block_state_by_number(ucb);
-                            if (!bs) return lscb_info;
-                            current_schedule = bs->active_schedule;
-                            new_schedule = bs->pending_schedule;
+                            auto ucb_state = ctrl.fetch_block_state_by_number(ucb);
+                            if (!ucb_state) return pending_scb_info;
+                            current_schedule = ucb_state->active_schedule;
+                            new_schedule = ucb_state->pending_schedule;
                         }
-                    } else if (lscb) {
-                        current_schedule = lscb->active_schedule;
-                        new_schedule = lscb->pending_schedule;
+                    } else if (scb) {
+                        current_schedule = scb->active_schedule;
+                        new_schedule = scb->pending_schedule;
                     } else {
-                        return lscb_info;
+                        return pending_scb_info;
                     }
 
-                    if ((*itr)->is_stable
-                        && (head_checkpoint_schedule == current_schedule || head_checkpoint_schedule == new_schedule)) {
-                        lscb_info = block_info_type{(*itr)->block_id};
+                    if ((*itr)->is_stable) {
+                        if (head_checkpoint_schedule == current_schedule || head_checkpoint_schedule == new_schedule) {
+                            pending_scb_info = block_info_type{(*itr)->block_id};
+                            pending_scb_num = pending_scb_info.block_num();
+                        } else {
+                            return pending_scb_info;
+                        }
                     }
                 }
                 ++itr;
             }
-            return lscb_info;
+            return pending_scb_info;
         }
 
         vector<pbft_checkpoint> pbft_database::generate_and_add_pbft_checkpoint() {
@@ -1161,12 +1192,12 @@ namespace eosio {
                 if (in <= ucb) return false;
                 auto watermarks = get_updated_watermarks();
                 return in == ucb + 1 // checkpoint on first pbft block;
-                       || in % 100 == 1 // checkpoint on every 100 block;
+                       || in % pbft_checkpoint_granularity == 1 // checkpoint on every 100 block;
                        || std::find(watermarks.begin(), watermarks.end(), in) != watermarks.end(); // checkpoint on bp schedule change;
             };
 
             auto new_pc = vector<pbft_checkpoint>{};
-            new_pc.reserve(ctrl.my_signature_providers().size());
+
             auto const &by_commit_and_num_index = pbft_state_index.get<by_commit_and_num>();
             auto itr = by_commit_and_num_index.begin();
             if (itr == by_commit_and_num_index.end() || !(*itr)->is_committed) return new_pc;
@@ -1186,9 +1217,9 @@ namespace eosio {
                         } else {
                             auto checkpoints = (*c_itr)->checkpoints;
                             for (auto const &my_sp : ctrl.my_signature_providers()) {
-                                auto p_itr = find_if(checkpoints.begin(), checkpoints.end(),
-                                        [&](const pbft_checkpoint &ext) { return ext.common.sender == my_sp.first; });
-                                if (p_itr != checkpoints.end() && !(*c_itr)->is_stable) pending_checkpoint_block_num[i] = true; //retry sending at this time.
+                                if (checkpoints.find(my_sp.first) != checkpoints.end() && !(*c_itr)->is_stable) {
+                                    pending_checkpoint_block_num[i] = true; //retry sending at this time.
+                                }
                             }
                             if (pending_checkpoint_block_num.find(i) == pending_checkpoint_block_num.end()) {
                                 pending_checkpoint_block_num[i] = false;
@@ -1204,12 +1235,11 @@ namespace eosio {
                 for (auto& bnum_and_retry: pending_checkpoint_block_num) {
                     if (auto bs = ctrl.fork_db().get_block_in_current_chain_by_num(bnum_and_retry.first)) {
                         for (auto const &my_sp : ctrl.my_signature_providers()) {
-                            auto uuid = boost::uuids::to_string(uuid_generator());
                             pbft_checkpoint cp;
-                            cp.common.uuid=uuid; cp.block_info={bs->id}; cp.common.sender=my_sp.first; cp.common.chain_id=chain_id;
-                            cp.sender_signature = my_sp.second(cp.digest());
-                            if (!bnum_and_retry.second) { //first time sending this checkpoint
-                                add_pbft_checkpoint(cp);
+                            cp.block_info={bs->id};
+                            cp.sender_signature = my_sp.second(cp.digest(chain_id));
+                            if (!bnum_and_retry.second && is_valid_checkpoint(cp, my_sp.first)) { //first time sending this checkpoint
+                                add_pbft_checkpoint(cp, my_sp.first);
                             }
                             new_pc.emplace_back(cp);
                         }
@@ -1217,55 +1247,51 @@ namespace eosio {
                 }
             } else if (lscb_num > 0) { //retry sending my lscb
                 for (auto const &my_sp : ctrl.my_signature_providers()) {
-                    auto uuid = boost::uuids::to_string(uuid_generator());
                     pbft_checkpoint cp;
-                    cp.common.uuid=uuid; cp.block_info={ctrl.last_stable_checkpoint_block_id()}; cp.common.sender=my_sp.first; cp.common.chain_id=chain_id;
-                    cp.sender_signature = my_sp.second(cp.digest());
+                    cp.block_info={ctrl.last_stable_checkpoint_block_id()};
+                    cp.sender_signature = my_sp.second(cp.digest(chain_id));
                     new_pc.emplace_back(cp);
                 }
             }
             return new_pc;
         }
 
-        void pbft_database::add_pbft_checkpoint(pbft_checkpoint &cp) {
-
-            if (!is_valid_checkpoint(cp)) return;
+        void pbft_database::add_pbft_checkpoint(pbft_checkpoint &cp, const public_key_type &pk) {
 
             auto cp_block_state = ctrl.fetch_block_state_by_id(cp.block_info.block_id);
             if (!cp_block_state) return;
-            auto active_bps = cp_block_state->active_schedule.producers;
-            auto checkpoint_count = count_if(active_bps.begin(), active_bps.end(), [&](const producer_key &p) {
-                return p.block_signing_key == cp.common.sender;
-            });
-            if (checkpoint_count == 0) return;
 
             auto &by_block = checkpoint_index.get<by_block_id>();
             auto itr = by_block.find(cp.block_info.block_id);
             if (itr == by_block.end()) {
-                auto cs = pbft_checkpoint_state{cp.block_info.block_id, cp.block_info.block_num(), .checkpoints={cp}};
-                auto csp = make_shared<pbft_checkpoint_state>(cs);
+                flat_map<public_key_type, pbft_checkpoint> checkpoints;
+                checkpoints[pk] = cp;
+                pbft_checkpoint_state cs;
+                cs.block_id = cp.block_info.block_id;
+                cs.block_num = cp.block_info.block_num();
+                cs.checkpoints = checkpoints;
+                auto csp = std::make_shared<pbft_checkpoint_state>(move(cs));
                 checkpoint_index.insert(csp);
                 itr = by_block.find(cp.block_info.block_id);
             } else {
                 auto csp = (*itr);
                 auto checkpoints = csp->checkpoints;
-                auto p_itr = find_if(checkpoints.begin(), checkpoints.end(),
-                        [&](const pbft_checkpoint &existed) { return existed.common.sender == cp.common.sender; });
-                if (p_itr == checkpoints.end()) {
+                if (checkpoints.find(pk) == checkpoints.end()) {
                     by_block.modify(itr, [&](const pbft_checkpoint_state_ptr &pcp) {
-                        csp->checkpoints.emplace_back(cp);
+                        csp->checkpoints[pk] = cp;
                     });
                 }
             }
 
             auto csp = (*itr);
+            auto active_bps = cp_block_state->active_schedule.producers;
             auto threshold = active_bps.size() * 2 / 3 + 1;
             if (csp->checkpoints.size() >= threshold && !csp->is_stable) {
                 auto cp_count = 0;
 
-                for (auto const &sp: active_bps) {
-                    for (auto const &pp: csp->checkpoints) {
-                        if (sp.block_signing_key == pp.common.sender) cp_count += 1;
+                for (auto const &bp: active_bps) {
+                    for (auto const &c: csp->checkpoints) {
+                        if (bp.block_signing_key == c.first) cp_count += 1;
                     }
                 }
                 if (cp_count >= threshold) {
@@ -1299,14 +1325,14 @@ namespace eosio {
         }
 
         void pbft_database::checkpoint_local() {
-            auto lscb_info = cal_pending_stable_checkpoint();
+            auto pending_scb_info = cal_pending_stable_checkpoint();
             auto lscb_num = ctrl.last_stable_checkpoint_block_num();
-            auto pending_num = lscb_info.block_num();
-            auto pending_id = lscb_info.block_id;
+            auto pending_num = pending_scb_info.block_num();
+            auto pending_id = pending_scb_info.block_id;
             if (pending_num > lscb_num) {
                 ctrl.set_pbft_latest_checkpoint(pending_id);
                 if (ctrl.last_irreversible_block_num() < pending_num) ctrl.pbft_commit_local(pending_id);
-                auto const &by_block_id_index = pbft_state_index.get<by_block_id>();
+                auto &by_block_id_index = pbft_state_index.get<by_block_id>();
                 auto pitr = by_block_id_index.find(pending_id);
                 if (pitr != by_block_id_index.end()) {
                     prune(*pitr);
@@ -1314,70 +1340,66 @@ namespace eosio {
             }
             auto &bni = checkpoint_index.get<by_num>();
             auto oldest = bni.begin();
-            if (oldest != bni.end() && lscb_num - (*oldest)->block_num > 10000) {
-                auto it = bni.lower_bound(lscb_num - 10000);
-                if (it != bni.end() && (*it)->is_stable) {
-                    prune_checkpoints(*it);
-                }
+            if ( oldest != bni.end()
+                 && (*oldest)->is_stable
+                 && (*oldest)->block_num < lscb_num - oldest_stable_checkpoint ) {
+                prune(*oldest);
             }
         }
 
-        bool pbft_database::is_valid_checkpoint(const pbft_checkpoint &cp) {
-            if (!(is_valid_pbft_message(cp.common) && cp.is_signature_valid())) return false;
+        bool pbft_database::is_valid_checkpoint(const pbft_checkpoint &cp, const public_key_type &pk) {
 
-            if (cp.block_info.block_num() > ctrl.head_block_num()
-                || cp.block_info.block_num() <= ctrl.last_stable_checkpoint_block_num()
-                || !cp.is_signature_valid())
-                return false;
-            auto bs = ctrl.fetch_block_state_by_id(cp.block_info.block_id);
-            if (bs) {
+            if (cp.block_info.block_num() > ctrl.head_block_num() || cp.block_info.block_num() <= ctrl.last_stable_checkpoint_block_num()) return false;
+
+            if (auto bs = ctrl.fetch_block_state_by_id(cp.block_info.block_id)) {
                 auto active_bps = bs->active_schedule.producers;
                 for (auto const &bp: active_bps) {
-                    if (bp.block_signing_key == cp.common.sender) return true;
+                    if (bp.block_signing_key == pk) return true;
                 }
             }
             return false;
         }
 
-        bool pbft_database::is_valid_stable_checkpoint(const pbft_stable_checkpoint &scp) {
+        bool pbft_database::is_valid_stable_checkpoint(const pbft_stable_checkpoint &scp, bool add_to_pbft_db) {
             if (scp.block_info.block_num() <= ctrl.last_stable_checkpoint_block_num())
                 // the stable checkpoint is way behind lib, no way getting the block state,
                 // it will not be applied nor saved, thus considered safe.
                 return true;
 
-            auto valid = true;
-            for (auto const &c: scp.checkpoints) {
-                valid = valid && is_valid_checkpoint(c) && c.block_info == scp.block_info;
-                if (!valid) return false;
+            auto checkpoints = scp.checkpoints;
+            auto checkpoints_metadata = vector<pbft_message_metadata<pbft_checkpoint>>{};
+            checkpoints_metadata.reserve(checkpoints.size());
+
+            for (auto &cp : checkpoints) {
+                auto pmm = pbft_message_metadata<pbft_checkpoint>(cp, chain_id);
+                checkpoints_metadata.emplace_back(pmm);
+                if (cp.block_info != scp.block_info || !is_valid_checkpoint(cp, pmm.sender_key)) return false;
+                if (add_to_pbft_db) add_pbft_checkpoint(cp, pmm.sender_key);
             }
 
-            auto bs = ctrl.fetch_block_state_by_number(scp.block_info.block_num());
-            if (bs) {
+            if (add_to_pbft_db) checkpoint_local();
+
+
+            if (auto bs = ctrl.fetch_block_state_by_number(scp.block_info.block_num())) {
                 auto as = bs->active_schedule;
                 auto cp_count = 0;
-                for (auto const &sp: as.producers) {
-                    for (auto const &v: scp.checkpoints) {
-                        if (sp.block_signing_key == v.common.sender) cp_count += 1;
+                for (auto const &bp: as.producers) {
+                    for (auto const &cpm: checkpoints_metadata) {
+                        if (bp.block_signing_key == cpm.sender_key) cp_count += 1;
                     }
                 }
-                valid = valid && cp_count >= as.producers.size() * 2 / 3 + 1;
-            } else {
-                return false;
+                return cp_count >= as.producers.size() * 2 / 3 + 1;
             }
-            return valid;
-        }
+            return false;
 
-        bool pbft_database::is_valid_pbft_message(const pbft_message_common &common) {
-            return common.chain_id == chain_id;
         }
 
         bool pbft_database::should_send_pbft_msg() {
 
-            auto my_sp = ctrl.my_signature_providers();
             auto schedules = get_updated_fork_schedules();
             for (auto const &bp: schedules) {
-                for (auto const &my: my_sp) {
-                    if (bp.first == my.first) return true;
+                for (auto const &sp: ctrl.my_signature_providers()) {
+                    if (bp.first == sp.first) return true;
                 }
             }
             return false;
@@ -1409,11 +1431,11 @@ namespace eosio {
                 num = ucb;
             }
 
-            auto bs = ctrl.fetch_block_state_by_number(num);
-            if (!bs) return ctrl.initial_schedule();
-
-            if (bs->pending_schedule.producers.empty()) return bs->active_schedule;
-            return bs->pending_schedule;
+            if (auto bs = ctrl.fetch_block_state_by_number(num)) {
+                if (bs->pending_schedule.producers.empty()) return bs->active_schedule;
+                return bs->pending_schedule;
+            }
+            return ctrl.initial_schedule();
         }
 
         block_num_type pbft_database::get_current_pbft_watermark() {
@@ -1461,9 +1483,9 @@ namespace eosio {
                     }
                 }
                 if (!removed.empty()) {
-                    auto pruned_num = *max_element(removed.begin(), removed.end());
+                    auto removed_num = *max_element(removed.begin(), removed.end());
                     for (auto itr = fork_schedules.begin(); itr != fork_schedules.end();) {
-                        if ((*itr).second <= pruned_num) {
+                        if ((*itr).second <= removed_num) {
                             itr = fork_schedules.erase(itr);
                         } else {
                             ++itr;
@@ -1512,9 +1534,8 @@ namespace eosio {
             auto &by_num_index = checkpoint_index.get<by_num>();
 
             auto pitr  = by_num_index.lower_bound( num );
-            auto epitr = by_num_index.upper_bound( num );
-            while( pitr != epitr ) {
-                if (pitr != by_num_index.end() && (*pitr)) results.emplace_back(*(*pitr));
+            while(pitr != by_num_index.end() && (*pitr)->block_num == num ) {
+                results.emplace_back(*(*pitr));
                 ++pitr;
             }
 
@@ -1566,13 +1587,13 @@ namespace eosio {
             }
         }
 
-        void pbft_database::prune_checkpoints(const pbft_checkpoint_state_ptr &h) {
+        void pbft_database::prune(const pbft_checkpoint_state_ptr &h) {
             auto num = h->block_num;
 
             auto &by_bn = checkpoint_index.get<by_num>();
             auto bni = by_bn.begin();
             while (bni != by_bn.end() && (*bni)->block_num < num) {
-                prune_checkpoints(*bni);
+                prune(*bni);
                 bni = by_bn.begin();
             }
 

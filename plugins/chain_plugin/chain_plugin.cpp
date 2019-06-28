@@ -178,11 +178,11 @@ public:
    fc::microseconds                 abi_serializer_max_time_ms;
    fc::optional<bfs::path>          snapshot_path;
 
-   void on_pbft_incoming_prepare(pbft_prepare p);
-   void on_pbft_incoming_commit(pbft_commit c);
-   void on_pbft_incoming_view_change(pbft_view_change vc);
-   void on_pbft_incoming_new_view(pbft_new_view nv);
-   void on_pbft_incoming_checkpoint(pbft_checkpoint cp);
+   void on_pbft_incoming_prepare(pbft_metadata_ptr<pbft_prepare> p);
+   void on_pbft_incoming_commit(pbft_metadata_ptr<pbft_commit> c);
+   void on_pbft_incoming_view_change(pbft_metadata_ptr<pbft_view_change> vc);
+   void on_pbft_incoming_new_view(pbft_metadata_ptr<pbft_new_view> nv);
+   void on_pbft_incoming_checkpoint(pbft_metadata_ptr<pbft_checkpoint> cp);
 
    // retained references to channels for easy publication
    channels::pre_accepted_block::channel_type&     pre_accepted_block_channel;
@@ -214,30 +214,30 @@ public:
    fc::optional<scoped_connection>                                   accepted_confirmation_connection;
 
    //pbft
-   fc::optional<scoped_connection>                                   pbft_outgoing_prepare_connection;
-   pbft::incoming::prepare_channel::channel_type::handle pbft_incoming_prepare_subscription;
-   pbft::outgoing::prepare_channel::channel_type& pbft_outgoing_prepare_channel;
-   pbft::incoming::prepare_channel::channel_type& pbft_incoming_prepare_channel;
+   fc::optional<scoped_connection>                          pbft_outgoing_prepare_connection;
+   pbft::incoming::prepare_channel::channel_type::handle    pbft_incoming_prepare_subscription;
+   pbft::outgoing::prepare_channel::channel_type&           pbft_outgoing_prepare_channel;
+   pbft::incoming::prepare_channel::channel_type&           pbft_incoming_prepare_channel;
 
-   fc::optional<scoped_connection>                                   pbft_outgoing_commit_connection;
+   fc::optional<scoped_connection>                      pbft_outgoing_commit_connection;
    pbft::incoming::commit_channel::channel_type::handle pbft_incoming_commit_subscription;
-   pbft::outgoing::commit_channel::channel_type& pbft_outgoing_commit_channel;
-   pbft::incoming::commit_channel::channel_type& pbft_incoming_commit_channel;
+   pbft::outgoing::commit_channel::channel_type&        pbft_outgoing_commit_channel;
+   pbft::incoming::commit_channel::channel_type&        pbft_incoming_commit_channel;
 
-   fc::optional<scoped_connection>                                   pbft_outgoing_view_change_connection;
-   pbft::incoming::view_change_channel::channel_type::handle pbft_incoming_view_change_subscription;
-   pbft::outgoing::view_change_channel::channel_type& pbft_outgoing_view_change_channel;
-   pbft::incoming::view_change_channel::channel_type& pbft_incoming_view_change_channel;
+   fc::optional<scoped_connection>                              pbft_outgoing_view_change_connection;
+   pbft::incoming::view_change_channel::channel_type::handle    pbft_incoming_view_change_subscription;
+   pbft::outgoing::view_change_channel::channel_type&           pbft_outgoing_view_change_channel;
+   pbft::incoming::view_change_channel::channel_type&           pbft_incoming_view_change_channel;
 
-   fc::optional<scoped_connection>                                   pbft_outgoing_new_view_connection;
-    pbft::incoming::new_view_channel::channel_type::handle pbft_incoming_new_view_subscription;
-    pbft::outgoing::new_view_channel::channel_type& pbft_outgoing_new_view_channel;
-    pbft::incoming::new_view_channel::channel_type& pbft_incoming_new_view_channel;
+   fc::optional<scoped_connection>                          pbft_outgoing_new_view_connection;
+   pbft::incoming::new_view_channel::channel_type::handle   pbft_incoming_new_view_subscription;
+   pbft::outgoing::new_view_channel::channel_type&          pbft_outgoing_new_view_channel;
+   pbft::incoming::new_view_channel::channel_type&          pbft_incoming_new_view_channel;
 
-    fc::optional<scoped_connection>                                  pbft_outgoing_checkpoint_connection;
-    pbft::incoming::checkpoint_channel::channel_type::handle pbft_incoming_checkpoint_subscription;
-    pbft::outgoing::checkpoint_channel::channel_type& pbft_outgoing_checkpoint_channel;
-    pbft::incoming::checkpoint_channel::channel_type& pbft_incoming_checkpoint_channel;
+   fc::optional<scoped_connection>                          pbft_outgoing_checkpoint_connection;
+   pbft::incoming::checkpoint_channel::channel_type::handle pbft_incoming_checkpoint_subscription;
+   pbft::outgoing::checkpoint_channel::channel_type&        pbft_outgoing_checkpoint_channel;
+   pbft::incoming::checkpoint_channel::channel_type&        pbft_incoming_checkpoint_channel;
 };
 
 chain_plugin::chain_plugin()
@@ -805,23 +805,23 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
 
 
       //pbft
-      my->pbft_incoming_prepare_subscription = my->pbft_incoming_prepare_channel.subscribe( [this]( pbft_prepare p ){
+      my->pbft_incoming_prepare_subscription = my->pbft_incoming_prepare_channel.subscribe( [this]( pbft_metadata_ptr<pbft_prepare> p ){
           my->on_pbft_incoming_prepare(p);
       });
 
-      my->pbft_incoming_commit_subscription = my->pbft_incoming_commit_channel.subscribe( [this]( pbft_commit c ){
+      my->pbft_incoming_commit_subscription = my->pbft_incoming_commit_channel.subscribe( [this]( pbft_metadata_ptr<pbft_commit> c ){
           my->on_pbft_incoming_commit(c);
       });
 
-      my->pbft_incoming_view_change_subscription = my->pbft_incoming_view_change_channel.subscribe( [this]( pbft_view_change vc ){
+      my->pbft_incoming_view_change_subscription = my->pbft_incoming_view_change_channel.subscribe( [this]( pbft_metadata_ptr<pbft_view_change> vc ){
           my->on_pbft_incoming_view_change(vc);
       });
 
-      my->pbft_incoming_new_view_subscription = my->pbft_incoming_new_view_channel.subscribe( [this]( pbft_new_view nv ){
+      my->pbft_incoming_new_view_subscription = my->pbft_incoming_new_view_channel.subscribe( [this]( pbft_metadata_ptr<pbft_new_view> nv ){
           my->on_pbft_incoming_new_view(nv);
       });
 
-      my->pbft_incoming_checkpoint_subscription = my->pbft_incoming_checkpoint_channel.subscribe( [this]( pbft_checkpoint cp ){
+      my->pbft_incoming_checkpoint_subscription = my->pbft_incoming_checkpoint_channel.subscribe( [this]( pbft_metadata_ptr<pbft_checkpoint> cp ){
           my->on_pbft_incoming_checkpoint(cp);
       });
 
@@ -856,23 +856,23 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
 
 }
 
-void chain_plugin_impl::on_pbft_incoming_prepare(pbft_prepare p){
+void chain_plugin_impl::on_pbft_incoming_prepare(pbft_metadata_ptr<pbft_prepare> p){
    pbft_ctrl->on_pbft_prepare(p);
 }
 
-void chain_plugin_impl::on_pbft_incoming_commit(pbft_commit c){
+void chain_plugin_impl::on_pbft_incoming_commit(pbft_metadata_ptr<pbft_commit> c){
    pbft_ctrl->on_pbft_commit(c);
 }
 
-void chain_plugin_impl::on_pbft_incoming_view_change(pbft_view_change vc){
+void chain_plugin_impl::on_pbft_incoming_view_change(pbft_metadata_ptr<pbft_view_change> vc){
    pbft_ctrl->on_pbft_view_change(vc);
 }
 
-void chain_plugin_impl::on_pbft_incoming_new_view(pbft_new_view nv){
+void chain_plugin_impl::on_pbft_incoming_new_view(pbft_metadata_ptr<pbft_new_view> nv){
    pbft_ctrl->on_pbft_new_view(nv);
 }
 
-void chain_plugin_impl::on_pbft_incoming_checkpoint(pbft_checkpoint cp){
+void chain_plugin_impl::on_pbft_incoming_checkpoint(pbft_metadata_ptr<pbft_checkpoint> cp){
    pbft_ctrl->on_pbft_checkpoint(cp);
 }
 
