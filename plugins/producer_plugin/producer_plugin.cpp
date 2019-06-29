@@ -1413,7 +1413,7 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
             _incoming_trx_weight = 0.0;
 
             if (!_pending_incoming_transactions.empty()) {
-               fc_dlog(_log, "Processing ${n} pending transactions");
+               fc_dlog(_log, "Processing ${n} pending transactions", ("n", _pending_incoming_transactions.size()));
                while (orig_pending_txn_size && _pending_incoming_transactions.size()) {
                   if (preprocess_deadline <= fc::time_point::now()) return start_block_result::exhausted;
                   auto e = _pending_incoming_transactions.front();
