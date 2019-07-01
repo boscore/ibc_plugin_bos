@@ -127,8 +127,6 @@ struct controller_impl {
    bool                           pbft_upgrading = false;
    optional<block_id_type>        pending_pbft_lib;
    optional<block_id_type>        pending_pbft_checkpoint;
-   vector<block_num_type>         proposed_schedule_blocks;
-   vector<block_num_type>         promoted_schedule_blocks;
    block_state_ptr                pbft_prepared;
    block_state_ptr                my_prepare;
    block_state_ptr                head;
@@ -366,7 +364,7 @@ struct controller_impl {
          read_from_snapshot( snapshot );
 
          //do upgrade migration if necessary;
-         migrate_upgrade(); //compatiable for snapshot integrity test
+         update_pbft_status(); //compatiable for snapshot integrity test
 
          auto end = blog.read_head();
          if( !end ) {
@@ -381,7 +379,7 @@ struct controller_impl {
          }
       } else {
          //do upgrade migration if necessary;
-         migrate_upgrade();  //compatiable for snapshot integrity test
+         update_pbft_status();  //compatiable for snapshot integrity test
          if( !head ) {
             initialize_fork_db(); // set head to genesis state
          }
@@ -432,43 +430,35 @@ struct controller_impl {
       //*bos end*
    }
 
-   void migrate_upgrade() {
-       //generate upo.
-       try {
-           db.get<upgrade_property_object>();
-           if (pbft_enabled) wlog("pbft enabled");
-       } catch( const boost::exception& e) {
-           wlog("no upo found, generating...");
-           db.create<upgrade_property_object>([](auto&){});
-       }
-       update_pbft_status();
-   }
-
    void update_pbft_status() {
-       auto utb = optional<block_num_type>{};
-       auto&  upo = db.get<upgrade_property_object>();
-       if (upo.upgrade_target_block_num > 0) utb = upo.upgrade_target_block_num;
+      try {
+         auto utb = optional<block_num_type>{};
+         auto&  upo = db.get<upgrade_property_object>();
+         if (upo.upgrade_target_block_num > 0) utb = upo.upgrade_target_block_num;
 
-       auto ucb = optional<block_num_type>{};
-       if (upo.upgrade_complete_block_num > 0) ucb = upo.upgrade_complete_block_num;
+         auto ucb = optional<block_num_type>{};
+         if (upo.upgrade_complete_block_num > 0) ucb = upo.upgrade_complete_block_num;
 
+         if (utb && !ucb && head->dpos_irreversible_blocknum >= *utb) {
+            db.modify( upo, [&]( auto& up ) {
+                up.upgrade_complete_block_num = head->block_num;
+            });
+            if (!replaying) wlog("pbft will be working after the block ${b}", ("b", head->block_num));
+         }
 
-       if (utb && !ucb && head->dpos_irreversible_blocknum >= *utb) {
-           db.modify( upo, [&]( auto& up ) {
-               up.upgrade_complete_block_num = head->block_num;
-           });
-           if (!replaying) wlog("pbft will be working after the block ${b}", ("b", head->block_num));
-       }
+         if ( !pbft_enabled && utb && head->block_num >= *utb) {
+            if (!pbft_upgrading) pbft_upgrading = true;
 
-       if ( !pbft_enabled && utb && head->block_num >= *utb) {
-           if (!pbft_upgrading) pbft_upgrading = true;
-
-           // new version starts from the next block of ucb, this is to avoid inconsistency after pre calculation inside schedule loop.
-           if (ucb && head->block_num > *ucb) {
+            // new version starts from the next block of ucb, this is to avoid inconsistency after pre calculation inside schedule loop.
+            if (ucb && head->block_num > *ucb) {
                if (pbft_upgrading) pbft_upgrading = false;
                pbft_enabled = true;
-           }
-       }
+            }
+         }
+      } catch( const boost::exception& e) {
+          wlog("no upo found, generating...");
+          db.create<upgrade_property_object>([](auto&){});
+      }
    }
 
    ~controller_impl() {
@@ -557,24 +547,20 @@ struct controller_impl {
          section.add_row(conf.genesis, db);
       });
 
-      snapshot->write_section<batch_pbft_snapshot_migration>([this]( auto &section ){
-         section.add_row(batch_pbft_snapshot_migration{}, db);
-      });
+      snapshot->write_section<batch_pbft_snapshot_migrated>([]( auto &section ){});
 
-      if (pbft_enabled) {
-          snapshot->write_section<batch_pbft_enabled>([this]( auto &section ) {
-              section.add_row(batch_pbft_enabled{}, db);
-          });
-          snapshot->write_section<branch_type>([this](auto &section) {
-              auto bid = fork_db.get_block_in_current_chain_by_num(fork_db.head()->pbft_stable_checkpoint_blocknum)->id;
-              EOS_ASSERT(bid != block_id_type{}, snapshot_exception, "cannot find lscb block");
-              auto bss = fork_db.fetch_branch_from(fork_db.head()->id, bid).first;
-              section.template add_row<branch_type>(bss, db);
-          });
+      auto lscb = fork_db.get_block_in_current_chain_by_num(fork_db.head()->pbft_stable_checkpoint_blocknum);
+      if (pbft_enabled && lscb) {
+         snapshot->write_section<batch_pbft_enabled>([]( auto &section ) {});
+
+         snapshot->write_section<batch_pbft_lscb_branch>([this, &lscb](auto &section) {
+            auto bss = fork_db.fetch_branch_from(fork_db.head()->id, lscb->id).first;
+            section.template add_row<branch_type>(bss, db);
+         });
       } else {
-          snapshot->write_section<block_state>([this]( auto &section ){
-              section.template add_row<block_header_state>(*fork_db.head(), db);
-          });
+         snapshot->write_section<block_state>([this]( auto &section ) {
+            section.template add_row<block_header_state>(*fork_db.head(), db);
+         });
       }
 
       controller_index_set::walk_indices([this, &snapshot]( auto utils ){
@@ -605,54 +591,43 @@ struct controller_impl {
          header.validate();
       });
 
-      bool migrated = snapshot->has_section<batch_pbft_snapshot_migration>();
-      if (migrated) {
-          auto upgraded = snapshot->has_section<batch_pbft_enabled>();
-          if (upgraded) {
-              snapshot->read_section<branch_type>([this](auto &section) {
-                  branch_type bss;
-                  section.template read_row<branch_type>(bss, db);
-                  EOS_ASSERT(!bss.empty(), snapshot_exception, "no last stable checkpoint block in the snapshot");
+      bool migrated = snapshot->has_section<batch_pbft_snapshot_migrated>();
+      auto upgraded = snapshot->has_section<batch_pbft_enabled>();
+      if (migrated && upgraded) {
+         snapshot->read_section<batch_pbft_lscb_branch>([this](auto &section) {
+            branch_type bss;
+            section.template read_row<branch_type>(bss, db);
+            if (bss.empty()) elog( "no last stable checkpoint block found in the snapshot, perhaps corrupted");
 
-                  wlog("${n} reversible blocks found in the snapshot", ("n", bss.size()));
+            ilog("${n} fork_db blocks found in the snapshot", ("n", bss.size()));
 
-                  for (auto i = bss.rbegin(); i != bss.rend(); ++i ) {
-                      if (i == bss.rbegin()) {
-                          fork_db.set(*i);
-                          snapshot_head_block = (*i)->block_num;
-                      } else {
-                          fork_db.add((*i), true, true);
-                      }
-                      fork_db.set_validity((*i), true);
-                      fork_db.mark_in_current_chain((*i), true);
-                  }
-                  head = fork_db.head();
-              });
-          } else {
-              snapshot->read_section<block_state>([this](auto &section) {
-                  block_header_state head_header_state;
-                  section.read_row(head_header_state, db);
-
-                  auto head_state = std::make_shared<block_state>(head_header_state);
-                  fork_db.set(head_state);
-                  fork_db.set_validity(head_state, true);
-                  fork_db.mark_in_current_chain(head_state, true);
-                  head = head_state;
-                  snapshot_head_block = head->block_num;
-              });
-          }
+            for (auto i = bss.rbegin(); i != bss.rend(); ++i ) {
+               if (i == bss.rbegin()) {
+                  fork_db.set(*i);
+                  snapshot_head_block = (*i)->block_num;
+               } else {
+                  fork_db.add((*i), true, true);
+               }
+                  fork_db.set_validity((*i), true);
+                  fork_db.mark_in_current_chain((*i), true);
+               }
+               head = fork_db.head();
+            });
       } else {
-          snapshot->read_section<block_state>([this](snapshot_reader::section_reader &section) {
+         snapshot->read_section<block_state>([this, &migrated](snapshot_reader::section_reader &section) {
             block_header_state head_header_state;
-            section.read_pbft_migrate_row(head_header_state, db);
-
+            if (migrated) {
+                section.read_row(head_header_state, db);
+            } else {
+                section.read_pbft_migrate_row(head_header_state, db);
+            }
             auto head_state = std::make_shared<block_state>(head_header_state);
             fork_db.set(head_state);
             fork_db.set_validity(head_state, true);
             fork_db.mark_in_current_chain(head_state, true);
             head = head_state;
             snapshot_head_block = head->block_num;
-          });
+         });
 
       }
 
@@ -665,14 +640,14 @@ struct controller_impl {
          }
 
          if(snapshot->has_section<value_t>()){
-             snapshot->read_section<value_t>([this]( auto& section ) {
+            snapshot->read_section<value_t>([this]( auto& section ) {
                bool more = !section.empty();
                while(more) {
-                   decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
+                  decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
                      more = section.read_row(row, db);
-                   });
+                  });
                }
-             });
+            });
          }
       });
 
@@ -935,26 +910,6 @@ struct controller_impl {
    }
    // "bos end"
 
-   optional<block_num_type> upgrade_target_block() {
-
-       const auto&  upo = db.get<upgrade_property_object>();
-       if (upo.upgrade_target_block_num > 0) {
-           return upo.upgrade_target_block_num;
-       } else {
-           return optional<block_num_type>{};
-       }
-   }
-
-   optional<block_num_type> upgrade_complete_block() {
-
-       const auto&  upo = db.get<upgrade_property_object>();
-       if (upo.upgrade_complete_block_num > 0) {
-           return upo.upgrade_complete_block_num;
-       } else {
-           return optional<block_num_type>{};
-       }
-   }
-
    /**
     * @post regardless of the success of commit block there is no active pending block
     */
@@ -981,6 +936,10 @@ struct controller_impl {
                ubo.blocknum = pending->_pending_block_state->block_num;
                ubo.set_block( pending->_pending_block_state->block );
             });
+         }
+
+         if (pbft_enabled && pending->_pending_block_state->pbft_watermark) {
+            if (auto bs = fork_db.get_block(pending->_pending_block_state->id)) fork_db.mark_as_pbft_watermark(bs);
          }
 
          emit( self.accepted_block, pending->_pending_block_state );
@@ -1426,17 +1385,10 @@ struct controller_impl {
          const auto& gpo = db.get<global_property_object>();
 
          auto lib_num = std::max(pending->_pending_block_state->dpos_irreversible_blocknum, pending->_pending_block_state->bft_irreversible_blocknum);
-         auto lscb_num = pending->_pending_block_state->pbft_stable_checkpoint_blocknum;
 
          if (pbft_enabled && gpo.proposed_schedule_block_num) {
-             proposed_schedule_blocks.emplace_back(*gpo.proposed_schedule_block_num);
-             for ( auto itr = proposed_schedule_blocks.begin(); itr != proposed_schedule_blocks.end();) {
-                 if ((*itr) < lscb_num) {
-                     itr = proposed_schedule_blocks.erase(itr);
-                 } else {
-                     ++itr;
-                 }
-             }
+             auto bs = fork_db.get_block_in_current_chain_by_num(*gpo.proposed_schedule_block_num);
+             if (bs) fork_db.mark_as_pbft_watermark(bs);
          }
 
          bool should_promote_pending_schedule = false;
@@ -1468,14 +1420,7 @@ struct controller_impl {
                  pending->_pending_block_state->set_new_producers(gpo.proposed_schedule);
 
                  if (pbft_enabled) {
-                     promoted_schedule_blocks.emplace_back(pending->_pending_block_state->block_num);
-                     for ( auto itr = promoted_schedule_blocks.begin(); itr != promoted_schedule_blocks.end();) {
-                         if ((*itr) < lscb_num) {
-                             itr = promoted_schedule_blocks.erase(itr);
-                         } else {
-                             ++itr;
-                         }
-                     }
+                     pending->_pending_block_state->pbft_watermark = true;
                  }
              }
              db.modify( gpo, [&]( auto& gp ) {
@@ -2382,13 +2327,8 @@ block_id_type controller::last_stable_checkpoint_block_id() const {
     return block_id_type{};
 }
 
-
-vector<uint32_t> controller::proposed_schedule_block_nums() const {
-    return my->proposed_schedule_blocks;
-}
-
-vector<uint32_t> controller::promoted_schedule_block_nums() const {
-    return my->promoted_schedule_blocks;
+vector<uint32_t> controller::get_watermarks() const {
+    return my->fork_db.get_watermarks_in_forkdb();
 }
 
 bool controller::is_replaying() const {
@@ -2589,6 +2529,11 @@ void controller::set_pbft_my_prepare(const block_id_type& id) {
    }
 }
 
+block_id_type controller::get_pbft_prepared() const {
+    if (my->pbft_prepared) return my->pbft_prepared->id;
+    return block_id_type{};
+}
+
 block_id_type controller::get_pbft_my_prepare() const {
    if (my->my_prepare) return my->my_prepare->id;
    return block_id_type{};
@@ -2723,7 +2668,6 @@ path controller::blocks_dir() const {
 producer_schedule_type controller::initial_schedule() const {
    return producer_schedule_type{ 0, {{eosio::chain::config::system_account_name, my->conf.genesis.initial_key}} };
 }
-
 
 bool controller::is_known_unexpired_transaction( const transaction_id_type& id) const {
    return db().find<transaction_object, by_trx_id>(id);
