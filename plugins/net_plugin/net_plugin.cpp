@@ -2835,7 +2835,13 @@ namespace eosio {
 
        if ( msg.end_block == 0 || msg.end_block < msg.start_block) return;
 
-       fc_dlog(logger, "received checkpoint request message ${m}", ("m", msg));
+       fc_dlog(logger, "received checkpoint request message ${m}, from ${p}", ("m", msg)("p", c->peer_name()));
+
+       if ( msg.end_block - msg.start_block > pbft_checkpoint_granularity * 100) {
+           fc_dlog(logger, "request range too large");
+           return;
+       }
+
        vector<pbft_stable_checkpoint> scp_stack;
        controller &cc = my_impl->chain_plug->chain();
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
