@@ -2696,30 +2696,45 @@ namespace eosio { namespace ibc {
       lwc_block_commits_data_message ret_msg;
 
       if ( bps_ptr ){
-         // ret_msg.headers
+
+         // fill ret_msg.headers
          uint32_t end_block_num = msg.block_num ;
 
-         for( auto& commit : bps_ptr->commits ){
-            idump((commit));
-            end_block_num = std::max( end_block_num, commit.block_num );
+         for( auto& item : bps_ptr->commits ){
+            auto& commit = item.second;
+            // idump((commit));
+            end_block_num = std::max( end_block_num, commit.block_info.block_num() );
          }
          for( uint32_t num = msg.block_num; num <= end_block_num; ++num ){
             auto sbp = chain_plug->chain().fetch_block_by_number( num );
             if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", num)); return; }
             ret_msg.headers.push_back( *sbp );
          }
-         // ret_msg.blockroot_merkle
+
+         // fill ret_msg.blockroot_merkle
          ret_msg.blockroot_merkle = get_blockroot_merkle_by_num( msg.block_num );
          if ( ret_msg.blockroot_merkle._node_count == 0 ){
             elog("get blockroot_merkle of block ${n} failed", ("n", msg.block_num));
             return;
          }
-         ret_msg.proof_data = fc::raw::pack( bps_ptr->commits );
+
+         if ( ! bps_ptr->is_committed ){
+            elog("bps_ptr->is_committed is faulse");
+            return;
+         }
+
+         map<pbft_view_type, std::vector<pbft_commit>, std::greater<pbft_view_type>> commits_arrange;
+         for(const auto& item : bps_ptr->commits){
+            commits_arrange[item.first.first].emplace_back(item.second);
+         }
+
+         ret_msg.proof_data = fc::raw::pack( commits_arrange.begin()->second );
          ret_msg.proof_type = N(commit);
 
          c->enqueue( ret_msg );
          return;
       }
+
       /* bps_ptr == nullptr */
       vector<char>   content;
       uint32_t       check_num;
@@ -2750,7 +2765,7 @@ namespace eosio { namespace ibc {
       uint32_t end_block_num = check_num ;
       for( auto& checkpoint : scp.checkpoints ){
          idump((checkpoint));
-         end_block_num = std::max( end_block_num, checkpoint.block_num );
+         end_block_num = std::max( end_block_num, checkpoint.block_info.block_num() );
       }
       for( uint32_t num = check_num; num <= end_block_num; ++num ){
          auto sbp = chain_plug->chain().fetch_block_by_number( num );
