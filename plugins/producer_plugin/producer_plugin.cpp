@@ -225,12 +225,12 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
          new_block_header.timestamp = new_block_header.timestamp.next();
          new_block_header.previous = bsp->id;
 
-         auto new_version = chain.is_pbft_enabled();
+         auto pbft_enabled = chain.is_pbft_enabled();
 
-         auto new_bs = bsp->generate_next(new_block_header.timestamp, new_version);
+         auto new_bs = bsp->generate_next(new_block_header.timestamp, pbft_enabled);
 
          // for newly installed producers we can set their watermarks to the block they became active
-         if (new_bs.maybe_promote_pending(new_version) && bsp->active_schedule.version != new_bs.active_schedule.version) {
+         if (new_bs.maybe_promote_pending(pbft_enabled) && bsp->active_schedule.version != new_bs.active_schedule.version) {
             flat_set<account_name> new_producers;
             new_producers.reserve(new_bs.active_schedule.producers.size());
             for( const auto& p: new_bs.active_schedule.producers) {
@@ -979,12 +979,6 @@ producer_plugin::snapshot_information producer_plugin::create_snapshot() const {
    return {head_id, snapshot_path};
 }
 
-void producer_plugin::set_pbft_current_view(const uint32_t view) {
-    //this is used to recover from a disaster, do not set this unless you have to do so.
-    pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
-    pbft_ctrl.state_machine.manually_set_current_view(view);
-}
-
 optional<fc::time_point> producer_plugin_impl::calculate_next_block_time(const account_name& producer_name, const block_timestamp_type& current_block_time) const {
    chain::controller& chain = chain_plug->chain();
    const auto& hbs = chain.head_block_state();
@@ -1104,9 +1098,9 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
       _pending_block_mode = pending_block_mode::speculating;
    }
 
-   auto new_version = chain.is_pbft_enabled();
+   auto pbft_enabled = chain.is_pbft_enabled();
 
-    if (_pending_block_mode == pending_block_mode::producing && !new_version) {
+   if (_pending_block_mode == pending_block_mode::producing && !pbft_enabled) {
       // determine if our watermark excludes us from producing at this point
       if (currrent_watermark_itr != _producer_watermarks.end()) {
          if (currrent_watermark_itr->second >= hbs->block_num + 1) {
@@ -1128,7 +1122,7 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
    try {
       uint16_t blocks_to_confirm = 0;
 
-      if (_pending_block_mode == pending_block_mode::producing && !new_version) {
+      if (_pending_block_mode == pending_block_mode::producing && !pbft_enabled) {
          // determine how many blocks this producer can confirm
          // 1) if it is not a producer from this node, assume no confirmations (we will discard this block anyway)
          // 2) if it is a producer on this node that has never produced, the conservative approach is to assume no
@@ -1236,7 +1230,7 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
 
                   if( preprocess_deadline <= fc::time_point::now() ) exhausted = true;
                   if( exhausted ) break;
-                  const auto& trx = itr->second;
+                  const transaction_metadata_ptr trx = itr->second;
                   auto category = calculate_transaction_category(trx);
                   if (category == tx_category::EXPIRED ||
                      (category == tx_category::UNEXPIRED_UNPERSISTED && _producers.empty()))
@@ -1419,7 +1413,7 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
             _incoming_trx_weight = 0.0;
 
             if (!_pending_incoming_transactions.empty()) {
-               fc_dlog(_log, "Processing ${n} pending transactions");
+               fc_dlog(_log, "Processing ${n} pending transactions", ("n", _pending_incoming_transactions.size()));
                while (orig_pending_txn_size && _pending_incoming_transactions.size()) {
                   if (preprocess_deadline <= fc::time_point::now()) return start_block_result::exhausted;
                   auto e = _pending_incoming_transactions.front();
@@ -1607,10 +1601,18 @@ void producer_plugin_impl::produce_block() {
    block_state_ptr new_bs = chain.head_block_state();
    _producer_watermarks[new_bs->header.producer] = chain.head_block_num();
 
-   ilog("Produced block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, lscb: ${lscb}]",
-        ("p",new_bs->header.producer)("id",fc::variant(new_bs->id).as_string().substr(0,16))
-        ("n",new_bs->block_num)("t",new_bs->header.timestamp)
-        ("count",new_bs->block->transactions.size())("lib",chain.last_irreversible_block_num())("lscb", chain.last_stable_checkpoint_block_num()));
+   if (chain.is_pbft_enabled()) {
+      ilog("Produced block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, lscb: ${lscb}]",
+           ("p", new_bs->header.producer)("id", fc::variant(new_bs->id).as_string().substr(0, 16))
+                   ("n", new_bs->block_num)("t", new_bs->header.timestamp)
+                   ("count", new_bs->block->transactions.size())
+                   ("lib", chain.last_irreversible_block_num())("lscb", chain.last_stable_checkpoint_block_num()));
+   } else {
+      ilog("Produced block ${id}... #${n} @ ${t} signed by ${p} [trxs: ${count}, lib: ${lib}, confirmed: ${confs}]",
+           ("p",new_bs->header.producer)("id",fc::variant(new_bs->id).as_string().substr(0,16))
+                   ("n",new_bs->block_num)("t",new_bs->header.timestamp)
+                   ("count",new_bs->block->transactions.size())("lib",chain.last_irreversible_block_num())("confs", new_bs->header.confirmed));
+   }
 }
 
 } // namespace eosio

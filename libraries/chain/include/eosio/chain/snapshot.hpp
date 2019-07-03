@@ -239,6 +239,7 @@ namespace eosio { namespace chain {
                      fc::raw::unpack(tmp_ds, data);
                      auto original_data_length = tmp_ds.tellp() - 4;
                      in.seekg(original_data_length);
+                     data.pbft_stable_checkpoint_blocknum = 0;
                  }else{
                      fc::raw::unpack(in, data);
                  }

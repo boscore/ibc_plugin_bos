@@ -68,8 +68,28 @@ $ ./cleos set contract eosio ~/eos/build.release/contracts/eosio.bios/
 
 ### Initialize the accounts txn_test_gen_plugin uses
 ```bash
-$ curl --data-binary '["eosio", "5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3"]' http://127.0.0.1:8888/v1/txn_test_gen/create_test_accounts
+$ curl --data-binary '[<creator>, <creator's private key>, <core_symbol>]' http://127.0.0.1:8888/v1/txn_test_gen/create_test_accounts
+
+example:
+$ curl --data-binary '["eosio", "5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3", "EOS"]' http://127.0.0.1:8888/v1/txn_test_gen/create_test_accounts
 ```
+> **make sure there are more than 4000,0000 <core_symbol>** in creator
+
+
+This api does:
+1. creates following accounts:  
+aaaaaaaaaaaa  
+bbbbbbbbbbbb  
+cccccccccccc 
+
+1. delegate 1000,0000 cpu, 100 net, and 100 ram to above accounts using <creator>
+1. deploy a token contract to account cccccccccccc and issue a large number of tokens to cccccccccccc, then transfer some tokens to aaaaaaaaaaaa and bbbbbbbbbbbb
+1. subsequent trx will be generated using deployed token contract
+    1. aaaaaaaaaaaa transfer to bbbbbbbbbbbb
+    1. bbbbbbbbbbbb transfer to aaaaaaaaaaaa
+
+
+
 
 ### Start transaction generation, this will submit 20 transactions evey 20ms (total of 1000TPS)
 ```bash

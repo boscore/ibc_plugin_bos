@@ -40,8 +40,8 @@ namespace eosio { namespace chain {
           * block_state and will return a pointer to the new block state or
           * throw on error.
           */
-         block_state_ptr add( signed_block_ptr b, bool skip_validate_signee, bool new_version );
-         block_state_ptr add( const block_state_ptr& next_block, bool skip_validate_previous, bool new_version );
+         block_state_ptr add( signed_block_ptr b, bool skip_validate_signee, bool pbft_enabled );
+         block_state_ptr add( const block_state_ptr& next_block, bool skip_validate_previous, bool pbft_enabled );
          void            remove( const block_id_type& id );
 
          void            add( const header_confirmation& c );
@@ -81,6 +81,10 @@ namespace eosio { namespace chain {
          void remove_pbft_my_prepare_fork();
 
          void remove_pbft_prepared_fork();
+
+         vector<block_num_type> get_watermarks_in_forkdb();
+
+         void mark_as_pbft_watermark( const block_state_ptr& h);
 
    private:
          unique_ptr<fork_database_impl> my;
