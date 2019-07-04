@@ -1,6 +1,6 @@
 # BOSCore - Born for DApps. Born for Usability.
 
-## BOSCore Version: v3.0.0
+## BOSCore Version: v3.0.1
 ### Basic EOSIO Version: v1.6.6 (support REX)
 
 # Background

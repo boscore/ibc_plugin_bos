@@ -1,6 +1,6 @@
 # BOSCore - 更可用的链，为DApp而生。
 
-## BOSCore Version: v3.0.0
+## BOSCore Version: v3.0.1
 ### Basic EOSIO Version: v1.6.6 (support REX)
 
 # 背景
