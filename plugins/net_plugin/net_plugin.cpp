@@ -2362,7 +2362,8 @@ namespace eosio {
             }
             if( !conn->read_delay_timer ) return;
             conn->read_delay_timer->expires_from_now( def_read_delay_for_full_write_queue );
-            conn->read_delay_timer->async_wait([this, weak_conn]( boost::system::error_code ) {
+            conn->read_delay_timer->async_wait([this, weak_conn]( boost::system::error_code ec ) {
+               if ( ec == boost::asio::error::operation_aborted ) return;
                auto conn = weak_conn.lock();
                if( !conn ) return;
                start_read_message( conn );
@@ -2834,7 +2835,13 @@ namespace eosio {
 
        if ( msg.end_block == 0 || msg.end_block < msg.start_block) return;
 
-       fc_dlog(logger, "received checkpoint request message ${m}", ("m", msg));
+       fc_dlog(logger, "received checkpoint request message ${m}, from ${p}", ("m", msg)("p", c->peer_name()));
+
+       if ( msg.end_block - msg.start_block > pbft_checkpoint_granularity * 100) {
+           fc_dlog(logger, "request range too large");
+           return;
+       }
+
        vector<pbft_stable_checkpoint> scp_stack;
        controller &cc = my_impl->chain_plug->chain();
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
@@ -2842,10 +2849,14 @@ namespace eosio {
        auto end_block = std::min(msg.end_block, cc.last_stable_checkpoint_block_num());
 
        for (auto i = end_block; i >= msg.start_block && i>0; --i) {
-           auto bid = cc.get_block_id_for_num(i);
-           auto scp = pcc.pbft_db.get_stable_checkpoint_by_id(bid);
-           if (!scp.empty()) {
-               scp_stack.push_back(scp);
+           try {
+               auto bid = cc.get_block_id_for_num(i);
+               auto scp = pcc.pbft_db.get_stable_checkpoint_by_id(bid);
+               if (!scp.empty()) {
+                   scp_stack.push_back(scp);
+               }
+           } catch (...) {
+               break;
            }
        }
 
@@ -3080,6 +3091,8 @@ namespace eosio {
     }
 
     void net_plugin_impl::clean_expired_pbft_messages(){
+       pbft_message_cache_ticker ();
+
        auto itr = pbft_message_cache.begin();
        auto now = time_point::now();
 
@@ -3249,11 +3262,14 @@ namespace eosio {
     void net_plugin_impl::pbft_message_cache_ticker() {
         pbft_message_cache_timer->expires_from_now (pbft_message_cache_tick_interval);
         pbft_message_cache_timer->async_wait ([this](boost::system::error_code ec) {
-            pbft_message_cache_ticker ();
-            if (ec) {
+
+            if ( !ec ) {
+                clean_expired_pbft_messages();
+            } else {
                 wlog ("pbft message cache ticker error: ${m}", ("m", ec.message()));
+                pbft_message_cache_ticker();
             }
-            clean_expired_pbft_messages();
+
         });
     }
 

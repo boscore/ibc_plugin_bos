@@ -180,7 +180,10 @@ namespace eosio {
                 auto lib = ctrl.last_irreversible_block_id();
                 if (lib == block_id_type()) return true;
                 auto forks = ctrl.fork_db().fetch_branch_from(in, lib);
-                return !forks.first.empty() && forks.second.empty();
+
+                //`branch_type` will always contain at least the common ancestor.
+                //`in` block num should be higher than lib, yet fall on the same branch with lib.
+                return forks.first.size() > 1 && forks.second.size() == 1;
             };
 
 
