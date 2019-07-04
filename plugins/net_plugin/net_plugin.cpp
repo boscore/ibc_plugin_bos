@@ -2849,10 +2849,14 @@ namespace eosio {
        auto end_block = std::min(msg.end_block, cc.last_stable_checkpoint_block_num());
 
        for (auto i = end_block; i >= msg.start_block && i>0; --i) {
-           auto bid = cc.get_block_id_for_num(i);
-           auto scp = pcc.pbft_db.get_stable_checkpoint_by_id(bid);
-           if (!scp.empty()) {
-               scp_stack.push_back(scp);
+           try {
+               auto bid = cc.get_block_id_for_num(i);
+               auto scp = pcc.pbft_db.get_stable_checkpoint_by_id(bid);
+               if (!scp.empty()) {
+                   scp_stack.push_back(scp);
+               }
+           } catch (...) {
+               break;
            }
        }
 
