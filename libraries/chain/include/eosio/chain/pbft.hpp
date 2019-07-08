@@ -40,7 +40,7 @@ namespace eosio {
             void on_prepare(pbft_metadata_ptr<pbft_prepare> e);
             void on_commit(pbft_metadata_ptr<pbft_commit> e);
             void on_view_change(pbft_metadata_ptr<pbft_view_change> e);
-            void on_new_view(const pbft_metadata_ptr<pbft_new_view> &e);
+            void on_new_view(pbft_metadata_ptr<pbft_new_view> e);
 
             void send_prepare();
             void send_commit();
@@ -187,7 +187,7 @@ namespace eosio {
             void on_pbft_prepare(pbft_metadata_ptr<pbft_prepare> p);
             void on_pbft_commit(pbft_metadata_ptr<pbft_commit> c);
             void on_pbft_view_change(pbft_metadata_ptr<pbft_view_change> vc);
-            void on_pbft_new_view(const pbft_metadata_ptr<pbft_new_view> &nv);
+            void on_pbft_new_view(pbft_metadata_ptr<pbft_new_view> nv);
             void on_pbft_checkpoint(const pbft_metadata_ptr<pbft_checkpoint> &cp);
 
         private:

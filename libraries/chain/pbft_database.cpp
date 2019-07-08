@@ -605,8 +605,14 @@ namespace eosio {
             nv.stable_checkpoint=highest_sc;
             nv.view_changed_cert=vcc;
             nv.sender_signature = sp_itr->second(nv.digest(chain_id));
-            emit(pbft_outgoing_new_view, nv);
-            return nv;
+            try {
+                validate_new_view(nv, sp_itr->first);
+                emit(pbft_outgoing_new_view, nv);
+                return nv;
+            } catch (const fc::exception& ex) {
+                elog("bad new view, ${s} ", ("s", ex.to_string()));
+                return pbft_new_view();
+            }
         }
 
         pbft_prepared_certificate pbft_database::generate_prepared_certificate() {

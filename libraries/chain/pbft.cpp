@@ -81,8 +81,8 @@ namespace eosio {
             state_machine->on_view_change(std::move(vc));
         }
 
-        void pbft_controller::on_pbft_new_view(const pbft_metadata_ptr<pbft_new_view> &nv) {
-            state_machine->on_new_view(nv);
+        void pbft_controller::on_pbft_new_view(pbft_metadata_ptr<pbft_new_view> nv) {
+            state_machine->on_new_view(std::move(nv));
         }
 
         void pbft_controller::on_pbft_checkpoint(const pbft_metadata_ptr<pbft_checkpoint> &cp) {
@@ -137,20 +137,21 @@ namespace eosio {
             current->send_view_change(shared_from_this(), pbft_db);
         }
 
-        void psm_machine::on_new_view(const pbft_metadata_ptr<pbft_new_view> &e) {
-            if (e->msg.new_view <= get_current_view()) return;
+        void psm_machine::on_new_view(pbft_metadata_ptr<pbft_new_view> e) {
+            auto nv = std::move(e);
+            if (nv->msg.new_view <= get_current_view()) return;
 
             try {
-                pbft_db.validate_new_view(e->msg, e->sender_key);
+                pbft_db.validate_new_view(nv->msg, nv->sender_key);
             } catch (const fc::exception& ex) {
                 elog("bad new view, ${s} ", ("s",ex.to_string()));
                 return;
             }
 
             try {
-                transit_to_new_view(e, current);
+                transit_to_new_view(nv, current);
             } catch(...) {
-                elog("apply new view failed, waiting for next round.. ${nv} ", ("nv", e->msg));
+                elog("apply new view failed, waiting for next round.. ${nv} ", ("nv", nv->msg));
             }
         }
 
@@ -366,6 +367,7 @@ namespace eosio {
 
             auto prepares = pbft_db.send_and_add_pbft_prepare(pbft_prepare(), get_current_view());
             set_prepares_cache(prepares);
+            //TODO: reset prepare timer;
 
             set_view_changes_cache(pbft_view_change());
             set_view_change_timer(0);
@@ -378,6 +380,7 @@ namespace eosio {
 
             auto commits = pbft_db.send_and_add_pbft_commit(pbft_commit(), get_current_view());
             set_commits_cache(commits);
+            //TODO: reset commit timer;
 
             set_view_changes_cache(pbft_view_change());
 
@@ -418,13 +421,6 @@ namespace eosio {
                         new_view);
 
                 if (nv_msg.empty()) return false;
-
-                try {
-                    pbft_db.validate_new_view(nv_msg, pk);
-                } catch (const fc::exception& ex) {
-                    elog("bad new view, ${s} ", ("s", ex.to_string()));
-                    return false;
-                }
 
                 try {
                     transit_to_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(nv_msg, pbft_db.get_chain_id()), s);
