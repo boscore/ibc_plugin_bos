@@ -73,11 +73,11 @@ namespace eosio { namespace chain { namespace plugin_interface {
        }
 
        namespace outgoing {
-           using prepare_channel = channel_decl<struct pbft_prepare_tag, pbft_prepare>;
-           using commit_channel = channel_decl<struct pbft_commit_tag, pbft_commit>;
-           using view_change_channel = channel_decl<struct pbft_view_change_tag, pbft_view_change>;
-           using new_view_channel = channel_decl<struct pbft_new_view_tag, pbft_new_view>;
-           using checkpoint_channel = channel_decl<struct pbft_checkpoint_tag, pbft_checkpoint>;
+           using prepare_channel = channel_decl<struct pbft_prepare_tag, pbft_prepare_ptr>;
+           using commit_channel = channel_decl<struct pbft_commit_tag, pbft_commit_ptr>;
+           using view_change_channel = channel_decl<struct pbft_view_change_tag, pbft_view_change_ptr>;
+           using new_view_channel = channel_decl<struct pbft_new_view_tag, pbft_new_view_ptr>;
+           using checkpoint_channel = channel_decl<struct pbft_checkpoint_tag, pbft_checkpoint_ptr>;
 
        }
    }

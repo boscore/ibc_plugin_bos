@@ -60,7 +60,7 @@ std::map<eosio::chain::public_key_type, signature_provider_type> make_signature_
 
 BOOST_AUTO_TEST_CASE(can_init) {
     tester tester;
-    controller &ctrl = *tester.control.get();
+    controller &ctrl = *tester.control;
     pbft_controller pbft_ctrl{ctrl};
 
     tester.produce_block();
@@ -70,7 +70,7 @@ BOOST_AUTO_TEST_CASE(can_init) {
 
 BOOST_AUTO_TEST_CASE(can_advance_lib_in_old_version) {
     tester tester;
-    controller &ctrl = *tester.control.get();
+    controller &ctrl = *tester.control;
     pbft_controller pbft_ctrl{ctrl};
 
     auto msp = make_signature_provider();
@@ -86,7 +86,7 @@ BOOST_AUTO_TEST_CASE(can_advance_lib_in_old_version) {
 
 BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade) {
     tester tester;
-    controller &ctrl = *tester.control.get();
+    controller &ctrl = *tester.control;
     pbft_controller pbft_ctrl{ctrl};
     ctrl.set_upo(150);
 
@@ -130,7 +130,7 @@ BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade) {
 
 BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade_with_four_producers) {
     tester tester;
-    controller &ctrl = *tester.control.get();
+    controller &ctrl = *tester.control;
     pbft_controller pbft_ctrl{ctrl};
 
     ctrl.set_upo(109);
@@ -229,11 +229,11 @@ BOOST_AUTO_TEST_CASE(view_change_validation) {
 
 BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_on_short_fork) {
     tester short_prepared_fork, long_non_prepared_fork, new_view_generator;
-    controller &ctrl_short_prepared_fork = *short_prepared_fork.control.get();
+    controller &ctrl_short_prepared_fork = *short_prepared_fork.control;
     pbft_controller pbft_short_prepared_fork{ctrl_short_prepared_fork};
-    controller &ctrl_long_non_prepared_fork = *long_non_prepared_fork.control.get();
+    controller &ctrl_long_non_prepared_fork = *long_non_prepared_fork.control;
     pbft_controller pbft_long_non_prepared_fork{ctrl_long_non_prepared_fork};
-    controller &ctrl_new_view_generator = *new_view_generator.control.get();
+    controller &ctrl_new_view_generator = *new_view_generator.control;
     pbft_controller pbft_new_view_generator{ctrl_new_view_generator};
 
     auto msp = make_signature_provider();
@@ -304,6 +304,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     //generate new view with short fork prepare certificate
     pbft_new_view_generator.state_machine->set_prepares_cache(pbft_prepare());
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_send_pbft_msg(), true);
+    ctrl_new_view_generator.reset_pbft_my_prepare();
     pbft_new_view_generator.maybe_pbft_prepare();
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_prepared(), true);
     BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 136);
@@ -330,7 +331,8 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 137);
 
     //can switch fork after apply prepare certificate in new view
-    pbft_short_prepared_fork.state_machine->on_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(nv_msg, ctrl_new_view_generator.get_chain_id()));
+    auto pmm = pbft_message_metadata<pbft_new_view>(nv_msg, pbft_short_prepared_fork.pbft_db.get_chain_id());
+    pbft_short_prepared_fork.on_pbft_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(pmm));
 
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 136);
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 101);

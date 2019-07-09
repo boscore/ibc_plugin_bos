@@ -37,18 +37,18 @@ namespace eosio {
                 return current;
             }
 
-            void on_prepare(pbft_metadata_ptr<pbft_prepare> e);
-            void on_commit(pbft_metadata_ptr<pbft_commit> e);
-            void on_view_change(pbft_metadata_ptr<pbft_view_change> e);
-            void on_new_view(pbft_metadata_ptr<pbft_new_view> e);
+            void on_prepare(const pbft_metadata_ptr<pbft_prepare>& e);
+            void on_commit(const pbft_metadata_ptr<pbft_commit>& e);
+            void on_view_change(const pbft_metadata_ptr<pbft_view_change>& e);
+            void on_new_view(const pbft_metadata_ptr<pbft_new_view>& e);
 
             void send_prepare();
             void send_commit();
             void send_view_change();
 
-            void transit_to_committed_state(psm_state_ptr s, bool to_new_view);
-            void transit_to_prepared_state(psm_state_ptr s);
-            void transit_to_view_change_state(psm_state_ptr s);
+            void transit_to_committed_state(const psm_state_ptr& s, bool to_new_view);
+            void transit_to_prepared_state(const psm_state_ptr& s);
+            void transit_to_view_change_state(const psm_state_ptr& s);
             void transit_to_new_view(const pbft_metadata_ptr<pbft_new_view>& e, const psm_state_ptr& s);
 
             void do_send_view_change();
@@ -106,13 +106,13 @@ namespace eosio {
             psm_state();
             ~psm_state();
 
-            virtual void on_prepare(psm_machine_ptr m, pbft_metadata_ptr<pbft_prepare> e, pbft_database &pbft_db) = 0;
-            virtual void on_commit(psm_machine_ptr m, pbft_metadata_ptr<pbft_commit> e, pbft_database &pbft_db) = 0;
-            virtual void on_view_change(psm_machine_ptr m, pbft_metadata_ptr<pbft_view_change> e, pbft_database &pbft_db) = 0;
+            virtual void on_prepare(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_prepare>& e, pbft_database &pbft_db) = 0;
+            virtual void on_commit(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_commit>& e, pbft_database &pbft_db) = 0;
+            virtual void on_view_change(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_view_change>& e, pbft_database &pbft_db) = 0;
 
-            virtual void send_prepare(psm_machine_ptr m, pbft_database &pbft_db) = 0;
-            virtual void send_commit(psm_machine_ptr m, pbft_database &pbft_db) = 0;
-            virtual void send_view_change(psm_machine_ptr m, pbft_database &pbft_db) = 0;
+            virtual void send_prepare(const psm_machine_ptr& m, pbft_database &pbft_db) = 0;
+            virtual void send_commit(const psm_machine_ptr& m, pbft_database &pbft_db) = 0;
+            virtual void send_view_change(const psm_machine_ptr& m, pbft_database &pbft_db) = 0;
 
             virtual const char* get_name() = 0;
             std::shared_ptr<psm_state> get_self()  { return shared_from_this(); };
@@ -124,13 +124,13 @@ namespace eosio {
             psm_prepared_state();
             ~psm_prepared_state();
 
-            void on_prepare(psm_machine_ptr m, pbft_metadata_ptr<pbft_prepare> e, pbft_database &pbft_db) override;
-            void on_commit(psm_machine_ptr m, pbft_metadata_ptr<pbft_commit> e, pbft_database &pbft_db) override;
-            void on_view_change(psm_machine_ptr m, pbft_metadata_ptr<pbft_view_change> e, pbft_database &pbft_db) override;
+            void on_prepare(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_prepare>& e, pbft_database &pbft_db) override;
+            void on_commit(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_commit>& e, pbft_database &pbft_db) override;
+            void on_view_change(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_view_change>& e, pbft_database &pbft_db) override;
 
-            void send_prepare(psm_machine_ptr m, pbft_database &pbft_db) override;
-            void send_commit(psm_machine_ptr m, pbft_database &pbft_db) override;
-            void send_view_change(psm_machine_ptr m, pbft_database &pbft_db) override;
+            void send_prepare(const psm_machine_ptr& m, pbft_database &pbft_db) override;
+            void send_commit(const psm_machine_ptr& m, pbft_database &pbft_db) override;
+            void send_view_change(const psm_machine_ptr& m, pbft_database &pbft_db) override;
 
             bool pending_commit_local;
 
@@ -142,13 +142,13 @@ namespace eosio {
             psm_committed_state();
             ~psm_committed_state();
 
-            void on_prepare(psm_machine_ptr m, pbft_metadata_ptr<pbft_prepare> e, pbft_database &pbft_db) override;
-            void on_commit(psm_machine_ptr m, pbft_metadata_ptr<pbft_commit> e, pbft_database &pbft_db) override;
-            void on_view_change(psm_machine_ptr m, pbft_metadata_ptr<pbft_view_change> e, pbft_database &pbft_db) override;
+            void on_prepare(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_prepare>& e, pbft_database &pbft_db) override;
+            void on_commit(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_commit>& e, pbft_database &pbft_db) override;
+            void on_view_change(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_view_change>& e, pbft_database &pbft_db) override;
 
-            void send_prepare(psm_machine_ptr m, pbft_database &pbft_db) override;
-            void send_commit(psm_machine_ptr m, pbft_database &pbft_db) override;
-            void send_view_change(psm_machine_ptr m, pbft_database &pbft_db) override;
+            void send_prepare(const psm_machine_ptr& m, pbft_database &pbft_db) override;
+            void send_commit(const psm_machine_ptr& m, pbft_database &pbft_db) override;
+            void send_view_change(const psm_machine_ptr& m, pbft_database &pbft_db) override;
 
             const char* get_name() override { return "{==== COMMITTED ====}"; }
         };
@@ -158,13 +158,13 @@ namespace eosio {
             psm_view_change_state();
             ~psm_view_change_state();
 
-            void on_prepare(psm_machine_ptr m, pbft_metadata_ptr<pbft_prepare> e, pbft_database &pbft_db) override;
-            void on_commit(psm_machine_ptr m, pbft_metadata_ptr<pbft_commit> e, pbft_database &pbft_db) override;
-            void on_view_change(psm_machine_ptr m, pbft_metadata_ptr<pbft_view_change> e, pbft_database &pbft_db) override;
+            void on_prepare(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_prepare>& e, pbft_database &pbft_db) override;
+            void on_commit(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_commit>& e, pbft_database &pbft_db) override;
+            void on_view_change(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_view_change>& e, pbft_database &pbft_db) override;
 
-            void send_prepare(psm_machine_ptr m, pbft_database &pbft_db) override;
-            void send_commit(psm_machine_ptr m, pbft_database &pbft_db) override;
-            void send_view_change(psm_machine_ptr m, pbft_database &pbft_db) override;
+            void send_prepare(const psm_machine_ptr& m, pbft_database &pbft_db) override;
+            void send_commit(const psm_machine_ptr& m, pbft_database &pbft_db) override;
+            void send_view_change(const psm_machine_ptr& m, pbft_database &pbft_db) override;
 
             const char* get_name() override { return "{==== VIEW CHANGE ====}"; }
         };
@@ -184,11 +184,11 @@ namespace eosio {
             void maybe_pbft_view_change();
             void maybe_pbft_checkpoint();
 
-            void on_pbft_prepare(pbft_metadata_ptr<pbft_prepare> p);
-            void on_pbft_commit(pbft_metadata_ptr<pbft_commit> c);
-            void on_pbft_view_change(pbft_metadata_ptr<pbft_view_change> vc);
-            void on_pbft_new_view(pbft_metadata_ptr<pbft_new_view> nv);
-            void on_pbft_checkpoint(const pbft_metadata_ptr<pbft_checkpoint> &cp);
+            void on_pbft_prepare(const pbft_metadata_ptr<pbft_prepare>& p);
+            void on_pbft_commit(const pbft_metadata_ptr<pbft_commit>& c);
+            void on_pbft_view_change(const pbft_metadata_ptr<pbft_view_change>& vc);
+            void on_pbft_new_view(const pbft_metadata_ptr<pbft_new_view>& nv);
+            void on_pbft_checkpoint(const pbft_metadata_ptr<pbft_checkpoint>& cp);
 
         private:
             fc::path    datadir;
