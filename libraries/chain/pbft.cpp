@@ -456,6 +456,9 @@ namespace eosio {
                 }
             }
 
+            if (pbft_db.should_committed()) {
+                pbft_db.commit_local();
+            }
             transit_to_committed_state(s, true);
         }
 

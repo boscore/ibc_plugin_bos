@@ -263,14 +263,14 @@ namespace eosio {
       void pbft_outgoing_new_view(const pbft_new_view_ptr& new_view);
       void pbft_outgoing_checkpoint(const pbft_checkpoint_ptr& checkpoint);
 
-      void handle_message( const connection_ptr& c, pbft_prepare &msg);
-      void handle_message( const connection_ptr& c, pbft_commit &msg);
-      void handle_message( const connection_ptr& c, pbft_view_change &msg);
-      void handle_message( const connection_ptr& c, pbft_new_view &msg);
-      void handle_message( const connection_ptr& c, pbft_checkpoint &msg);
-      void handle_message( const connection_ptr& c, pbft_stable_checkpoint &msg);
+      void handle_message( const connection_ptr& c, const pbft_prepare &msg);
+      void handle_message( const connection_ptr& c, const pbft_commit &msg);
+      void handle_message( const connection_ptr& c, const pbft_view_change &msg);
+      void handle_message( const connection_ptr& c, const pbft_new_view &msg);
+      void handle_message( const connection_ptr& c, const pbft_checkpoint &msg);
+      void handle_message( const connection_ptr& c, const pbft_stable_checkpoint &msg);
       void handle_message( const connection_ptr& c, const checkpoint_request_message &msg);
-      void handle_message( const connection_ptr& c, compressed_pbft_message &msg);
+      void handle_message( const connection_ptr& c, const compressed_pbft_message &msg);
 
       void start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection);
       void start_txn_timer();
@@ -3102,14 +3102,15 @@ namespace eosio {
        }
     }
 
-    void net_plugin_impl::handle_message( const connection_ptr& c, pbft_prepare &msg) {
+    void net_plugin_impl::handle_message( const connection_ptr& c, const pbft_prepare &msg) {
+
+       if (!is_pbft_msg_valid(msg)) return;
+
+       auto added = maybe_add_to_pbft_cache(std::string(msg.sender_signature));
+       if (!added) return;
 
        auto pmm = pbft_message_metadata<pbft_prepare>(std::move(msg), chain_id);
 
-       if (!is_pbft_msg_valid(pmm.msg)) return;
-
-       auto added = maybe_add_to_pbft_cache(std::string(pmm.msg.sender_signature));
-       if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_prepare(pmm.msg, pmm.sender_key)) return;
@@ -3120,15 +3121,15 @@ namespace eosio {
        pbft_incoming_prepare_channel.publish(std::make_shared<pbft_message_metadata<pbft_prepare>>(std::move(pmm)));
     }
 
-    void net_plugin_impl::handle_message( const connection_ptr& c, pbft_commit &msg) {
+    void net_plugin_impl::handle_message( const connection_ptr& c, const pbft_commit &msg) {
 
-       auto pmm = pbft_message_metadata<pbft_commit>(std::move(msg), chain_id);
 
-       if (!is_pbft_msg_valid(pmm.msg)) return;
+       if (!is_pbft_msg_valid(msg)) return;
 
-       auto added = maybe_add_to_pbft_cache(std::string(pmm.msg.sender_signature));
+       auto added = maybe_add_to_pbft_cache(std::string(msg.sender_signature));
        if (!added) return;
 
+       auto pmm = pbft_message_metadata<pbft_commit>(std::move(msg), chain_id);
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_commit(pmm.msg, pmm.sender_key)) return;
@@ -3139,14 +3140,14 @@ namespace eosio {
        pbft_incoming_commit_channel.publish(std::make_shared<pbft_message_metadata<pbft_commit>>(std::move(pmm)));
     }
 
-    void net_plugin_impl::handle_message( const connection_ptr& c, pbft_view_change &msg) {
+    void net_plugin_impl::handle_message( const connection_ptr& c, const pbft_view_change &msg) {
+
+       if (!is_pbft_msg_valid(msg)) return;
+
+       auto added = maybe_add_to_pbft_cache(std::string(msg.sender_signature));
+       if (!added) return;
 
        auto pmm = pbft_message_metadata<pbft_view_change>( std::move(msg), chain_id);
-
-       if (!is_pbft_msg_valid(pmm.msg)) return;
-
-       auto added = maybe_add_to_pbft_cache(std::string(pmm.msg.sender_signature));
-       if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        controller &ctrl = my_impl->chain_plug->chain();
@@ -3174,20 +3175,20 @@ namespace eosio {
        pbft_incoming_view_change_channel.publish(std::make_shared<pbft_message_metadata<pbft_view_change>>(std::move(pmm)));
     }
 
-    void net_plugin_impl::handle_message( const connection_ptr& c, pbft_new_view &msg) {
+    void net_plugin_impl::handle_message( const connection_ptr& c, const pbft_new_view &msg) {
 
-       auto pmm = pbft_message_metadata<pbft_new_view>(std::move(msg), chain_id);
-
-       auto added = maybe_add_to_pbft_cache(std::string(pmm.msg.sender_signature));
+       auto added = maybe_add_to_pbft_cache(std::string(msg.sender_signature));
        if (!added) return;
 
         pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
 
-       if  (time_point_sec(time_point::now()) > time_point_sec(pmm.msg.common.timestamp) + 60 * pbft_message_TTL
-          || pmm.msg.new_view <= pcc.state_machine->get_current_view()) {
+       if  (time_point_sec(time_point::now()) > time_point_sec(msg.common.timestamp) + 60 * pbft_message_TTL
+          || msg.new_view <= pcc.state_machine->get_current_view()) {
           //skip new view messages that are too old or whose target views are lower than mine.
           return;
        }
+
+       auto pmm = pbft_message_metadata<pbft_new_view>(std::move(msg), chain_id);
 
        if (pmm.sender_key != pcc.pbft_db.get_new_view_primary_key(pmm.msg.new_view)) return;
 
@@ -3197,7 +3198,7 @@ namespace eosio {
        pbft_incoming_new_view_channel.publish(std::make_shared<pbft_message_metadata<pbft_new_view>>(std::move(pmm)));
     }
 
-    void net_plugin_impl::handle_message( const connection_ptr& c, compressed_pbft_message &msg) {
+    void net_plugin_impl::handle_message( const connection_ptr& c, const compressed_pbft_message &msg) {
 
         auto decompressed_msg = decompress_pbft(msg.content);
 
@@ -3213,14 +3214,14 @@ namespace eosio {
         }
     }
 
-    void net_plugin_impl::handle_message( const connection_ptr& c, pbft_checkpoint &msg) {
+    void net_plugin_impl::handle_message( const connection_ptr& c, const pbft_checkpoint &msg) {
+
+       if (!is_pbft_msg_valid(msg)) return;
+
+       auto added = maybe_add_to_pbft_cache(std::string(msg.sender_signature));
+       if (!added) return;
 
        auto pmm = pbft_message_metadata<pbft_checkpoint>(std::move(msg), chain_id);
-
-       if (!is_pbft_msg_valid(pmm.msg)) return;
-
-       auto added = maybe_add_to_pbft_cache(std::string(pmm.msg.sender_signature));
-       if (!added) return;
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
        if (!pcc.pbft_db.is_valid_checkpoint(pmm.msg, pmm.sender_key)) return;
@@ -3231,7 +3232,7 @@ namespace eosio {
        pbft_incoming_checkpoint_channel.publish(std::make_shared<pbft_message_metadata<pbft_checkpoint>>(std::move(pmm)));
     }
 
-    void net_plugin_impl::handle_message( const connection_ptr& c, pbft_stable_checkpoint &msg) {
+    void net_plugin_impl::handle_message( const connection_ptr& c, const pbft_stable_checkpoint &msg) {
 
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
 

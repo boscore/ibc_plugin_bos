@@ -849,8 +849,6 @@ namespace eosio {
                 if (add_to_pbft_db) add_pbft_commit(c, pmm.sender_key);
             }
 
-            if (add_to_pbft_db && should_committed()) commit_local();
-
             auto cert_id = certificate.block_info.block_id;
             auto cert_bs = ctrl.fetch_block_state_by_id(cert_id);
             auto producer_schedule = lscb_active_producers();
