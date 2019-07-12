@@ -2318,7 +2318,7 @@ namespace eosio {
    void net_plugin_impl::start_read_message(const connection_ptr& conn) {
 
       try {
-         if(!conn->socket || !conn->socket->is_open()) {
+         if(!conn->socket) {
             return;
          }
          connection_wptr weak_conn = conn;
