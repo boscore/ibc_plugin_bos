@@ -60,7 +60,7 @@ std::map<eosio::chain::public_key_type, signature_provider_type> make_signature_
 
 BOOST_AUTO_TEST_CASE(can_init) {
     tester tester;
-    controller &ctrl = *tester.control.get();
+    controller &ctrl = *tester.control;
     pbft_controller pbft_ctrl{ctrl};
 
     tester.produce_block();
@@ -70,7 +70,7 @@ BOOST_AUTO_TEST_CASE(can_init) {
 
 BOOST_AUTO_TEST_CASE(can_advance_lib_in_old_version) {
     tester tester;
-    controller &ctrl = *tester.control.get();
+    controller &ctrl = *tester.control;
     pbft_controller pbft_ctrl{ctrl};
 
     auto msp = make_signature_provider();
@@ -86,7 +86,7 @@ BOOST_AUTO_TEST_CASE(can_advance_lib_in_old_version) {
 
 BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade) {
     tester tester;
-    controller &ctrl = *tester.control.get();
+    controller &ctrl = *tester.control;
     pbft_controller pbft_ctrl{ctrl};
     ctrl.set_upo(150);
 
@@ -130,7 +130,7 @@ BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade) {
 
 BOOST_AUTO_TEST_CASE(can_advance_lib_after_upgrade_with_four_producers) {
     tester tester;
-    controller &ctrl = *tester.control.get();
+    controller &ctrl = *tester.control;
     pbft_controller pbft_ctrl{ctrl};
 
     ctrl.set_upo(109);
@@ -229,11 +229,11 @@ BOOST_AUTO_TEST_CASE(view_change_validation) {
 
 BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_on_short_fork) {
     tester short_prepared_fork, long_non_prepared_fork, new_view_generator;
-    controller &ctrl_short_prepared_fork = *short_prepared_fork.control.get();
+    controller &ctrl_short_prepared_fork = *short_prepared_fork.control;
     pbft_controller pbft_short_prepared_fork{ctrl_short_prepared_fork};
-    controller &ctrl_long_non_prepared_fork = *long_non_prepared_fork.control.get();
+    controller &ctrl_long_non_prepared_fork = *long_non_prepared_fork.control;
     pbft_controller pbft_long_non_prepared_fork{ctrl_long_non_prepared_fork};
-    controller &ctrl_new_view_generator = *new_view_generator.control.get();
+    controller &ctrl_new_view_generator = *new_view_generator.control;
     pbft_controller pbft_new_view_generator{ctrl_new_view_generator};
 
     auto msp = make_signature_provider();
@@ -304,6 +304,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     //generate new view with short fork prepare certificate
     pbft_new_view_generator.state_machine->set_prepares_cache(pbft_prepare());
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_send_pbft_msg(), true);
+    ctrl_new_view_generator.reset_pbft_my_prepare();
     pbft_new_view_generator.maybe_pbft_prepare();
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_prepared(), true);
     BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 136);
@@ -330,7 +331,8 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 137);
 
     //can switch fork after apply prepare certificate in new view
-    pbft_short_prepared_fork.state_machine->on_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(nv_msg, ctrl_new_view_generator.get_chain_id()));
+    auto pmm = pbft_message_metadata<pbft_new_view>(nv_msg, pbft_short_prepared_fork.pbft_db.get_chain_id());
+    pbft_short_prepared_fork.on_pbft_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(pmm));
 
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.head_block_num(), 136);
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 101);
@@ -347,6 +349,445 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     BOOST_CHECK_EQUAL(ctrl_short_prepared_fork.last_irreversible_block_num(), 136);
 }
 
+BOOST_AUTO_TEST_CASE(new_view_with_committed_cert_call_two_times_maybe_switch_forks) {
+	tester c1, new_view_generator;
+	controller &c1_ctrl = *c1.control.get();
+	pbft_controller c1_pbft_controller{c1_ctrl};
+	controller &ctrl_new_view_generator = *new_view_generator.control.get();
+	pbft_controller pbft_new_view_generator{ctrl_new_view_generator};
 
+	auto msp = make_signature_provider();
+	c1_ctrl.set_my_signature_providers(msp);
+	ctrl_new_view_generator.set_my_signature_providers(msp);
+
+	c1_ctrl.set_upo(48);
+	ctrl_new_view_generator.set_upo(48);
+
+	c1.create_accounts( {N(alice),N(bob),N(carol),N(deny)} );
+	c1.set_producers({N(alice),N(bob),N(carol),N(deny)});
+	c1.produce_blocks(100);
+
+	new_view_generator.create_accounts( {N(alice),N(bob),N(carol),N(deny)} );
+	new_view_generator.set_producers({N(alice),N(bob),N(carol),N(deny)});
+	new_view_generator.produce_blocks(100);
+
+	c1_pbft_controller.maybe_pbft_prepare();
+	c1_pbft_controller.maybe_pbft_commit();
+	c1.produce_blocks(1);
+	c1_pbft_controller.maybe_pbft_commit();
+	c1.produce_blocks(25);
+
+	pbft_new_view_generator.maybe_pbft_prepare();
+	pbft_new_view_generator.maybe_pbft_commit();
+	new_view_generator.produce_blocks(1);
+	pbft_new_view_generator.maybe_pbft_commit();
+	new_view_generator.produce_blocks(25);
+
+	BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 127);
+	BOOST_CHECK_EQUAL(c1_ctrl.head_block_num(), 127);
+	BOOST_CHECK_EQUAL(ctrl_new_view_generator.last_irreversible_block_num(), 101);
+	BOOST_CHECK_EQUAL(c1_ctrl.last_irreversible_block_num(), 101);
+
+	c1.create_accounts({N(shortname)});
+	new_view_generator.create_accounts({N(longname)});
+	c1.produce_blocks(6);
+	new_view_generator.produce_blocks(10);
+
+	c1_pbft_controller.state_machine->set_prepares_cache(pbft_prepare());
+	c1_ctrl.reset_pbft_my_prepare();
+	c1_pbft_controller.maybe_pbft_prepare();
+	c1.produce_block();
+
+	//merge short fork and long fork, make sure current head is short fork
+	for(int i=1;i<=10;i++){
+		auto tmp = ctrl_new_view_generator.fetch_block_by_number(127+i);
+		c1.push_block(tmp);
+	}
+	BOOST_CHECK_EQUAL(c1_ctrl.head_block_num(), 134);
+	auto c1_my_prepare = c1_ctrl.get_pbft_my_prepare();
+	auto c1_my_prepare_num = c1_ctrl.fork_db().get_block(c1_my_prepare)->block_num;
+	BOOST_CHECK_EQUAL(c1_my_prepare_num, 133);
+
+
+	//generate new view with long fork commit certificate
+	pbft_new_view_generator.state_machine->set_prepares_cache(pbft_prepare());
+	BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_send_pbft_msg(), true);
+	ctrl_new_view_generator.reset_pbft_my_prepare();
+	pbft_new_view_generator.maybe_pbft_prepare();
+
+	auto pbft_new_view_prepare = ctrl_new_view_generator.get_pbft_my_prepare();
+	auto pbft_new_view_prepare_num = ctrl_new_view_generator.fork_db().get_block(pbft_new_view_prepare)->block_num;
+	BOOST_CHECK_EQUAL(pbft_new_view_prepare_num, 137);
+
+	BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 137);
+	pbft_new_view_generator.maybe_pbft_commit();
+	new_view_generator.produce_block();
+	BOOST_CHECK_EQUAL(ctrl_new_view_generator.last_irreversible_block_num(), 137);
+
+	for(int i = 0; i<pbft_new_view_generator.view_change_timeout; i++){
+		pbft_new_view_generator.maybe_pbft_view_change();
+	}
+	pbft_new_view_generator.state_machine->do_send_view_change();
+	auto new_view = pbft_new_view_generator.pbft_db.get_proposed_new_view_num();
+	auto vcc = pbft_new_view_generator.pbft_db.generate_view_changed_certificate(new_view);
+	auto nv_msg = pbft_new_view_generator.pbft_db.send_pbft_new_view(vcc, new_view);
+
+	//can switch fork after apply prepare certificate in new view
+	auto pmm = pbft_message_metadata<pbft_new_view>(nv_msg, c1_pbft_controller.pbft_db.get_chain_id());
+
+	/// boscore issue https://github.com/boscore/bos/issues/114.
+	/// It will never throw exception block_validate_exception, "next block must be in the future" in the version 20e08dba
+	c1_pbft_controller.on_pbft_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(pmm));
+	c1_pbft_controller.maybe_pbft_commit();
+	c1.produce_blocks(2);
+	BOOST_CHECK_EQUAL(c1_ctrl.last_irreversible_block_num(), 137);
+	// make sure commited block same with new view generator lib block
+	BOOST_CHECK_EQUAL(c1_ctrl.fetch_block_by_number(137)->id(), ctrl_new_view_generator.fetch_block_by_number(137)->id());
+}
+
+
+private_key_type get_private_key( name keyname, string role ) {
+	return private_key_type::regenerate<fc::ecc::private_key_shim>(fc::sha256::hash(string(keyname)+role));
+}
+
+public_key_type  get_public_key( name keyname, string role ){
+	return get_private_key( keyname, role ).get_public_key();
+}
+
+BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
+	const char* curr_state;
+	tester c1, c2, c2_prime, c3_final;
+	controller &c1_ctrl = *c1.control.get(); /// only have signature Alice
+	pbft_controller c1_pbft_controller{c1_ctrl};
+	controller &c2_ctrl = *c2.control.get(); /// have signature Alice and bob
+	pbft_controller c2_pbft_controller{c2_ctrl};
+	controller &c2_ctrl_prime = c2_ctrl;     /// for make fork
+	pbft_controller c2_prime_pbft_controller{c2_ctrl_prime};
+	controller &c3_final_ctrl = *c3_final.control.get(); /// only have signature bob
+	pbft_controller c3_final_pbft_controller{c3_final_ctrl};
+
+
+	c1_ctrl.set_upo(48);
+	c2_ctrl.set_upo(48);
+	c2_ctrl_prime.set_upo(48);
+	c3_final_ctrl.set_upo(48);
+
+	/// c1
+	c1.produce_block();
+	c1.create_accounts( {N(alice), N(bob)} );
+	c1.produce_block();
+
+	// make and get signature provider for c1
+	std::map<eosio::chain::public_key_type, signature_provider_type> msp_c1;
+	auto priv_alice = tester::get_private_key( N(alice), "active" );
+	auto pub_alice = tester::get_public_key( N(alice), "active");
+	auto sp_alice = [priv_alice]( const eosio::chain::digest_type& digest ) {
+		return priv_alice.sign(digest);
+	};
+	msp_c1[pub_alice]=sp_alice;
+	c1_ctrl.set_my_signature_providers(msp_c1);
+
+	c1.set_producers( {N(alice), N(bob)} );
+
+	vector<producer_key> c1_sch = { {N(alice),get_public_key(N(alice), "active")} };
+
+
+	/// c2
+	c2.produce_block();
+	c2.create_accounts( {N(alice), N(bob)} );
+	c2.produce_block();
+
+	// make and get signature provider for c2
+	std::map<eosio::chain::public_key_type, signature_provider_type> msp_c2;
+	msp_c2[pub_alice]=sp_alice;
+
+	auto priv_bob = tester::get_private_key( N(bob), "active" );
+	auto pub_bob = tester::get_public_key( N(bob), "active");
+	auto sp_bob = [priv_bob]( const eosio::chain::digest_type& digest ) {
+		return priv_bob.sign(digest);
+	};
+	msp_c2[pub_bob]=sp_bob;
+	c2_ctrl.set_my_signature_providers(msp_c2);
+
+	c2.set_producers( {N(alice), N(bob)} );
+
+	vector<producer_key> c2_sch = { {N(alice),get_public_key(N(alice), "active")},
+									{N(bob),get_public_key(N(bob), "active")}};
+
+
+	c2.produce_blocks(95);
+	c2_pbft_controller.maybe_pbft_prepare();
+	c2_pbft_controller.maybe_pbft_commit();
+	c2.produce_block();
+	BOOST_CHECK_EQUAL(c2.control->last_irreversible_block_num(), 98);
+
+	/// c3 final
+	c3_final.produce_block();
+	c3_final.create_accounts( {N(alice), N(bob)} );
+	c3_final.produce_block();
+
+	// make and get signature provider for c3 final
+	std::map<eosio::chain::public_key_type, signature_provider_type> msp_c3_final;
+	msp_c3_final[pub_bob]=sp_bob;
+
+	c3_final_ctrl.set_my_signature_providers(msp_c3_final);
+
+	c3_final.set_producers( {N(alice), N(bob)} );
+
+	vector<producer_key> c3_final_sch = { {N(bob),get_public_key(N(bob), "active")} };
+
+	push_blocks(c2, c3_final);
+
+
+	push_blocks(c2, c1);
+	/// make c1 lib 98
+	c1_pbft_controller.maybe_pbft_prepare();
+	pbft_prepare c2_prepare_ = c2_pbft_controller.state_machine->get_prepares_cache();
+	BOOST_CHECK_EQUAL(c2_prepare_.block_info.block_num(), 98);
+	c1_pbft_controller.state_machine->on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c2_prepare_, c2_pbft_controller.pbft_db.get_chain_id()));
+	c1_pbft_controller.maybe_pbft_commit();
+
+	pbft_commit c2_commit_ = c2_pbft_controller.state_machine->get_commits_cache();
+	c1_pbft_controller.state_machine->on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c2_commit_, c2_pbft_controller.pbft_db.get_chain_id()));
+	c1.produce_block();
+	c1_pbft_controller.maybe_pbft_commit();
+	BOOST_CHECK_EQUAL(c1.control->last_irreversible_block_num(), 98);
+
+	c2_pbft_controller.maybe_pbft_commit();
+
+	/// make c3_final lib 98
+	c3_final_pbft_controller.maybe_pbft_prepare();
+	pbft_prepare c1_prepare_ = c1_pbft_controller.state_machine->get_prepares_cache();
+	BOOST_CHECK_EQUAL(c1_prepare_.block_info.block_num(), 99);
+	c3_final_pbft_controller.state_machine->on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c1_prepare_, c1_pbft_controller.pbft_db.get_chain_id()));
+	c3_final_pbft_controller.maybe_pbft_commit();
+
+	pbft_commit c1_commit_ = c1_pbft_controller.state_machine->get_commits_cache();
+	c3_final_pbft_controller.state_machine->on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c1_commit_, c1_pbft_controller.pbft_db.get_chain_id()));
+	c3_final.produce_block();
+	c3_final_pbft_controller.maybe_pbft_commit();
+	BOOST_CHECK_EQUAL(c3_final.control->last_irreversible_block_num(), 98);
+
+	// copy c2 to c2_prime
+	push_blocks(c2, c2_prime);
+
+	pbft_prepare c1_prepare;
+	c1_prepare_ = c1_pbft_controller.state_machine->get_prepares_cache();
+	c1_prepare = c1_prepare_;
+
+	/// for set pbft commit cache to 99
+	c2.produce_block();
+
+	c2_pbft_controller.maybe_pbft_prepare();
+	c2_prepare_ = c2_pbft_controller.state_machine->get_prepares_cache();
+	BOOST_CHECK_EQUAL(c2_prepare_.block_info.block_num(), 99);
+	c2_pbft_controller.maybe_pbft_commit();
+	c2.produce_block();
+	c2_pbft_controller.maybe_pbft_commit();
+
+	c2_commit_ = c2_pbft_controller.state_machine->get_commits_cache();
+	BOOST_CHECK_EQUAL(c2_commit_.block_info.block_num(), 99);
+	BOOST_CHECK_EQUAL(c2.control->last_irreversible_block_num(), 99);
+
+	push_blocks(c2, c1);
+	c1_pbft_controller.maybe_pbft_prepare();
+	c2_prepare_ = c2_pbft_controller.state_machine->get_prepares_cache();
+	c1_pbft_controller.state_machine->on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c2_prepare_, c2_pbft_controller.pbft_db.get_chain_id()));
+	c1_pbft_controller.maybe_pbft_commit();
+	c2_commit_ = c2_pbft_controller.state_machine->get_commits_cache();
+	c1_pbft_controller.state_machine->on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c2_commit_, c2_pbft_controller.pbft_db.get_chain_id()));
+	c1.produce_block();
+	c1_pbft_controller.maybe_pbft_commit();
+
+	c1_prepare_ = c1_pbft_controller.state_machine->get_prepares_cache();
+	c1_commit_ = c1_pbft_controller.state_machine->get_commits_cache();
+	BOOST_CHECK_EQUAL(c1_commit_.block_info.block_num(), 99);
+	BOOST_CHECK_EQUAL(c1.control->last_irreversible_block_num(), 99);
+
+	c3_final_pbft_controller.maybe_pbft_prepare();
+
+	c3_final.produce_block();
+	c3_final.produce_block();
+
+	BOOST_CHECK_EQUAL(c1_prepare.block_info.block_num(), 99);
+	/// set c3 my preprare at 100
+	c3_final_ctrl.set_pbft_my_prepare(c3_final_ctrl.get_block_id_for_num(100));
+	c3_final_pbft_controller.state_machine->on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c1_prepare, c1_pbft_controller.pbft_db.get_chain_id()));
+
+	pbft_prepare c3_final_prepare = c3_final_pbft_controller.state_machine->get_prepares_cache();
+	// check c3 prepare at 99
+	BOOST_CHECK_EQUAL(c3_final_prepare.block_info.block_num(), 99);
+	curr_state = c3_final_pbft_controller.state_machine->get_current()->get_name();
+	BOOST_CHECK_EQUAL(curr_state, "{==== PREPARED ====}");
+
+
+	c3_final_pbft_controller.maybe_pbft_commit();
+
+	c2_prime.create_accounts({N(tester1)});
+	c2_prime.produce_blocks(5);
+
+	//push fork to c3_final
+	for(int i = 100; i <= 104; i++) {
+		auto fb = c2_prime.control->fetch_block_by_number(i);
+		c3_final.push_block(fb);
+	}
+
+	auto tmp_c2_prime_prepared_fork = c3_final.control->fork_db().get_block(c2_prime.control->get_block_id_for_num(100));
+	auto tmp_c3_final_prepared_fork = c3_final.control->fork_db().get_block(c3_final.control->get_block_id_for_num(100));
+	BOOST_CHECK_EQUAL(tmp_c3_final_prepared_fork->pbft_prepared, true);
+	BOOST_CHECK_EQUAL(tmp_c3_final_prepared_fork->pbft_my_prepare, true);
+	BOOST_CHECK_EQUAL(tmp_c2_prime_prepared_fork->pbft_prepared, true);
+	BOOST_CHECK_EQUAL(tmp_c2_prime_prepared_fork->pbft_my_prepare, true);
+	BOOST_CHECK_EQUAL(c3_final.control->last_irreversible_block_num(), 98);
+
+	BOOST_CHECK_EQUAL(c3_final.control->head_block_num(), 104);
+
+	c3_final_pbft_controller.maybe_pbft_commit();
+	c3_final.produce_block();
+	pbft_commit c3_final_commit = c3_final_pbft_controller.state_machine->get_commits_cache();
+	/// on commit will prepare next block immediately will trigger reserve prepare
+	c3_final_pbft_controller.state_machine->on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c1_commit_, c1_pbft_controller.pbft_db.get_chain_id()));
+	// for sync
+	c3_final.produce_block();
+	c3_final_pbft_controller.maybe_pbft_commit();
+	curr_state = c3_final_pbft_controller.state_machine->get_current()->get_name();
+	BOOST_CHECK_EQUAL(curr_state, "{==== COMMITTED ====}");
+	BOOST_CHECK_EQUAL(c3_final.control->last_irreversible_block_num(), 99);
+
+	c3_final_pbft_controller.maybe_pbft_prepare();
+	c3_final_prepare = c3_final_pbft_controller.state_machine->get_prepares_cache();
+	BOOST_CHECK_EQUAL(c3_final_prepare.block_info.block_num(), 100);
+
+}
+
+
+BOOST_AUTO_TEST_CASE(fetch_branch_from_block_at_same_fork_return_at_least_common_ancestor) {
+	//create forks
+	tester c;
+	c.produce_block();
+	c.produce_block();
+	auto r = c.create_accounts( {N(dan),N(sam),N(pam)} );
+	wdump((fc::json::to_pretty_string(r)));
+	c.produce_block();
+	auto res = c.set_producers( {N(dan),N(sam),N(pam)} );
+	vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
+								 {N(sam),get_public_key(N(sam), "active")},
+								 {N(pam),get_public_key(N(pam), "active")}};
+	wdump((fc::json::to_pretty_string(res)));
+	wlog("set producer schedule to [dan,sam,pam]");
+	c.produce_blocks(98);
+
+	BOOST_CHECK_EQUAL(c.control->head_block_num(), 102);
+
+	// first is low block number
+	auto first = c.control->get_block_id_for_num(100);
+	auto second = c.control->get_block_id_for_num(102);
+	auto result = c.control->fork_db().fetch_branch_from(first, second);
+
+	BOOST_CHECK_EQUAL(result.first.size(), 1);
+	BOOST_CHECK_EQUAL(result.second.size(), 3);
+
+
+	// first is high block number
+	first = c.control->get_block_id_for_num(102);
+	second = c.control->get_block_id_for_num(99);
+	result = c.control->fork_db().fetch_branch_from(first, second);
+
+	BOOST_CHECK_EQUAL(result.first.size(), 4);
+	BOOST_CHECK_EQUAL(result.second.size(), 1);
+
+	BOOST_CHECK_EQUAL(result.first[result.first.size() - 1]->id, result.second[result.second.size() - 1]->id);
+}
+
+
+BOOST_AUTO_TEST_CASE(fetch_branch_from_block_at_same_block_return_at_least_common_ancestor) {
+	//create forks
+	tester c;
+	c.produce_block();
+	c.produce_block();
+	auto r = c.create_accounts( {N(dan),N(sam),N(pam)} );
+	wdump((fc::json::to_pretty_string(r)));
+	c.produce_block();
+	auto res = c.set_producers( {N(dan),N(sam),N(pam)} );
+	vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
+								 {N(sam),get_public_key(N(sam), "active")},
+								 {N(pam),get_public_key(N(pam), "active")}};
+	wdump((fc::json::to_pretty_string(res)));
+	wlog("set producer schedule to [dan,sam,pam]");
+	c.produce_blocks(98);
+
+	BOOST_CHECK_EQUAL(c.control->head_block_num(), 102);
+
+	// same block
+	auto first = c.control->get_block_id_for_num(102);
+	auto second = c.control->get_block_id_for_num(102);
+	auto result = c.control->fork_db().fetch_branch_from(first, second);
+
+	// result two branch will only include one common_ancestor
+	BOOST_CHECK_EQUAL(result.first.size(), 1);
+	BOOST_CHECK_EQUAL(result.second.size(), 1);
+
+	BOOST_CHECK_EQUAL(result.first[result.first.size() - 1]->id == result.second[result.second.size() - 1]->id, true);
+}
+
+
+BOOST_AUTO_TEST_CASE(fetch_branch_from_block_at_diffent_fork_return_without_common_ancestor) {
+	//create forks
+	tester c;
+	c.produce_block();
+	c.produce_block();
+	auto r = c.create_accounts( {N(dan),N(sam),N(pam)} );
+	wdump((fc::json::to_pretty_string(r)));
+	c.produce_block();
+	auto res = c.set_producers( {N(dan),N(sam),N(pam)} );
+	vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
+								 {N(sam),get_public_key(N(sam), "active")},
+								 {N(pam),get_public_key(N(pam), "active")}};
+	wdump((fc::json::to_pretty_string(res)));
+	wlog("set producer schedule to [dan,sam,pam]");
+	c.produce_blocks(98);
+
+	tester c2;
+	c2.produce_block();
+	c2.produce_block();
+	c2.create_accounts( {N(dan),N(sam),N(pam)} );
+	c2.produce_block();
+	c2.set_producers( {N(dan),N(sam),N(pam)} );
+	wlog("set producer schedule to [dan,sam,pam]");
+	c2.produce_blocks(98);
+
+	//check c2 98 c98 equal
+
+	c.create_accounts({N(tester1)});
+	c.produce_blocks(10);
+	c2.create_accounts({N(tester2)});
+	c2.produce_blocks(1);
+
+	auto c2_previous_fork_head_id = c2.control->get_block_id_for_num(103);
+	auto c2_tmp_102 = c2.control->get_block_id_for_num(102);
+	BOOST_CHECK_EQUAL(c2.control->head_block_num(), 103);
+
+	// push this fork to c2
+	for (int i = 103; i <= 104; i++) {
+		auto fb = c.control->fetch_block_by_number(i);
+		c2.push_block(fb);
+	}
+
+	BOOST_CHECK_EQUAL(c2.control->head_block_num(), 104);
+
+
+	auto first = c2.control->get_block_id_for_num(103);
+	BOOST_CHECK_EQUAL(first!= c2_previous_fork_head_id, true);
+	BOOST_CHECK_EQUAL(c2.control->get_block_id_for_num(102) == c2_tmp_102, true);
+	auto result = c2.control->fork_db().fetch_branch_from(first, c2_previous_fork_head_id);
+
+	// if first and second in different fork, the result two branch do not include common ancestor
+	BOOST_CHECK_EQUAL(result.first.size(), 1);
+	BOOST_CHECK_EQUAL(result.second.size(), 1);
+
+	BOOST_CHECK_EQUAL(result.first[result.first.size() - 1]->id != result.second[result.second.size() - 1]->id, true);
+	BOOST_CHECK_EQUAL(result.first[result.first.size() - 1]->block_num, 103);
+	BOOST_CHECK_EQUAL(result.second[result.second.size() - 1]->block_num, 103);
+}
 
 BOOST_AUTO_TEST_SUITE_END()
