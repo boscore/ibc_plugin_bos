@@ -61,7 +61,7 @@ namespace eosio {
 
       template<typename pbft_message_body>
       struct pbft_message_metadata {
-         explicit pbft_message_metadata(pbft_message_body m, chain_id_type chain_id): msg{m} {
+         explicit pbft_message_metadata(pbft_message_body m, chain_id_type& chain_id): msg{m} {
             try {
                sender_key = crypto::public_key(msg.sender_signature, msg.digest(chain_id), true);
             } catch (fc::exception & /*e*/) {
@@ -109,6 +109,8 @@ namespace eosio {
             return enc.result();
          }
       };
+
+      using pbft_prepare_ptr = std::shared_ptr<pbft_prepare>;
 
       struct pbft_commit {
          explicit pbft_commit() = default;
@@ -165,6 +167,8 @@ namespace eosio {
             return enc.result();
          }
       };
+
+      using pbft_checkpoint_ptr = std::shared_ptr<pbft_checkpoint>;
 
       struct pbft_stable_checkpoint {
          explicit pbft_stable_checkpoint() = default;
@@ -252,6 +256,8 @@ namespace eosio {
          }
       };
 
+      using pbft_view_change_ptr = std::shared_ptr<pbft_view_change>;
+
       struct pbft_view_changed_certificate {
          explicit pbft_view_changed_certificate() = default;
 
@@ -300,6 +306,8 @@ namespace eosio {
                    && sender_signature == signature_type();
          }
       };
+
+      using pbft_new_view_ptr = std::shared_ptr<pbft_new_view>;
 
       struct pbft_state {
          block_id_type                                                       block_id;
@@ -465,7 +473,7 @@ namespace eosio {
          bool should_recv_pbft_msg(const public_key_type &pub_key);
 
          bool pending_pbft_lib();
-         chain_id_type get_chain_id() {return chain_id;}
+         chain_id_type& get_chain_id() {return chain_id;}
          pbft_stable_checkpoint get_stable_checkpoint_by_id(const block_id_type &block_id, bool incl_blk_extn = true);
          pbft_stable_checkpoint fetch_stable_checkpoint_from_blk_extn(const signed_block_ptr &b);
          block_info_type cal_pending_stable_checkpoint() const;
@@ -481,20 +489,11 @@ namespace eosio {
          flat_map<public_key_type, uint32_t> get_pbft_fork_schedules() const;
 
 
-         signal<void(const pbft_prepare &)> pbft_outgoing_prepare;
-         signal<void(const pbft_prepare &)> pbft_incoming_prepare;
-
-         signal<void(const pbft_commit &)> pbft_outgoing_commit;
-         signal<void(const pbft_commit &)> pbft_incoming_commit;
-
-         signal<void(const pbft_view_change &)> pbft_outgoing_view_change;
-         signal<void(const pbft_view_change &)> pbft_incoming_view_change;
-
-         signal<void(const pbft_new_view &)> pbft_outgoing_new_view;
-         signal<void(const pbft_new_view &)> pbft_incoming_new_view;
-
-         signal<void(const pbft_checkpoint &)> pbft_outgoing_checkpoint;
-         signal<void(const pbft_checkpoint &)> pbft_incoming_checkpoint;
+         signal<void(const pbft_prepare_ptr &)> pbft_outgoing_prepare;
+         signal<void(const pbft_commit_ptr &)> pbft_outgoing_commit;
+         signal<void(const pbft_view_change_ptr &)> pbft_outgoing_view_change;
+         signal<void(const pbft_new_view_ptr &)> pbft_outgoing_new_view;
+         signal<void(const pbft_checkpoint_ptr &)> pbft_outgoing_checkpoint;
 
       private:
          controller                                  &ctrl;

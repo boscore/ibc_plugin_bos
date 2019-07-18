@@ -180,7 +180,10 @@ namespace eosio {
              auto lib = ctrl.last_irreversible_block_id();
              if (lib == block_id_type()) return true;
              auto forks = ctrl.fork_db().fetch_branch_from(in, lib);
-             return !forks.first.empty() && forks.second.empty();
+
+             //`branch_type` will always contain at least themselves.
+             //`in` block num should be higher than lib, yet fall on the same branch with lib.
+             return forks.first.size() > 1 && forks.second.size() == 1;
           };
 
 
@@ -190,7 +193,7 @@ namespace eosio {
                   auto retry_p = cached_prepare;
                   retry_p.common.timestamp = time_point::now();
                   retry_p.sender_signature = sp.second(retry_p.digest(chain_id));
-                  emit(pbft_outgoing_prepare, retry_p);
+                  emit(pbft_outgoing_prepare, std::make_shared<pbft_prepare>(retry_p));
               }
               return prepare_to_be_cached;
           } else if (reserve_prepare(my_prepare)) {
@@ -198,7 +201,7 @@ namespace eosio {
                   pbft_prepare reserve_p;
                   reserve_p.view=current_view; reserve_p.block_info={my_prepare};
                   reserve_p.sender_signature = sp.second(reserve_p.digest(chain_id));
-                  emit(pbft_outgoing_prepare, reserve_p);
+                  emit(pbft_outgoing_prepare, std::make_shared<pbft_prepare>(reserve_p));
                   if (prepare_to_be_cached.empty()) prepare_to_be_cached = reserve_p;
               }
               return prepare_to_be_cached;
@@ -222,7 +225,7 @@ namespace eosio {
                       new_p.view=current_view; new_p.block_info={hwbs->id};
                       new_p.sender_signature = sp.second(new_p.digest(chain_id));
                       if (is_valid_prepare(new_p, sp.first)) {
-                          emit(pbft_outgoing_prepare, new_p);
+                          emit(pbft_outgoing_prepare, std::make_shared<pbft_prepare>(new_p));
                           add_pbft_prepare(new_p, sp.first);
                           sent = true;
                           if (prepare_to_be_cached.empty()) prepare_to_be_cached = new_p;
@@ -327,7 +330,7 @@ namespace eosio {
                   auto retry_c = cached_commit;
                   retry_c.common.timestamp = time_point::now();
                   retry_c.sender_signature = sp.second(retry_c.digest(chain_id));
-                  emit(pbft_outgoing_commit, retry_c);
+                  emit(pbft_outgoing_commit, std::make_shared<pbft_commit>(retry_c));
               }
               return commit_to_be_cached;
           } else {
@@ -348,7 +351,7 @@ namespace eosio {
                       new_c.sender_signature = sp.second(new_c.digest(chain_id));
 
                       if (is_valid_commit(new_c, sp.first)) {
-                          emit(pbft_outgoing_commit, new_c);
+                          emit(pbft_outgoing_commit, std::make_shared<pbft_commit>(new_c));
                           add_pbft_commit(new_c, sp.first);
                           if (commit_to_be_cached.empty()) commit_to_be_cached = new_c;
                       }
@@ -512,7 +515,7 @@ namespace eosio {
                   auto retry_vc = cached_view_change;
                   retry_vc.common.timestamp = time_point::now();
                   retry_vc.sender_signature = sp.second(retry_vc.digest(chain_id));
-                  emit(pbft_outgoing_view_change, retry_vc);
+                  emit(pbft_outgoing_view_change, std::make_shared<pbft_view_change>(retry_vc));
               }
               return view_change_to_be_cached;
           } else {
@@ -528,7 +531,7 @@ namespace eosio {
                   new_vc.stable_checkpoint=my_lsc;
                   new_vc.sender_signature = my_sp.second(new_vc.digest(chain_id));
                   if (is_valid_view_change(new_vc, my_sp.first)) {
-                      emit(pbft_outgoing_view_change, new_vc);
+                      emit(pbft_outgoing_view_change, std::make_shared<pbft_view_change>(new_vc));
                       add_pbft_view_change(new_vc, my_sp.first);
                       if (view_change_to_be_cached.empty()) view_change_to_be_cached = new_vc;
                   }
@@ -602,8 +605,14 @@ namespace eosio {
           nv.stable_checkpoint=highest_sc;
           nv.view_changed_cert=vcc;
           nv.sender_signature = sp_itr->second(nv.digest(chain_id));
-          emit(pbft_outgoing_new_view, nv);
-          return nv;
+          try {
+              validate_new_view(nv, sp_itr->first);
+              emit(pbft_outgoing_new_view, std::make_shared<pbft_new_view>(nv));
+              return nv;
+          } catch (const fc::exception& ex) {
+              elog("bad new view, ${s} ", ("s", ex.to_string()));
+              return pbft_new_view();
+          }
       }
 
       pbft_prepared_certificate pbft_database::generate_prepared_certificate() {
@@ -839,8 +848,6 @@ namespace eosio {
               if (!is_valid_commit(c, pmm.sender_key)) return false;
               if (add_to_pbft_db) add_pbft_commit(c, pmm.sender_key);
           }
-
-          if (add_to_pbft_db && should_committed()) commit_local();
 
           auto cert_id = certificate.block_info.block_id;
           auto cert_bs = ctrl.fetch_block_state_by_id(cert_id);
@@ -1320,7 +1327,7 @@ namespace eosio {
       void pbft_database::send_pbft_checkpoint() {
           auto cps_to_send = generate_and_add_pbft_checkpoint();
           for (auto const &cp: cps_to_send) {
-              emit(pbft_outgoing_checkpoint, cp);
+              emit(pbft_outgoing_checkpoint, std::make_shared<pbft_checkpoint>(cp));
           }
       }
 
