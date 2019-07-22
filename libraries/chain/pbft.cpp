@@ -154,7 +154,7 @@ namespace eosio {
             }
         }
 
-        void psm_machine::manually_set_current_view(const uint32_t &cv) {
+        void psm_machine::manually_set_current_view(uint32_t cv) {
             set_current_view(cv);
             set_target_view(cv + 1);
             transit_to_view_change_state(current);
@@ -492,86 +492,6 @@ namespace eosio {
             if (!view_changes.empty()) {
                 set_view_changes_cache(view_changes);
             }
-        }
-
-        const pbft_prepare& psm_machine::get_prepares_cache() const {
-            return cache.prepares_cache;
-        }
-
-        void psm_machine::set_prepares_cache(const pbft_prepare &pcache) {
-            cache.prepares_cache = pcache;
-        }
-
-        const pbft_commit& psm_machine::get_commits_cache() const {
-            return cache.commits_cache;
-        }
-
-        void psm_machine::set_commits_cache(const pbft_commit &ccache) {
-            cache.commits_cache = ccache;
-        }
-
-        const pbft_view_change& psm_machine::get_view_changes_cache() const {
-            return cache.view_changes_cache;
-        }
-
-        void psm_machine::set_view_changes_cache(const pbft_view_change &vc_cache) {
-            cache.view_changes_cache = vc_cache;
-        }
-
-        const uint32_t& psm_machine::get_current_view() const {
-            return current_view;
-        }
-
-        void psm_machine::set_current_view(const uint32_t &cv) {
-            current_view = cv;
-        }
-
-        const pbft_prepared_certificate& psm_machine::get_prepared_certificate() const {
-            return cache.prepared_certificate;
-        }
-
-        void psm_machine::set_prepared_certificate(const pbft_prepared_certificate &pcert) {
-            cache.prepared_certificate = pcert;
-        }
-
-        const vector<pbft_committed_certificate>& psm_machine::get_committed_certificate() const {
-            return cache.committed_certificate;
-        }
-
-        void psm_machine::set_committed_certificate(const vector<pbft_committed_certificate> &ccert) {
-            cache.committed_certificate = ccert;
-        }
-
-        const pbft_view_changed_certificate& psm_machine::get_view_changed_certificate() const {
-            return cache.view_changed_certificate;
-        }
-
-        void psm_machine::set_view_changed_certificate(const pbft_view_changed_certificate &vc_cert) {
-            cache.view_changed_certificate = vc_cert;
-        }
-
-        const uint32_t& psm_machine::get_target_view_retries() const {
-            return target_view_retries;
-        }
-
-        void psm_machine::set_target_view_retries(const uint32_t &tv_reties) {
-            target_view_retries = tv_reties;
-        }
-
-        const uint32_t& psm_machine::get_target_view() const {
-            return target_view;
-        }
-
-        void psm_machine::set_target_view(const uint32_t &tv) {
-            target_view = tv;
-        }
-
-        const uint32_t& psm_machine::get_view_change_timer() const {
-            return view_change_timer;
-        }
-
-        void psm_machine::set_view_change_timer(const uint32_t &vc_timer) {
-            view_change_timer = vc_timer;
         }
     }
 }

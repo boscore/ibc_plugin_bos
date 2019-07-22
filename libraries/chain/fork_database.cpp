@@ -525,7 +525,7 @@ namespace eosio { namespace chain {
     *
     *  This will require a search over all forks
     */
-   void fork_database::set_bft_irreversible( block_id_type id ) {
+   void fork_database::set_bft_irreversible( const block_id_type& id ) {
        auto b = get_block( id );
        EOS_ASSERT( b, fork_db_block_not_found, "unable to find block id ${id}", ("id",id));
 
@@ -569,7 +569,7 @@ namespace eosio { namespace chain {
        my->head = *my->index.get<by_lib_block_num>().begin();
    }
 
-   void fork_database::set_latest_checkpoint( block_id_type id) {
+   void fork_database::set_latest_checkpoint( const block_id_type& id) {
        auto b = get_block( id );
        EOS_ASSERT( b, fork_db_block_not_found, "unable to find block id ${id}", ("id",id));
 

@@ -158,7 +158,7 @@ namespace eosio { namespace chain {
       pending_schedule         = *header.new_producers;
       pending_schedule_lib_num = block_num;
   }
-
+  
 
   /**
    *  Transitions the current header state into the next header state given the supplied signed block header.
@@ -176,7 +176,7 @@ namespace eosio { namespace chain {
     EOS_ASSERT( h.previous == id, unlinkable_block_exception, "block must link to current state" );
     auto result = generate_next( h.timestamp, pbft_enabled);
     EOS_ASSERT( result.header.producer == h.producer, wrong_producer, "wrong producer specified" );
-    EOS_ASSERT( result.header.schedule_version == h.schedule_version, producer_schedule_exception, "schedule_version in signed block is corrupted" );
+    EOS_ASSERT( result.header.schedule_version == h.schedule_version, producer_schedule_exception, "schedule_version in s  igned block is corrupted" );
 
     auto itr = producer_to_last_produced.find(h.producer);
     if( itr != producer_to_last_produced.end() ) {

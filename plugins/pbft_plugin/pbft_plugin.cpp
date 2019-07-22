@@ -22,11 +22,8 @@ namespace eosio {
         boost::asio::steady_timer::duration checkpoint_timeout{std::chrono::seconds{50}};
 
         void prepare_timer_tick();
-
         void commit_timer_tick();
-
         void view_change_timer_tick();
-
         void checkpoint_timer_tick();
 
     private:
@@ -67,13 +64,13 @@ namespace eosio {
         return pbft_state();
     }
 
-    vector<pbft_checkpoint_state> pbft_plugin::get_pbft_checkpoints_record(const block_num_type &bnum) const {
+    vector<pbft_checkpoint_state> pbft_plugin::get_pbft_checkpoints_record(block_num_type bnum) const {
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         auto records = pbft_ctrl.pbft_db.get_checkpoints_by_num(bnum);
         if (!records.empty()) return records;
         return vector<pbft_checkpoint_state>();
     }
-    pbft_view_change_state pbft_plugin::get_view_change_record(const pbft_view_type& view) const {
+    pbft_view_change_state pbft_plugin::get_view_change_record(pbft_view_type view) const {
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         auto record = pbft_ctrl.pbft_db.get_view_changes_by_target_view(view);
         if (record) return *record;
@@ -105,7 +102,7 @@ namespace eosio {
         return ctrl.get_pbft_my_prepare();
     }
 
-    void pbft_plugin::set_pbft_current_view(const pbft_view_type& view) {
+    void pbft_plugin::set_pbft_current_view(pbft_view_type view) {
         //this is used to boost the recovery from a disaster, do not set this unless you have to do so.
         pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         pbft_ctrl.state_machine->manually_set_current_view(view);
