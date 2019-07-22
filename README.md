@@ -29,6 +29,12 @@ As BOS continues to develop, developer rewards will be appropriately adjusted to
 1. Build from code : `bash ./eosio_build.sh -s BOS`
 2. Docker Style，check [Docker](./Docker/README.md)
 
+## Tips:
+- HTTP&P2P endpoints can be get from the [validator](https://validate.eosnation.io/bos/reports/endpoints.html) by EOS Nation
+- BOS Mainnet [genesis.json](https://github.com/boscore/bosres/blob/master/genesis.json)
+- BOS Mainnet [Genesis](https://github.com/boscore/bosres/blob/master/BOS_Genesis.md)
+- EOS Mainnet [snapshot](https://github.com/boscore/bos-airdrop-snapshots/blob/master/README.md)
+
 ## BOSCore Workflow
 BOSCore encourage community developer actively participate in contributing the code, members should follow the workflow below.
 ![BOSCore Workflow](./images/bos-workflow.png)

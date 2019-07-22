@@ -29,6 +29,12 @@ BOS链的代码完全由社区贡献并维护，每个生态参与者都可以�
 1. 源码直接编译: `bash ./eosio_build.sh -s BOS`
 2. Docker方式部署，参看 [Docker](./Docker/README.md)
 
+## Tips:
+- HTTP&P2P 列表可以从 EOS Nation 提供的[验证页面](https://validate.eosnation.io/bos/reports/endpoints.html)获取
+- BOS Mainnet [genesis.json](https://github.com/boscore/bosres/blob/master/genesis.json)
+- BOS Mainnet [创世纪](https://github.com/boscore/bosres/blob/master/BOS_Genesis.md)
+- EOS Mainnet [账户空投信息](https://github.com/boscore/bos-airdrop-snapshots/blob/master/README.md)
+
 ## BOSCore 开发流程 
 BOSCore 鼓励社区开发者参与代码贡献，社区成员应当遵循以下工作流：
 ![BOSCore Workflow](./images/bos-workflow.png)
