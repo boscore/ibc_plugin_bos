@@ -50,6 +50,8 @@ namespace eosio {
             }
         };
 
+        using fork_info_type = vector<block_info_type>;
+
         struct pbft_message_common {
             explicit pbft_message_common(pbft_message_type t): type{t} {};
 
@@ -426,19 +428,22 @@ namespace eosio {
             void add_pbft_view_change(const pbft_view_change& vc, const public_key_type& pk);
             void add_pbft_checkpoint(const pbft_checkpoint& cp, const public_key_type& pk);
 
-            pbft_prepare send_and_add_pbft_prepare(const pbft_prepare& cached_prepare = pbft_prepare(), pbft_view_type current_view = 0);
-            pbft_commit send_and_add_pbft_commit(const pbft_commit& cached_commit = pbft_commit(), pbft_view_type current_view = 0);
-            pbft_view_change send_and_add_pbft_view_change(
-                    const pbft_view_change& cached_view_change = pbft_view_change(),
-                    const pbft_prepared_certificate& ppc = pbft_prepared_certificate(),
-                    const vector<pbft_committed_certificate>& pcc = vector<pbft_committed_certificate>{},
+            vector<pbft_prepare> generate_and_add_pbft_prepare(
+                    const pbft_prepare &cached_prepare = pbft_prepare(),
+                    pbft_view_type current_view = 0);
+            vector<pbft_commit> generate_and_add_pbft_commit(
+                    const pbft_commit &cached_commit = pbft_commit(),
+                    pbft_view_type current_view = 0);
+            vector<pbft_view_change> generate_and_add_pbft_view_change(
+                    const pbft_view_change &cached_view_change = pbft_view_change(),
+                    const pbft_prepared_certificate &ppc = pbft_prepared_certificate(),
+                    const vector<pbft_committed_certificate> &pcc = vector<pbft_committed_certificate>{},
                     pbft_view_type current_view = 0,
                     pbft_view_type target_view = 1);
-            pbft_new_view send_pbft_new_view(
-                    const pbft_view_changed_certificate& vcc = pbft_view_changed_certificate(),
+            pbft_new_view generate_pbft_new_view(
+                    const pbft_view_changed_certificate &vcc = pbft_view_changed_certificate(),
                     pbft_view_type current_view = 1);
             vector<pbft_checkpoint> generate_and_add_pbft_checkpoint();
-            void send_pbft_checkpoint();
 
             bool should_prepared();
             bool should_committed();
@@ -476,7 +481,6 @@ namespace eosio {
             chain_id_type& get_chain_id() {return chain_id;}
             pbft_stable_checkpoint get_stable_checkpoint_by_id(const block_id_type& block_id, bool incl_blk_extn = true);
             pbft_stable_checkpoint fetch_stable_checkpoint_from_blk_extn(const signed_block_ptr& b);
-            block_info_type cal_pending_stable_checkpoint() const;
 
             void cleanup_on_new_view();
             void update_fork_schedules();
@@ -487,13 +491,6 @@ namespace eosio {
             pbft_view_change_state_ptr get_view_changes_by_target_view(pbft_view_type tv) const;
             vector<block_num_type> get_pbft_watermarks() const;
             flat_map<public_key_type, uint32_t> get_pbft_fork_schedules() const;
-
-
-            signal<void(const pbft_prepare_ptr&)> pbft_outgoing_prepare;
-            signal<void(const pbft_commit_ptr&)> pbft_outgoing_commit;
-            signal<void(const pbft_view_change_ptr&)> pbft_outgoing_view_change;
-            signal<void(const pbft_new_view_ptr&)> pbft_outgoing_new_view;
-            signal<void(const pbft_checkpoint_ptr&)> pbft_outgoing_checkpoint;
 
         private:
             controller&                                 ctrl;
@@ -506,22 +503,19 @@ namespace eosio {
             flat_map<public_key_type, block_num_type>   fork_schedules;
             chain_id_type                               chain_id = ctrl.get_chain_id();
 
-
+            block_info_type cal_pending_stable_checkpoint() const;
             bool is_less_than_high_watermark(block_num_type bnum);
             bool is_valid_prepared_certificate(const pbft_prepared_certificate& certificate, bool add_to_pbft_db = false);
             bool is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db = false);
-            bool is_valid_longest_fork(const block_info_type& bi, vector<block_info_type> block_infos, unsigned long threshold, unsigned long non_fork_bp_count);
+            bool is_valid_longest_fork(const block_info_type& bi, fork_info_type block_infos, unsigned long threshold, unsigned long non_fork_bp_count);
 
             producer_schedule_type lscb_active_producers() const;
             vector<block_num_type>& get_updated_watermarks();
             flat_map<public_key_type, uint32_t>& get_updated_fork_schedules();
             block_num_type get_current_pbft_watermark();
 
-            vector<vector<block_info_type>> fetch_fork_from(vector<block_info_type>& block_infos);
-            vector<block_info_type> fetch_first_fork_from(vector<block_info_type>& bi);
-
-            template<typename Signal, typename Arg>
-            void emit(const Signal &s, Arg &&a);
+            vector<fork_info_type> fetch_fork_from(fork_info_type& block_infos);
+            fork_info_type fetch_first_fork_from(fork_info_type& bi);
 
             void set(const pbft_state_ptr& s);
             void set(const pbft_checkpoint_state_ptr& s);

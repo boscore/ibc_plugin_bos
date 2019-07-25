@@ -1,5 +1,3 @@
-#include <utility>
-
 #include <eosio/chain/pbft.hpp>
 #include <fc/io/fstream.hpp>
 #include <fstream>
@@ -8,8 +6,9 @@ namespace eosio {
     namespace chain {
 
         pbft_controller::pbft_controller(controller &ctrl) : 
-        pbft_db(ctrl), 
-        state_machine(new psm_machine(pbft_db)) {
+        pbft_db(ctrl),
+        state_machine(pbft_db) {
+            state_machine.set_current(std::make_shared<psm_committed_state>(state_machine, pbft_db));
             datadir = ctrl.state_dir();
 
             if (!fc::is_directory(datadir))
@@ -23,8 +22,8 @@ namespace eosio {
                 fc::datastream<const char *> ds(content.data(), content.size());
                 uint32_t current_view;
                 fc::raw::unpack(ds, current_view);
-                state_machine->set_current_view(current_view);
-                state_machine->set_target_view(state_machine->get_current_view() + 1);
+                state_machine.set_current_view(current_view);
+                state_machine.set_target_view(state_machine.get_current_view() + 1);
                 ilog("current view: ${cv}", ("cv", current_view));
             }
 
@@ -36,53 +35,53 @@ namespace eosio {
             std::ofstream out(pbft_db_dat.generic_string().c_str(),
                               std::ios::out | std::ios::binary | std::ofstream::trunc);
 
-            uint32_t current_view = state_machine->get_current_view();
+            uint32_t current_view = state_machine.get_current_view();
             fc::raw::pack(out, current_view);
         }
 
         void pbft_controller::maybe_pbft_prepare() {
             if (!pbft_db.should_send_pbft_msg()) return;
-            state_machine->send_prepare();
+            state_machine.send_prepare();
         }
 
         void pbft_controller::maybe_pbft_commit() {
             if (!pbft_db.should_send_pbft_msg()) return;
-            state_machine->send_commit();
+            state_machine.send_commit();
         }
 
         void pbft_controller::maybe_pbft_view_change() {
             if (!pbft_db.should_send_pbft_msg()) return;
-            if (state_machine->get_view_change_timer() <= view_change_timeout) {
-                if (!state_machine->get_view_changes_cache().empty()) {
-                    pbft_db.send_and_add_pbft_view_change(state_machine->get_view_changes_cache());
+            if (state_machine.get_view_change_timer() <= view_change_timeout) {
+                if (!state_machine.get_view_change_cache().empty()) {
+                    pbft_db.generate_and_add_pbft_view_change(state_machine.get_view_change_cache());
                 }
-                state_machine->set_view_change_timer(state_machine->get_view_change_timer() + 1);
+                state_machine.set_view_change_timer(state_machine.get_view_change_timer() + 1);
             } else {
-                state_machine->set_view_change_timer(0);
-                state_machine->send_view_change();
+                state_machine.set_view_change_timer(0);
+                state_machine.send_view_change();
             }
         }
 
         void pbft_controller::maybe_pbft_checkpoint() {
             if (!pbft_db.should_send_pbft_msg()) return;
-            pbft_db.send_pbft_checkpoint();
+            state_machine.send_checkpoint();
             pbft_db.checkpoint_local();
         }
 
         void pbft_controller::on_pbft_prepare(const pbft_metadata_ptr<pbft_prepare>& p) {
-            state_machine->on_prepare(p);
+            state_machine.on_prepare(p);
         }
 
         void pbft_controller::on_pbft_commit(const pbft_metadata_ptr<pbft_commit>& c) {
-            state_machine->on_commit(c);
+            state_machine.on_commit(c);
         }
 
         void pbft_controller::on_pbft_view_change(const pbft_metadata_ptr<pbft_view_change>& vc) {
-            state_machine->on_view_change(vc);
+            state_machine.on_view_change(vc);
         }
 
         void pbft_controller::on_pbft_new_view(const pbft_metadata_ptr<pbft_new_view>& nv) {
-            state_machine->on_new_view(nv);
+            state_machine.on_new_view(nv);
         }
 
         void pbft_controller::on_pbft_checkpoint(const pbft_metadata_ptr<pbft_checkpoint> &cp) {
@@ -91,15 +90,13 @@ namespace eosio {
             pbft_db.checkpoint_local();
         }
 
-        psm_state::psm_state() = default;
+        psm_state::psm_state(psm_machine& m, pbft_database& pbft_db) : m(m), pbft_db(pbft_db){}
         psm_state::~psm_state() = default;
 
-        psm_machine::psm_machine(pbft_database &pbft_db) : pbft_db(pbft_db) {
-            set_current(std::make_shared<psm_committed_state>());
-
-            set_prepares_cache(pbft_prepare());
-            set_commits_cache(pbft_commit());
-            set_view_changes_cache(pbft_view_change());
+        psm_machine::psm_machine(pbft_database& pbft_db) : pbft_db(pbft_db) {
+            set_prepare_cache(pbft_prepare());
+            set_commit_cache(pbft_commit());
+            set_view_change_cache(pbft_view_change());
 
             set_prepared_certificate(pbft_prepared_certificate{});
             set_committed_certificate(vector<pbft_committed_certificate>{});
@@ -114,27 +111,27 @@ namespace eosio {
         psm_machine::~psm_machine() = default;
 
         void psm_machine::on_prepare(const pbft_metadata_ptr<pbft_prepare>& e) {
-            current->on_prepare(shared_from_this(), e, pbft_db);
+            current->on_prepare(e);
         }
 
         void psm_machine::send_prepare() {
-            current->send_prepare(shared_from_this(), pbft_db);
+            current->send_prepare();
         }
 
         void psm_machine::on_commit(const pbft_metadata_ptr<pbft_commit>& e) {
-            current->on_commit(shared_from_this(), e, pbft_db);
+            current->on_commit(e);
         }
 
         void psm_machine::send_commit() {
-            current->send_commit(shared_from_this(), pbft_db);
+            current->send_commit();
         }
 
         void psm_machine::on_view_change(const pbft_metadata_ptr<pbft_view_change>& e) {
-            current->on_view_change(shared_from_this(), e, pbft_db);
+            current->on_view_change(e);
         }
 
         void psm_machine::send_view_change() {
-            current->send_view_change(shared_from_this(), pbft_db);
+            current->send_view_change();
         }
 
         void psm_machine::on_new_view(const pbft_metadata_ptr<pbft_new_view>& e) {
@@ -148,7 +145,7 @@ namespace eosio {
             }
 
             try {
-                transit_to_new_view(e, current);
+                transit_to_new_view(e);
             } catch(...) {
                 elog("apply new view failed, waiting for next round.. ${nv} ", ("nv", e->msg));
             }
@@ -157,33 +154,17 @@ namespace eosio {
         void psm_machine::manually_set_current_view(uint32_t cv) {
             set_current_view(cv);
             set_target_view(cv + 1);
-            transit_to_view_change_state(current);
+            transit_to_view_change_state();
         }
 
         /**
          * psm_prepared_state
          */
 
-        psm_prepared_state::psm_prepared_state() {pending_commit_local = false;}
+        psm_prepared_state::psm_prepared_state(psm_machine& m, pbft_database& pbft_db) : psm_state(m, pbft_db) {pending_commit_local = false;}
         psm_prepared_state::~psm_prepared_state() = default;
 
-        void psm_prepared_state::on_prepare(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_prepare>& e, pbft_database &pbft_db) {
-            //ignore
-        }
-
-        void psm_prepared_state::send_prepare(const psm_machine_ptr& m, pbft_database &pbft_db) {
-            //retry
-            if (m->get_prepares_cache().empty()) return;
-
-            pbft_db.send_and_add_pbft_prepare(m->get_prepares_cache(), m->get_current_view());
-        }
-
-        void psm_prepared_state::on_commit(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_commit>& e, pbft_database &pbft_db) {
-
-            if (e->msg.view < m->get_current_view()) return;
-            if (!pbft_db.is_valid_commit(e->msg, e->sender_key)) return;
-
-            pbft_db.add_pbft_commit(e->msg, e->sender_key);
+        void psm_prepared_state::maybe_transit_to_committed() {
 
             //`pending_commit_local` is used to mark committed local status in psm machine;
             //`pbft_db.pending_pbft_lib()` is used to mark commit local status in controller;
@@ -195,168 +176,174 @@ namespace eosio {
             }
 
             if (pending_commit_local && !pbft_db.pending_pbft_lib()) {
-                pbft_db.send_pbft_checkpoint();
+                m.send_checkpoint();
                 pbft_db.checkpoint_local();
-                m->transit_to_committed_state(shared_from_this(), false);
+                m.transit_to_committed_state(false);
             }
         }
 
-        void psm_prepared_state::send_commit(const psm_machine_ptr& m, pbft_database &pbft_db) {
-            auto commits = pbft_db.send_and_add_pbft_commit(m->get_commits_cache(), m->get_current_view());
-
-            if (!commits.empty()) {
-                m->set_commits_cache(commits);
-            }
-
-            if (pbft_db.should_committed() && !pending_commit_local) {
-                pbft_db.commit_local();
-                pending_commit_local = true;
-            }
-
-            if (pending_commit_local && !pbft_db.pending_pbft_lib()) {
-                pbft_db.send_pbft_checkpoint();
-                pbft_db.checkpoint_local();
-                m->transit_to_committed_state(shared_from_this(), false);
-            }
+        void psm_prepared_state::on_prepare(const pbft_metadata_ptr<pbft_prepare>& e) {
+            //ignore
         }
 
-        void psm_prepared_state::on_view_change(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_view_change>& e, pbft_database &pbft_db) {
+        void psm_prepared_state::send_prepare() {
+            //retry
+            if (m.get_prepare_cache().empty()) return;
 
-            if (e->msg.target_view <= m->get_current_view()) return;
+            m.do_send_prepare();
+        }
+
+        void psm_prepared_state::on_commit(const pbft_metadata_ptr<pbft_commit>& e) {
+
+            if (e->msg.view < m.get_current_view()) return;
+            if (!pbft_db.is_valid_commit(e->msg, e->sender_key)) return;
+
+            pbft_db.add_pbft_commit(e->msg, e->sender_key);
+
+            maybe_transit_to_committed();
+        }
+
+        void psm_prepared_state::send_commit() {
+
+            m.do_send_commit();
+
+            maybe_transit_to_committed();
+        }
+
+        void psm_prepared_state::on_view_change(const pbft_metadata_ptr<pbft_view_change>& e) {
+
+            if (e->msg.target_view <= m.get_current_view()) return;
             if (!pbft_db.is_valid_view_change(e->msg, e->sender_key)) return;
 
             pbft_db.add_pbft_view_change(e->msg, e->sender_key);
 
             //if received >= f+1 view_change on some view, transit to view_change and send view change
             auto target_view = pbft_db.should_view_change();
-            if (target_view > 0 && target_view > m->get_current_view()) {
-                m->set_target_view(target_view);
-                m->transit_to_view_change_state(shared_from_this());
+            if (target_view > 0 && target_view > m.get_current_view()) {
+                m.set_target_view(target_view);
+                m.transit_to_view_change_state();
             }
         }
 
-        void psm_prepared_state::send_view_change(const psm_machine_ptr& m, pbft_database &pbft_db) {
-            m->transit_to_view_change_state(shared_from_this());
+        void psm_prepared_state::send_view_change() {
+            m.transit_to_view_change_state();
         }
 
 
-        psm_committed_state::psm_committed_state() = default;
+        psm_committed_state::psm_committed_state(psm_machine& m, pbft_database& pbft_db) : psm_state(m, pbft_db) {}
         psm_committed_state::~psm_committed_state() = default;
 
         /**
          * psm_committed_state
          */
-        void psm_committed_state::on_prepare(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_prepare>& e, pbft_database &pbft_db) {
+        void psm_committed_state::on_prepare(const pbft_metadata_ptr<pbft_prepare>& e) {
             //validate
-            if (e->msg.view < m->get_current_view()) return;
+            if (e->msg.view < m.get_current_view()) return;
             if (!pbft_db.is_valid_prepare(e->msg, e->sender_key)) return;
 
             //do action add prepare
             pbft_db.add_pbft_prepare(e->msg, e->sender_key);
 
             //if prepare >= 2f+1, transit to prepared
-            if (pbft_db.should_prepared()) m->transit_to_prepared_state(shared_from_this());
+            if (pbft_db.should_prepared()) m.transit_to_prepared_state();
         }
 
-        void psm_committed_state::send_prepare(const psm_machine_ptr& m, pbft_database &pbft_db) {
+        void psm_committed_state::send_prepare() {
 
-            auto prepares = pbft_db.send_and_add_pbft_prepare(m->get_prepares_cache(), m->get_current_view());
-
-            if (!prepares.empty()) {
-                m->set_prepares_cache(prepares);
-            }
+            m.do_send_prepare();
 
             //if prepare >= 2f+1, transit to prepared
-            if (pbft_db.should_prepared()) m->transit_to_prepared_state(shared_from_this());
+            if (pbft_db.should_prepared()) m.transit_to_prepared_state();
         }
 
-        void psm_committed_state::on_commit(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_commit>& e, pbft_database &pbft_db) {
+        void psm_committed_state::on_commit(const pbft_metadata_ptr<pbft_commit>& e) {
 
-            if (e->msg.view < m->get_current_view()) return;
+            if (e->msg.view < m.get_current_view()) return;
             if (!pbft_db.is_valid_commit(e->msg, e->sender_key)) return;
 
             pbft_db.add_pbft_commit(e->msg, e->sender_key);
         }
 
-        void psm_committed_state::send_commit(const psm_machine_ptr& m, pbft_database &pbft_db) {
+        void psm_committed_state::send_commit() {
 
-            if (m->get_commits_cache().empty()) return;
-            pbft_db.send_and_add_pbft_commit(m->get_commits_cache(), m->get_current_view());
+            if (m.get_commit_cache().empty()) return;
+
+            m.do_send_commit();
 
         }
 
-        void psm_committed_state::on_view_change(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_view_change>& e, pbft_database &pbft_db) {
+        void psm_committed_state::on_view_change(const pbft_metadata_ptr<pbft_view_change>& e) {
 
-            if (e->msg.target_view <= m->get_current_view()) return;
+            if (e->msg.target_view <= m.get_current_view()) return;
             if (!pbft_db.is_valid_view_change(e->msg, e->sender_key)) return;
 
             pbft_db.add_pbft_view_change(e->msg, e->sender_key);
 
             //if received >= f+1 view_change on some view, transit to view_change and send view change
             auto new_view = pbft_db.should_view_change();
-            if (new_view > 0 && new_view > m->get_current_view()) {
-                m->set_target_view(new_view);
-                m->transit_to_view_change_state(shared_from_this());
+            if (new_view > 0 && new_view > m.get_current_view()) {
+                m.set_target_view(new_view);
+                m.transit_to_view_change_state();
             }
         }
 
-        void psm_committed_state::send_view_change(const psm_machine_ptr& m, pbft_database &pbft_db) {
-            m->transit_to_view_change_state(shared_from_this());
+        void psm_committed_state::send_view_change() {
+            m.transit_to_view_change_state();
         }
 
-        psm_view_change_state::psm_view_change_state() = default;
+        psm_view_change_state::psm_view_change_state(psm_machine& m, pbft_database& pbft_db) : psm_state(m, pbft_db) {}
         psm_view_change_state::~psm_view_change_state() = default;
         /**
          * psm_view_change_state
          */
-        void psm_view_change_state::on_prepare(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_prepare>& e, pbft_database &pbft_db) {
+        void psm_view_change_state::on_prepare(const pbft_metadata_ptr<pbft_prepare>& e) {
             //ignore;
         }
 
-        void psm_view_change_state::send_prepare(const psm_machine_ptr& m, pbft_database &pbft_db) {
+        void psm_view_change_state::send_prepare() {
             //ignore;
         }
 
-        void psm_view_change_state::on_commit(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_commit>& e, pbft_database &pbft_db) {
+        void psm_view_change_state::on_commit(const pbft_metadata_ptr<pbft_commit>& e) {
             //ignore;
         }
 
-        void psm_view_change_state::send_commit(const psm_machine_ptr& m, pbft_database &pbft_db) {
+        void psm_view_change_state::send_commit() {
             //ignore;
         }
 
-        void psm_view_change_state::on_view_change(const psm_machine_ptr& m, const pbft_metadata_ptr<pbft_view_change>& e, pbft_database &pbft_db) {
+        void psm_view_change_state::on_view_change(const pbft_metadata_ptr<pbft_view_change>& e) {
 
             //skip from view change state if my lib is higher than my view change state height.
-            auto vc = m->get_view_changes_cache();
+            auto vc = m.get_view_change_cache();
             if (!vc.empty() && pbft_db.should_stop_view_change(vc)) {
-                m->transit_to_committed_state(shared_from_this(), false);
+                m.transit_to_committed_state(false);
                 return;
             }
 
-            if (e->msg.target_view <= m->get_current_view()) return;
+            if (e->msg.target_view <= m.get_current_view()) return;
             if (!pbft_db.is_valid_view_change(e->msg, e->sender_key)) return;
 
             pbft_db.add_pbft_view_change(e->msg, e->sender_key);
 
-            m->maybe_new_view(shared_from_this());
+            m.maybe_new_view();
         }
 
-        void psm_view_change_state::send_view_change(const psm_machine_ptr& m, pbft_database &pbft_db) {
+        void psm_view_change_state::send_view_change() {
 
             //skip from view change state if my lib is higher than my view change state height.
-            auto vc = m->get_view_changes_cache();
+            auto vc = m.get_view_change_cache();
             if (!vc.empty() && pbft_db.should_stop_view_change(vc)) {
-                m->transit_to_committed_state(shared_from_this(), false);
+                m.transit_to_committed_state(false);
                 return;
             }
 
-            m->do_send_view_change();
+            m.do_send_view_change();
 
-            m->maybe_new_view(shared_from_this());
+            m.maybe_new_view();
         }
 
-        void psm_machine::transit_to_committed_state(const psm_state_ptr& s, bool to_new_view) {
+        void psm_machine::transit_to_committed_state(bool to_new_view) {
 
             if (!to_new_view) {
                 auto nv = pbft_db.get_committed_view();
@@ -364,44 +351,44 @@ namespace eosio {
                 set_target_view(get_current_view() + 1);
             }
 
-            auto prepares = pbft_db.send_and_add_pbft_prepare(pbft_prepare(), get_current_view());
-            set_prepares_cache(prepares);
-            //TODO: reset prepare timer;
+            set_prepare_cache(pbft_prepare());
+            do_send_prepare();
 
-            set_view_changes_cache(pbft_view_change());
+            set_view_change_cache(pbft_view_change());
             set_view_change_timer(0);
 
-            set_current(std::make_shared<psm_committed_state>());
+            set_current(std::make_shared<psm_committed_state>(*this, pbft_db));
+            emit(pbft_transit_to_committed, true);
         }
 
-        void psm_machine::transit_to_prepared_state(const psm_state_ptr& s) {
+        void psm_machine::transit_to_prepared_state() {
 
-            auto commits = pbft_db.send_and_add_pbft_commit(pbft_commit(), get_current_view());
-            set_commits_cache(commits);
-            //TODO: reset commit timer;
+            set_commit_cache(pbft_commit());
+            do_send_commit();
 
-            set_view_changes_cache(pbft_view_change());
+            set_view_change_cache(pbft_view_change());
 
-            set_current(std::make_shared<psm_prepared_state>());
+            set_current(std::make_shared<psm_prepared_state>(*this, pbft_db));
+            emit(pbft_transit_to_prepared, true);
         }
 
-        void psm_machine::transit_to_view_change_state(const psm_state_ptr& s) {
+        void psm_machine::transit_to_view_change_state() {
 
-            set_commits_cache(pbft_commit());
-            set_prepares_cache(pbft_prepare());
+            set_commit_cache(pbft_commit());
+            set_prepare_cache(pbft_prepare());
 
             set_view_change_timer(0);
             set_target_view_retries(0);
 
-            set_current(std::make_shared<psm_view_change_state>());
+            set_current(std::make_shared<psm_view_change_state>(*this, pbft_db));
             if (pbft_db.should_send_pbft_msg()) {
                 do_send_view_change();
-                auto nv = maybe_new_view(s);
+                auto nv = maybe_new_view();
                 if (nv) return;
             }
         }
 
-        bool psm_machine::maybe_new_view(const psm_state_ptr &s) {
+        bool psm_machine::maybe_new_view() {
             //if view_change >= 2f+1, calculate next primary, send new view if is primary
             auto nv = get_target_view();
             auto pk = pbft_db.get_new_view_primary_key(nv);
@@ -412,14 +399,15 @@ namespace eosio {
                 auto new_view = pbft_db.get_proposed_new_view_num();
                 if (new_view != nv) return false;
 
-                auto nv_msg = pbft_db.send_pbft_new_view(
+                auto nv_msg = pbft_db.generate_pbft_new_view(
                         get_view_changed_certificate(),
                         new_view);
 
                 if (nv_msg.empty()) return false;
+                emit(pbft_outgoing_new_view, std::make_shared<pbft_new_view>(nv_msg));
 
                 try {
-                    transit_to_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(nv_msg, pbft_db.get_chain_id()), s);
+                    transit_to_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(nv_msg, pbft_db.get_chain_id()));
                     return true;
                 } catch(const fc::exception& ex) {
                     elog("apply new view failed, waiting for next round.. ${nv} ", ("nv", nv_msg));
@@ -428,12 +416,12 @@ namespace eosio {
             return false;
         }
 
-        void psm_machine::transit_to_new_view(const pbft_metadata_ptr<pbft_new_view>& e, const psm_state_ptr& s) {
+        void psm_machine::transit_to_new_view(const pbft_metadata_ptr<pbft_new_view>& e) {
 
             set_current_view(e->msg.new_view);
             set_target_view(e->msg.new_view + 1);
 
-            set_prepares_cache(pbft_prepare());
+            set_prepare_cache(pbft_prepare());
 
             set_view_change_timer(0);
             set_target_view_retries(0);
@@ -451,7 +439,7 @@ namespace eosio {
             if (!e->msg.prepared_cert.prepares.empty()) {
                 pbft_db.mark_as_prepared(e->msg.prepared_cert.block_info.block_id);
                 if (pbft_db.should_prepared()) {
-                    transit_to_prepared_state(s);
+                    transit_to_prepared_state();
                     return;
                 }
             }
@@ -459,13 +447,34 @@ namespace eosio {
             if (pbft_db.should_committed()) {
                 pbft_db.commit_local();
             }
-            transit_to_committed_state(s, true);
+            transit_to_committed_state(true);
+        }
+
+        void psm_machine::do_send_prepare() {
+            auto prepares = pbft_db.generate_and_add_pbft_prepare(get_prepare_cache(), get_current_view());
+            if (!prepares.empty()) {
+                for (const auto& p: prepares) {
+                    emit(pbft_outgoing_prepare, std::make_shared<pbft_prepare>(p));
+                }
+                set_prepare_cache(prepares.front());
+            }
+        }
+
+        void psm_machine::do_send_commit() {
+            auto commits = pbft_db.generate_and_add_pbft_commit(get_commit_cache(), get_current_view());
+
+            if (!commits.empty()) {
+                for (const auto& c: commits) {
+                    emit(pbft_outgoing_commit, std::make_shared<pbft_commit>(c));
+                }
+                set_commit_cache(commits.front());
+            }
         }
 
         void psm_machine::do_send_view_change() {
 
             auto reset_view_change_state = [&]() {
-                set_view_changes_cache(pbft_view_change());
+                set_view_change_cache(pbft_view_change());
                 set_prepared_certificate(pbft_db.generate_prepared_certificate());
                 set_committed_certificate(pbft_db.generate_committed_certificate());
             };
@@ -482,15 +491,42 @@ namespace eosio {
             EOS_ASSERT((get_target_view() > get_current_view()), pbft_exception,
                        "target view should be always greater than current view");
 
-            auto view_changes = pbft_db.send_and_add_pbft_view_change(
-                    get_view_changes_cache(),
+            auto view_changes = pbft_db.generate_and_add_pbft_view_change(
+                    get_view_change_cache(),
                     get_prepared_certificate(),
                     get_committed_certificate(),
                     get_current_view(),
                     get_target_view());
 
             if (!view_changes.empty()) {
-                set_view_changes_cache(view_changes);
+                for (const auto& vc : view_changes) {
+                    emit(pbft_outgoing_view_change, std::make_shared<pbft_view_change>(vc));
+                }
+                set_view_change_cache(view_changes.front());
+            }
+        }
+
+        void psm_machine::send_checkpoint() {
+            auto checkpoints = pbft_db.generate_and_add_pbft_checkpoint();
+            for (const auto& cp: checkpoints) {
+                emit(pbft_outgoing_checkpoint, std::make_shared<pbft_checkpoint>(cp));
+            }
+        }
+
+        template<typename Signal, typename Arg>
+        void psm_machine::emit(const Signal &s, Arg &&a) {
+            try {
+                s(std::forward<Arg>(a));
+            } catch (boost::interprocess::bad_alloc &e) {
+                wlog("bad alloc");
+                throw e;
+            } catch (controller_emit_signal_exception &e) {
+                wlog("${details}", ("details", e.to_detail_string()));
+                throw e;
+            } catch (fc::exception &e) {
+                wlog("${details}", ("details", e.to_detail_string()));
+            } catch (...) {
+                wlog("signal handler threw exception");
             }
         }
     }
