@@ -51,7 +51,7 @@ namespace eosio {
 
         void pbft_controller::maybe_pbft_view_change() {
             if (!pbft_db.should_send_pbft_msg()) return;
-            if (state_machine.get_view_change_timer() <= view_change_timeout) {
+            if (state_machine.get_view_change_timer() <= pbft_db.get_view_change_timeout()) {
                 if (!state_machine.get_view_change_cache().empty()) {
                     pbft_db.generate_and_add_pbft_view_change(state_machine.get_view_change_cache());
                 }
@@ -93,20 +93,7 @@ namespace eosio {
         psm_state::psm_state(psm_machine& m, pbft_database& pbft_db) : m(m), pbft_db(pbft_db){}
         psm_state::~psm_state() = default;
 
-        psm_machine::psm_machine(pbft_database& pbft_db) : pbft_db(pbft_db) {
-            set_prepare_cache(pbft_prepare());
-            set_commit_cache(pbft_commit());
-            set_view_change_cache(pbft_view_change());
-
-            set_prepared_certificate(pbft_prepared_certificate{});
-            set_committed_certificate(vector<pbft_committed_certificate>{});
-            set_view_changed_certificate(pbft_view_changed_certificate{});
-
-            view_change_timer = 0;
-            target_view_retries = 0;
-            current_view = 0;
-            target_view = current_view + 1;
-        }
+        psm_machine::psm_machine(pbft_database& pbft_db) : pbft_db(pbft_db) {}
 
         psm_machine::~psm_machine() = default;
 
@@ -157,7 +144,8 @@ namespace eosio {
             transit_to_view_change_state();
         }
 
-        /**
+        /**\
+         *
          * psm_prepared_state
          */
 
@@ -176,8 +164,6 @@ namespace eosio {
             }
 
             if (pending_commit_local && !pbft_db.pending_pbft_lib()) {
-                m.send_checkpoint();
-                pbft_db.checkpoint_local();
                 m.transit_to_committed_state(false);
             }
         }
@@ -189,7 +175,6 @@ namespace eosio {
         void psm_prepared_state::send_prepare() {
             //retry
             if (m.get_prepare_cache().empty()) return;
-
             m.do_send_prepare();
         }
 
@@ -199,14 +184,12 @@ namespace eosio {
             if (!pbft_db.is_valid_commit(e->msg, e->sender_key)) return;
 
             pbft_db.add_pbft_commit(e->msg, e->sender_key);
-
             maybe_transit_to_committed();
         }
 
         void psm_prepared_state::send_commit() {
 
             m.do_send_commit();
-
             maybe_transit_to_committed();
         }
 
@@ -216,13 +199,7 @@ namespace eosio {
             if (!pbft_db.is_valid_view_change(e->msg, e->sender_key)) return;
 
             pbft_db.add_pbft_view_change(e->msg, e->sender_key);
-
-            //if received >= f+1 view_change on some view, transit to view_change and send view change
-            auto target_view = pbft_db.should_view_change();
-            if (target_view > 0 && target_view > m.get_current_view()) {
-                m.set_target_view(target_view);
-                m.transit_to_view_change_state();
-            }
+            m.maybe_view_change();
         }
 
         void psm_prepared_state::send_view_change() {
@@ -243,7 +220,6 @@ namespace eosio {
 
             //do action add prepare
             pbft_db.add_pbft_prepare(e->msg, e->sender_key);
-
             //if prepare >= 2f+1, transit to prepared
             if (pbft_db.should_prepared()) m.transit_to_prepared_state();
         }
@@ -251,7 +227,6 @@ namespace eosio {
         void psm_committed_state::send_prepare() {
 
             m.do_send_prepare();
-
             //if prepare >= 2f+1, transit to prepared
             if (pbft_db.should_prepared()) m.transit_to_prepared_state();
         }
@@ -267,9 +242,7 @@ namespace eosio {
         void psm_committed_state::send_commit() {
 
             if (m.get_commit_cache().empty()) return;
-
             m.do_send_commit();
-
         }
 
         void psm_committed_state::on_view_change(const pbft_metadata_ptr<pbft_view_change>& e) {
@@ -278,13 +251,7 @@ namespace eosio {
             if (!pbft_db.is_valid_view_change(e->msg, e->sender_key)) return;
 
             pbft_db.add_pbft_view_change(e->msg, e->sender_key);
-
-            //if received >= f+1 view_change on some view, transit to view_change and send view change
-            auto new_view = pbft_db.should_view_change();
-            if (new_view > 0 && new_view > m.get_current_view()) {
-                m.set_target_view(new_view);
-                m.transit_to_view_change_state();
-            }
+            m.maybe_view_change();
         }
 
         void psm_committed_state::send_view_change() {
@@ -314,32 +281,20 @@ namespace eosio {
 
         void psm_view_change_state::on_view_change(const pbft_metadata_ptr<pbft_view_change>& e) {
 
-            //skip from view change state if my lib is higher than my view change state height.
-            auto vc = m.get_view_change_cache();
-            if (!vc.empty() && pbft_db.should_stop_view_change(vc)) {
-                m.transit_to_committed_state(false);
-                return;
-            }
+            if (m.maybe_stop_view_change()) return;
 
             if (e->msg.target_view <= m.get_current_view()) return;
             if (!pbft_db.is_valid_view_change(e->msg, e->sender_key)) return;
 
             pbft_db.add_pbft_view_change(e->msg, e->sender_key);
-
             m.maybe_new_view();
         }
 
         void psm_view_change_state::send_view_change() {
 
-            //skip from view change state if my lib is higher than my view change state height.
-            auto vc = m.get_view_change_cache();
-            if (!vc.empty() && pbft_db.should_stop_view_change(vc)) {
-                m.transit_to_committed_state(false);
-                return;
-            }
+            if (m.maybe_stop_view_change()) return;
 
             m.do_send_view_change();
-
             m.maybe_new_view();
         }
 
@@ -386,6 +341,25 @@ namespace eosio {
                 auto nv = maybe_new_view();
                 if (nv) return;
             }
+        }
+
+        void psm_machine::maybe_view_change() {
+            //if received >= f+1 view_change on some view, transit to view_change and send view change
+            auto new_view = pbft_db.should_view_change();
+            if (new_view > 0 && new_view > get_current_view()) {
+                set_target_view(new_view);
+                transit_to_view_change_state();
+            }
+        }
+
+        bool psm_machine::maybe_stop_view_change() {
+            //skip from view change state if my lib is higher than my view change state height.
+            auto vc = get_view_change_cache();
+            if (!vc.empty() && pbft_db.should_stop_view_change(vc)) {
+                transit_to_committed_state(false);
+                return true;
+            }
+            return false;
         }
 
         bool psm_machine::maybe_new_view() {
@@ -514,7 +488,7 @@ namespace eosio {
         }
 
         template<typename Signal, typename Arg>
-        void psm_machine::emit(const Signal &s, Arg &&a) {
+        void psm_machine::emit(const Signal& s, Arg&& a) {
             try {
                 s(std::forward<Arg>(a));
             } catch (boost::interprocess::bad_alloc &e) {

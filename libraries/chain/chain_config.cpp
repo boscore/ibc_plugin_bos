@@ -49,4 +49,8 @@ void chain_config2::validate() const{
    EOS_ASSERT(std::numeric_limits<decltype(resource_greylist.size())>::max() > resource_greylist.size(), action_validate_exception, "Overflow in greylistwhen adding resource greylist!");
 }
 
+void chain_config3::validate() const{
+   EOS_ASSERT( view_change_timeout >= 1, action_validate_exception, "view change timeout must be at least 1");
+}
+
 } } // namespace eosio::chain

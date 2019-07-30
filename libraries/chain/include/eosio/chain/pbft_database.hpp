@@ -429,19 +429,19 @@ namespace eosio {
             void add_pbft_checkpoint(const pbft_checkpoint& cp, const public_key_type& pk);
 
             vector<pbft_prepare> generate_and_add_pbft_prepare(
-                    const pbft_prepare &cached_prepare = pbft_prepare(),
+                    const pbft_prepare& cached_prepare = pbft_prepare(),
                     pbft_view_type current_view = 0);
             vector<pbft_commit> generate_and_add_pbft_commit(
-                    const pbft_commit &cached_commit = pbft_commit(),
+                    const pbft_commit& cached_commit = pbft_commit(),
                     pbft_view_type current_view = 0);
             vector<pbft_view_change> generate_and_add_pbft_view_change(
-                    const pbft_view_change &cached_view_change = pbft_view_change(),
-                    const pbft_prepared_certificate &ppc = pbft_prepared_certificate(),
-                    const vector<pbft_committed_certificate> &pcc = vector<pbft_committed_certificate>{},
+                    const pbft_view_change& cached_view_change = pbft_view_change(),
+                    const pbft_prepared_certificate& ppc = pbft_prepared_certificate(),
+                    const vector<pbft_committed_certificate>& pcc = vector<pbft_committed_certificate>{},
                     pbft_view_type current_view = 0,
                     pbft_view_type target_view = 1);
             pbft_new_view generate_pbft_new_view(
-                    const pbft_view_changed_certificate &vcc = pbft_view_changed_certificate(),
+                    const pbft_view_changed_certificate& vcc = pbft_view_changed_certificate(),
                     pbft_view_type current_view = 1);
             vector<pbft_checkpoint> generate_and_add_pbft_checkpoint();
 
@@ -484,6 +484,7 @@ namespace eosio {
 
             void cleanup_on_new_view();
             void update_fork_schedules();
+            uint16_t get_view_change_timeout() const;
 
             //api related
             pbft_state_ptr get_pbft_state_by_id(const block_id_type& id) const;
@@ -507,7 +508,7 @@ namespace eosio {
             bool is_less_than_high_watermark(block_num_type bnum);
             bool is_valid_prepared_certificate(const pbft_prepared_certificate& certificate, bool add_to_pbft_db = false);
             bool is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db = false);
-            bool is_valid_longest_fork(const block_info_type& bi, fork_info_type block_infos, unsigned long threshold, unsigned long non_fork_bp_count);
+            bool is_valid_longest_fork(const block_info_type& bi, fork_info_type& block_infos, unsigned long threshold, unsigned long non_fork_bp_count);
 
             producer_schedule_type lscb_active_producers() const;
             vector<block_num_type>& get_updated_watermarks();

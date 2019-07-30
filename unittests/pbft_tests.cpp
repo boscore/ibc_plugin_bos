@@ -209,7 +209,7 @@ BOOST_AUTO_TEST_CASE(view_change_validation) {
     BOOST_CHECK_EQUAL(ctrl.head_block_num(), 102);
 
 
-    for(int i = 0; i< pbft_ctrl.view_change_timeout; i++){
+    for(int i = 0; i< pbft_ctrl.pbft_db.get_view_change_timeout(); i++){
         pbft_ctrl.maybe_pbft_view_change();
     }
         pbft_ctrl.state_machine.do_send_view_change();
@@ -308,7 +308,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     pbft_new_view_generator.maybe_pbft_prepare();
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_prepared(), true);
     BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 136);
-    for(int i = 0; i<pbft_new_view_generator.view_change_timeout; i++){
+    for(int i = 0; i < pbft_new_view_generator.pbft_db.get_view_change_timeout(); i++){
         pbft_new_view_generator.maybe_pbft_view_change();
     }
     pbft_new_view_generator.state_machine.do_send_view_change();
@@ -424,7 +424,7 @@ BOOST_AUTO_TEST_CASE(new_view_with_committed_cert_call_two_times_maybe_switch_fo
 	new_view_generator.produce_block();
 	BOOST_CHECK_EQUAL(ctrl_new_view_generator.last_irreversible_block_num(), 137);
 
-	for(int i = 0; i<pbft_new_view_generator.view_change_timeout; i++){
+	for(int i = 0; i < pbft_new_view_generator.pbft_db.get_view_change_timeout(); i++){
 		pbft_new_view_generator.maybe_pbft_view_change();
 	}
 	pbft_new_view_generator.state_machine.do_send_view_change();
@@ -435,8 +435,6 @@ BOOST_AUTO_TEST_CASE(new_view_with_committed_cert_call_two_times_maybe_switch_fo
 	//can switch fork after apply prepare certificate in new view
 	auto pmm = pbft_message_metadata<pbft_new_view>(nv_msg, c1_pbft_controller.pbft_db.get_chain_id());
 
-	/// boscore issue https://github.com/boscore/bos/issues/114.
-	/// It will never throw exception block_validate_exception, "next block must be in the future" in the version 20e08dba
 	c1_pbft_controller.on_pbft_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(pmm));
 	c1_pbft_controller.maybe_pbft_commit();
 	c1.produce_blocks(2);

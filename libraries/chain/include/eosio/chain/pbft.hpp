@@ -12,12 +12,12 @@ namespace eosio {
         using namespace fc;
 
         struct psm_cache {
-            pbft_prepare                        prepare_cache;
-            pbft_commit                         commit_cache;
-            pbft_view_change                    view_change_cache;
-            pbft_prepared_certificate           prepared_certificate;
-            vector<pbft_committed_certificate>  committed_certificate;
-            pbft_view_changed_certificate       view_changed_certificate;
+            pbft_prepare                        prepare_cache = pbft_prepare();
+            pbft_commit                         commit_cache = pbft_commit();
+            pbft_view_change                    view_change_cache = pbft_view_change();
+            pbft_prepared_certificate           prepared_certificate = pbft_prepared_certificate();
+            vector<pbft_committed_certificate>  committed_certificate = vector<pbft_committed_certificate>{};
+            pbft_view_changed_certificate       view_changed_certificate = pbft_view_changed_certificate();
         };
 
         class psm_state;
@@ -43,6 +43,8 @@ namespace eosio {
             void send_view_change();
             void send_checkpoint();
             bool maybe_new_view();
+            void maybe_view_change();
+            bool maybe_stop_view_change();
 
             void transit_to_committed_state(bool to_new_view);
             void transit_to_prepared_state();
@@ -54,13 +56,13 @@ namespace eosio {
             void do_send_view_change();
 
             const pbft_prepare& get_prepare_cache() const { return cache.prepare_cache; }
-            void set_prepare_cache(const pbft_prepare &pcache) { cache.prepare_cache = pcache; }
+            void set_prepare_cache(const pbft_prepare& pcache) { cache.prepare_cache = pcache; }
 
             const pbft_commit& get_commit_cache() const { return cache.commit_cache; }
-            void set_commit_cache(const pbft_commit &ccache) { cache.commit_cache = ccache; }
+            void set_commit_cache(const pbft_commit& ccache) { cache.commit_cache = ccache; }
 
             const pbft_view_change& get_view_change_cache() const { return cache.view_change_cache; }
-            void set_view_change_cache(const pbft_view_change &vc_cache) { cache.view_change_cache = vc_cache; }
+            void set_view_change_cache(const pbft_view_change& vc_cache) { cache.view_change_cache = vc_cache; }
 
             uint32_t get_current_view() const { return current_view; }
             void set_current_view(uint32_t cv) { current_view = cv; }
@@ -94,14 +96,14 @@ namespace eosio {
             signal<void(const bool)> pbft_transit_to_prepared;
 
             template<typename Signal, typename Arg>
-            void emit(const Signal &s, Arg &&a);
+            void emit(const Signal& s, Arg&& a);
 
         protected:
             psm_cache   cache;
-            uint32_t    current_view;
-            uint32_t    target_view_retries;
-            uint32_t    target_view;
-            uint32_t    view_change_timer;
+            uint32_t    current_view = 0;
+            uint32_t    target_view_retries = 0;
+            uint32_t    target_view = current_view + 1;
+            uint32_t    view_change_timer = 0;
 
         private:
             psm_state_ptr   current = nullptr;
@@ -128,8 +130,8 @@ namespace eosio {
             std::shared_ptr<psm_state> get_self()  { return shared_from_this(); };
 
         protected:
-            psm_machine&  m;
-            pbft_database&          pbft_db;
+            psm_machine&    m;
+            pbft_database&  pbft_db;
         };
 
         class psm_prepared_state final: public psm_state {
@@ -190,10 +192,8 @@ namespace eosio {
             explicit pbft_controller(controller& ctrl);
             ~pbft_controller();
 
-            const uint16_t                  view_change_timeout = 6;
-
-            pbft_database                   pbft_db;
-            psm_machine                     state_machine;
+            pbft_database   pbft_db;
+            psm_machine     state_machine;
 
             void maybe_pbft_prepare();
             void maybe_pbft_commit();

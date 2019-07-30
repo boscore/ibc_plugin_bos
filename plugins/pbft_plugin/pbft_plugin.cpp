@@ -28,16 +28,18 @@ namespace eosio {
         boost::asio::steady_timer::duration prepare_timeout{std::chrono::milliseconds{1000}};
         boost::asio::steady_timer::duration commit_timeout{std::chrono::milliseconds{1000}};
         boost::asio::steady_timer::duration view_change_check_interval{std::chrono::seconds{5}};
-        boost::asio::steady_timer::duration checkpoint_timeout{std::chrono::seconds{50}};
+        boost::asio::steady_timer::duration checkpoint_timeout{std::chrono::seconds{25}};
 
         void prepare_timer_tick();
         void commit_timer_tick();
         void view_change_timer_tick();
         void checkpoint_timer_tick();
 
+        fc::optional<scoped_connection>                             pbft_transit_to_committed_connection;
         pbft::committed_transition_channel::channel_type::handle    transit_to_committed_subscription;
         pbft::committed_transition_channel::channel_type&           transit_to_committed_channel;
 
+        fc::optional<scoped_connection>                             pbft_transit_to_prepared_connection;
         pbft::prepared_transition_channel::channel_type::handle     transit_to_prepared_subscription;
         pbft::prepared_transition_channel::channel_type&            transit_to_prepared_channel;
 
@@ -52,24 +54,26 @@ namespace eosio {
     };
 
     void pbft_plugin_impl::on_committed_transition() {
-        prepare_timer->expires_from_now(prepare_timeout);
+        prepare_timer_tick();
     }
 
     void pbft_plugin_impl::on_prepared_transition() {
-        commit_timer->expires_from_now(commit_timeout);
+        commit_timer_tick();
     }
 
     void pbft_plugin_impl::prepare_timer_tick() {
 
         prepare_timer->expires_from_now(prepare_timeout);
         prepare_timer->async_wait([&](boost::system::error_code ec) {
-            prepare_timer_tick();
-            if (ec) {
+            if ( ec == boost::asio::error::operation_aborted ) {
+                return;
+            } else if (ec) {
                 wlog ("pbft plugin prepare timer tick error: ${m}", ("m", ec.message()));
             } else if (pbft_ready()) {
                 chain::pbft_controller &pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
                 pbft_ctrl.maybe_pbft_prepare();
             }
+            prepare_timer_tick();
         });
     }
 
@@ -77,13 +81,15 @@ namespace eosio {
 
         commit_timer->expires_from_now(commit_timeout);
         commit_timer->async_wait([&](boost::system::error_code ec) {
-            commit_timer_tick();
-            if (ec) {
+            if ( ec == boost::asio::error::operation_aborted ) {
+                return;
+            } else if (ec) {
                 wlog ("pbft plugin commit timer tick error: ${m}", ("m", ec.message()));
             } else if (pbft_ready()) {
                 chain::pbft_controller &pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
                 pbft_ctrl.maybe_pbft_commit();
             }
+            commit_timer_tick();
         });
     }
 
@@ -110,8 +116,9 @@ namespace eosio {
 
         checkpoint_timer->expires_from_now(checkpoint_timeout);
         checkpoint_timer->async_wait([&](boost::system::error_code ec) {
-            checkpoint_timer_tick();
-            if (ec) {
+            if ( ec == boost::asio::error::operation_aborted ) {
+                return;
+            } if (ec) {
                 wlog ("pbft plugin checkpoint timer tick error: ${m}", ("m", ec.message()));
             } else if (pbft_ready()) {
                 chain::pbft_controller &pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
@@ -123,6 +130,7 @@ namespace eosio {
                     app().get_plugin<net_plugin>().maybe_sync_stable_checkpoints();
                 }
             }
+            checkpoint_timer_tick();
         });
     }
 
@@ -178,11 +186,11 @@ namespace eosio {
         my->view_change_timer_tick();
         my->checkpoint_timer_tick();
 
-        my->transit_to_prepared_subscription = my->transit_to_prepared_channel.subscribe( [this]( bool prepared ) {
+        my->pbft_transit_to_prepared_connection = app().get_plugin<chain_plugin>().pbft_ctrl().state_machine.pbft_transit_to_prepared.connect( [this]( bool prepared ) {
             my->on_prepared_transition();
         });
 
-        my->transit_to_committed_subscription = my->transit_to_committed_channel.subscribe( [this]( bool committed ) {
+        my->pbft_transit_to_committed_connection =  app().get_plugin<chain_plugin>().pbft_ctrl().state_machine.pbft_transit_to_committed.connect( [this]( bool committed ) {
             my->on_committed_transition();
         });
     }

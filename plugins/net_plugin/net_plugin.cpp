@@ -3175,7 +3175,7 @@ namespace eosio {
 
     void net_plugin_impl::handle_message( const connection_ptr& c, const pbft_checkpoint &msg) {
        if (is_pbft_msg_valid(msg) && maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
-           auto pmm = pbft_message_metadata<pbft_checkpoint>(std::move(msg), chain_id);
+           auto pmm = pbft_message_metadata<pbft_checkpoint>(msg, chain_id);
 
            pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
            if (!pcc.pbft_db.is_valid_checkpoint(pmm.msg, pmm.sender_key)) return;
