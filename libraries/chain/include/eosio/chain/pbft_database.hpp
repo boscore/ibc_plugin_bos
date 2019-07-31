@@ -428,21 +428,16 @@ namespace eosio {
             void add_pbft_view_change(const pbft_view_change& vc, const public_key_type& pk);
             void add_pbft_checkpoint(const pbft_checkpoint& cp, const public_key_type& pk);
 
-            vector<pbft_prepare> generate_and_add_pbft_prepare(
-                    const pbft_prepare& cached_prepare = pbft_prepare(),
-                    pbft_view_type current_view = 0);
-            vector<pbft_commit> generate_and_add_pbft_commit(
-                    const pbft_commit& cached_commit = pbft_commit(),
-                    pbft_view_type current_view = 0);
+            vector<pbft_prepare> generate_and_add_pbft_prepare(const pbft_prepare& cached_prepare = pbft_prepare());
+            vector<pbft_commit> generate_and_add_pbft_commit(const pbft_commit& cached_commit = pbft_commit());
             vector<pbft_view_change> generate_and_add_pbft_view_change(
                     const pbft_view_change& cached_view_change = pbft_view_change(),
                     const pbft_prepared_certificate& ppc = pbft_prepared_certificate(),
                     const vector<pbft_committed_certificate>& pcc = vector<pbft_committed_certificate>{},
-                    pbft_view_type current_view = 0,
                     pbft_view_type target_view = 1);
             pbft_new_view generate_pbft_new_view(
                     const pbft_view_changed_certificate& vcc = pbft_view_changed_certificate(),
-                    pbft_view_type current_view = 1);
+                    pbft_view_type new_view = 1);
             vector<pbft_checkpoint> generate_and_add_pbft_checkpoint();
 
             bool should_prepared();
@@ -485,6 +480,8 @@ namespace eosio {
             void cleanup_on_new_view();
             void update_fork_schedules();
             uint16_t get_view_change_timeout() const;
+            const pbft_view_type get_current_view() { return _current_view; }
+            void set_current_view(pbft_view_type view) { _current_view = view; }
 
             //api related
             pbft_state_ptr get_pbft_state_by_id(const block_id_type& id) const;
@@ -503,6 +500,7 @@ namespace eosio {
             vector<block_num_type>                      prepare_watermarks;
             flat_map<public_key_type, block_num_type>   fork_schedules;
             chain_id_type                               chain_id = ctrl.get_chain_id();
+            pbft_view_type                              _current_view;
 
             block_info_type cal_pending_stable_checkpoint() const;
             bool is_less_than_high_watermark(block_num_type bnum);

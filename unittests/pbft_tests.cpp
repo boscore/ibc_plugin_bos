@@ -439,7 +439,7 @@ BOOST_AUTO_TEST_CASE(new_view_with_committed_cert_call_two_times_maybe_switch_fo
 	c1_pbft_controller.maybe_pbft_commit();
 	c1.produce_blocks(2);
 	BOOST_CHECK_EQUAL(c1_ctrl.last_irreversible_block_num(), 137);
-	// make sure commited block same with new view generator lib block
+	// make sure committed block same with new view generator lib block
 	BOOST_CHECK_EQUAL(c1_ctrl.fetch_block_by_number(137)->id(), ctrl_new_view_generator.fetch_block_by_number(137)->id());
 }
 

@@ -51,6 +51,7 @@ void chain_config2::validate() const{
 
 void chain_config3::validate() const{
    EOS_ASSERT( view_change_timeout >= 1, action_validate_exception, "view change timeout must be at least 1");
+   EOS_ASSERT( pbft_checkpoint_granularity >= 100 && pbft_checkpoint_granularity % 100 == 0, action_validate_exception, "pbft checkpoint granularity must be multiple of 100 blocks");
 }
 
 } } // namespace eosio::chain

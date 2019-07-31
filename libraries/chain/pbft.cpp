@@ -9,35 +9,12 @@ namespace eosio {
         pbft_db(ctrl),
         state_machine(pbft_db) {
             state_machine.set_current(std::make_shared<psm_committed_state>(state_machine, pbft_db));
-            datadir = ctrl.state_dir();
-
-            if (!fc::is_directory(datadir))
-                fc::create_directories(datadir);
-
-            auto pbft_db_dat = datadir / config::pbftdb_filename;
-            if (fc::exists(pbft_db_dat)) {
-                string content;
-                fc::read_file_contents(pbft_db_dat, content);
-
-                fc::datastream<const char *> ds(content.data(), content.size());
-                uint32_t current_view;
-                fc::raw::unpack(ds, current_view);
-                state_machine.set_current_view(current_view);
-                state_machine.set_target_view(state_machine.get_current_view() + 1);
-                ilog("current view: ${cv}", ("cv", current_view));
-            }
-
-            fc::remove(pbft_db_dat);
+            state_machine.set_current_view(pbft_db.get_current_view());
+            state_machine.set_target_view(state_machine.get_current_view() + 1);
+            ilog("current view: ${cv}", ("cv", pbft_db.get_current_view()));
         }
 
-        pbft_controller::~pbft_controller() {
-            fc::path pbft_db_dat = datadir / config::pbftdb_filename;
-            std::ofstream out(pbft_db_dat.generic_string().c_str(),
-                              std::ios::out | std::ios::binary | std::ofstream::trunc);
-
-            uint32_t current_view = state_machine.get_current_view();
-            fc::raw::pack(out, current_view);
-        }
+        pbft_controller::~pbft_controller() = default;
 
         void pbft_controller::maybe_pbft_prepare() {
             if (!pbft_db.should_send_pbft_msg()) return;
@@ -84,7 +61,7 @@ namespace eosio {
             state_machine.on_new_view(nv);
         }
 
-        void pbft_controller::on_pbft_checkpoint(const pbft_metadata_ptr<pbft_checkpoint> &cp) {
+        void pbft_controller::on_pbft_checkpoint(const pbft_metadata_ptr<pbft_checkpoint>& cp) {
             if (!pbft_db.is_valid_checkpoint(cp->msg, cp->sender_key)) return;
             pbft_db.add_pbft_checkpoint(cp->msg, cp->sender_key);
             pbft_db.checkpoint_local();
@@ -140,6 +117,7 @@ namespace eosio {
 
         void psm_machine::manually_set_current_view(uint32_t cv) {
             set_current_view(cv);
+            pbft_db.set_current_view(cv);
             set_target_view(cv + 1);
             transit_to_view_change_state();
         }
@@ -302,7 +280,10 @@ namespace eosio {
 
             if (!to_new_view) {
                 auto nv = pbft_db.get_committed_view();
-                if (nv > get_current_view()) set_current_view(nv);
+                if (nv > get_current_view()) {
+                    set_current_view(nv);
+                    pbft_db.set_current_view(nv);
+                }
                 set_target_view(get_current_view() + 1);
             }
 
@@ -393,6 +374,7 @@ namespace eosio {
         void psm_machine::transit_to_new_view(const pbft_metadata_ptr<pbft_new_view>& e) {
 
             set_current_view(e->msg.new_view);
+            pbft_db.set_current_view(e->msg.new_view);
             set_target_view(e->msg.new_view + 1);
 
             set_prepare_cache(pbft_prepare());
@@ -425,7 +407,7 @@ namespace eosio {
         }
 
         void psm_machine::do_send_prepare() {
-            auto prepares = pbft_db.generate_and_add_pbft_prepare(get_prepare_cache(), get_current_view());
+            auto prepares = pbft_db.generate_and_add_pbft_prepare(get_prepare_cache());
             if (!prepares.empty()) {
                 for (const auto& p: prepares) {
                     emit(pbft_outgoing_prepare, std::make_shared<pbft_prepare>(p));
@@ -435,7 +417,7 @@ namespace eosio {
         }
 
         void psm_machine::do_send_commit() {
-            auto commits = pbft_db.generate_and_add_pbft_commit(get_commit_cache(), get_current_view());
+            auto commits = pbft_db.generate_and_add_pbft_commit(get_commit_cache());
 
             if (!commits.empty()) {
                 for (const auto& c: commits) {
@@ -469,7 +451,6 @@ namespace eosio {
                     get_view_change_cache(),
                     get_prepared_certificate(),
                     get_committed_certificate(),
-                    get_current_view(),
                     get_target_view());
 
             if (!view_changes.empty()) {

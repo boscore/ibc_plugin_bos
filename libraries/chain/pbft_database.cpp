@@ -23,8 +23,8 @@ namespace eosio {
 
                 fc::datastream<const char *> ds(content.data(), content.size());
 
-                //skip current_view in pbftdb.dat.
-                ds.seekp(ds.tellp() + 4);
+                //set current_view in pbftdb.dat.
+                fc::raw::unpack(ds, _current_view);
 
                 unsigned_int size;
                 fc::raw::unpack(ds, size);
@@ -76,7 +76,9 @@ namespace eosio {
 
             fc::path pbft_db_dat = pbft_db_dir / config::pbftdb_filename;
             std::ofstream out(pbft_db_dat.generic_string().c_str(),
-                              std::ios::out | std::ios::binary | std::ofstream::app);
+                              std::ios::out | std::ios::binary | std::ofstream::trunc);
+            fc::raw::pack(out, _current_view);
+
             uint32_t num_records_in_db = pbft_state_index.size();
             fc::raw::pack(out, unsigned_int{num_records_in_db});
 
@@ -169,8 +171,7 @@ namespace eosio {
             by_block_id_index.modify(itr, [&](const pbft_state_ptr& p) { p->is_prepared = true; });
         }
 
-        vector<pbft_prepare> pbft_database::generate_and_add_pbft_prepare(const pbft_prepare& cached_prepare,
-                                                                  pbft_view_type current_view) {
+        vector<pbft_prepare> pbft_database::generate_and_add_pbft_prepare(const pbft_prepare& cached_prepare) {
             vector<pbft_prepare> prepares_to_be_cached;
             const auto& my_sps = ctrl.my_signature_providers();
             prepares_to_be_cached.reserve(my_sps.size());
@@ -196,15 +197,19 @@ namespace eosio {
                     auto retry_p = cached_prepare;
                     retry_p.common.timestamp = time_point::now();
                     retry_p.sender_signature = sp.second(retry_p.digest(chain_id));
-                    prepares_to_be_cached.emplace_back(retry_p);
+                    if (is_valid_prepare(retry_p, sp.first)) {
+                        prepares_to_be_cached.emplace_back(retry_p);
+                    }
                 }
             } else if (reserve_prepare(my_prepare)) {
                 for (const auto& sp : my_sps) {
                     pbft_prepare reserve_p;
-                    reserve_p.view = current_view;
+                    reserve_p.view = _current_view;
                     reserve_p.block_info = {my_prepare};
                     reserve_p.sender_signature = sp.second(reserve_p.digest(chain_id));
-                    prepares_to_be_cached.emplace_back(reserve_p);
+                    if (is_valid_prepare(reserve_p, sp.first)) {
+                        prepares_to_be_cached.emplace_back(reserve_p);
+                    }
                 }
             } else {
                 auto current_watermark = get_current_pbft_watermark();
@@ -222,7 +227,7 @@ namespace eosio {
                     auto sent = false;
                     for (const auto& sp : my_sps) {
                         pbft_prepare new_p;
-                        new_p.view = current_view;
+                        new_p.view = _current_view;
                         new_p.block_info = {hwbs->id};
                         new_p.sender_signature = sp.second(new_p.digest(chain_id));
                         if (is_valid_prepare(new_p, sp.first)) {
@@ -323,8 +328,7 @@ namespace eosio {
             }
         }
 
-        vector<pbft_commit> pbft_database::generate_and_add_pbft_commit(const pbft_commit& cached_commit,
-                                                                pbft_view_type current_view) {
+        vector<pbft_commit> pbft_database::generate_and_add_pbft_commit(const pbft_commit& cached_commit) {
             vector<pbft_commit> commits_to_be_cached;
             const auto& my_sps = ctrl.my_signature_providers();
             commits_to_be_cached.reserve(my_sps.size());
@@ -335,7 +339,9 @@ namespace eosio {
                     auto retry_c = cached_commit;
                     retry_c.common.timestamp = time_point::now();
                     retry_c.sender_signature = sp.second(retry_c.digest(chain_id));
-                    commits_to_be_cached.emplace_back(retry_c);
+                    if (is_valid_commit(retry_c, sp.first)) {
+                        commits_to_be_cached.emplace_back(retry_c);
+                    }
                 }
             } else {
                 const auto& by_prepare_and_num_index = pbft_state_index.get<by_prepare_and_num>();
@@ -350,7 +356,7 @@ namespace eosio {
 
                     for (const auto& sp : my_sps) {
                         pbft_commit new_c;
-                        new_c.view = current_view;
+                        new_c.view = _current_view;
                         new_c.block_info = {psp->block_id};
                         new_c.sender_signature = sp.second(new_c.digest(chain_id));
 
@@ -510,7 +516,6 @@ namespace eosio {
                 const pbft_view_change& cached_view_change,
                 const pbft_prepared_certificate& ppc,
                 const vector<pbft_committed_certificate>& pcc,
-                pbft_view_type current_view,
                 pbft_view_type target_view) {
 
             vector<pbft_view_change> view_changes_to_be_cached;
@@ -523,14 +528,16 @@ namespace eosio {
                     auto retry_vc = cached_view_change;
                     retry_vc.common.timestamp = time_point::now();
                     retry_vc.sender_signature = sp.second(retry_vc.digest(chain_id));
-                    view_changes_to_be_cached.emplace_back(retry_vc);
+                    if (is_valid_view_change(retry_vc, sp.first)) {
+                        view_changes_to_be_cached.emplace_back(retry_vc);
+                    }
                 }
             } else {
                 for (const auto& sp : my_sps) {
                     auto my_lsc = get_stable_checkpoint_by_id(ctrl.last_stable_checkpoint_block_id());
 
                     pbft_view_change new_vc;
-                    new_vc.current_view = current_view;
+                    new_vc.current_view = _current_view;
                     new_vc.target_view = target_view;
                     new_vc.prepared_cert = ppc;
                     new_vc.committed_certs = pcc;
@@ -574,11 +581,11 @@ namespace eosio {
 
         pbft_new_view pbft_database::generate_pbft_new_view(
                 const pbft_view_changed_certificate& vcc,
-                pbft_view_type current_view) {
+                pbft_view_type new_view) {
 
             pbft_new_view nv;
 
-            auto primary_key = get_new_view_primary_key(current_view);
+            auto primary_key = get_new_view_primary_key(new_view);
             if (!has_new_primary(primary_key) || vcc.empty()) return nv;
 
             //`sp_itr` is not possible to be the end iterator, since it's already been checked in `has_new_primary`.
@@ -605,7 +612,7 @@ namespace eosio {
                 }
             }
 
-            nv.new_view = current_view;
+            nv.new_view = new_view;
             nv.prepared_cert = highest_ppc;
             nv.committed_certs = highest_pcc;
             nv.stable_checkpoint = highest_sc;
@@ -1241,8 +1248,8 @@ namespace eosio {
                             cp.sender_signature = sp.second(cp.digest(chain_id));
                             if (is_valid_checkpoint(cp, sp.first)) {
                                 add_pbft_checkpoint(cp, sp.first);
+                                new_pc.emplace_back(cp);
                             }
-                            new_pc.emplace_back(cp);
                         }
                     }
                 }
@@ -1251,7 +1258,9 @@ namespace eosio {
                     pbft_checkpoint cp;
                     cp.block_info={ctrl.last_stable_checkpoint_block_id()};
                     cp.sender_signature = sp.second(cp.digest(chain_id));
-                    new_pc.emplace_back(cp);
+                    if (is_valid_checkpoint(cp, sp.first)) {
+                        new_pc.emplace_back(cp);
+                    }
                 }
             }
             return new_pc;

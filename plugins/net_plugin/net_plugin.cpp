@@ -1597,16 +1597,21 @@ namespace eosio {
    void sync_manager::sync_stable_checkpoints(const connection_ptr& c, uint32_t target) {
        controller& cc = chain_plug->chain();
        uint32_t lscb_num = cc.last_stable_checkpoint_block_num();
-       if (last_req_scp_num < lscb_num || last_req_scp_num == 0 || last_req_scp_num >= target) last_req_scp_num = lscb_num;
+       auto head_num = cc.head_block_num();
+       if (last_req_scp_num < lscb_num
+          || last_req_scp_num == 0
+          || last_req_scp_num > target) last_req_scp_num = lscb_num;
+
        auto end = target;
        auto max_target_scp_num = last_req_scp_num + pbft_checkpoint_granularity * 10;
-       if (target >  max_target_scp_num) end = max_target_scp_num;
+       if (target > max_target_scp_num) end = std::min(max_target_scp_num, head_num);
 
+       if (end - last_req_scp_num < pbft_checkpoint_granularity) return;
        checkpoint_request_message crm = {last_req_scp_num+1,end};
        c->enqueue( net_message(crm));
        fc_dlog(logger, "request sync stable checkpoints from ${s} to ${e}",
-               ("s", last_req_scp_num+1)("e", max_target_scp_num));
-       last_req_scp_num = max_target_scp_num;
+               ("s", last_req_scp_num+1)("e", end));
+       last_req_scp_num = end;
    }
 
    void sync_manager::reassign_fetch(const connection_ptr& c, go_away_reason reason) {

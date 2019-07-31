@@ -120,6 +120,7 @@ struct chain_config2 {
 struct chain_config3 {
 
     uint16_t             view_change_timeout = 6; /// the actual wait time will be `num * 5`
+    uint16_t             pbft_checkpoint_granularity = 100; /// the interval of normal checkpoints must be a multiple of 100 * n;
 
     void validate()const;
 };
