@@ -5,7 +5,7 @@
 namespace eosio {
     namespace chain {
 
-        pbft_controller::pbft_controller(controller &ctrl) : 
+        pbft_controller::pbft_controller(controller& ctrl) :
         pbft_db(ctrl),
         state_machine(pbft_db) {
             state_machine.set_current(std::make_shared<psm_committed_state>(state_machine, pbft_db));
@@ -387,7 +387,7 @@ namespace eosio {
             if (!e->msg.committed_certs.empty()) {
                 auto committed_certs = e->msg.committed_certs;
                 std::sort(committed_certs.begin(), committed_certs.end());
-                for (auto const &cc :committed_certs) {
+                for (const auto& cc :committed_certs) {
                     pbft_db.mark_as_committed(cc.block_info.block_id);
                 }
             }

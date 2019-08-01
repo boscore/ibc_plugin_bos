@@ -19,7 +19,6 @@ namespace eosio {
 
         using pbft_view_type = uint32_t;
 
-        constexpr uint16_t pbft_checkpoint_granularity = 100;
         constexpr uint16_t oldest_stable_checkpoint = 10000;
 
         enum class pbft_message_type : uint8_t {
@@ -268,7 +267,7 @@ namespace eosio {
 
             bool empty() const {
                 return !target_view
-                       && view_changes.empty();
+                && view_changes.empty();
             }
         };
 
@@ -300,7 +299,7 @@ namespace eosio {
             }
 
             bool empty() const {
-                return new_view == 0
+                return !new_view
                 && prepared_cert.empty()
                 && committed_certs.empty()
                 && stable_checkpoint.empty()
@@ -418,10 +417,7 @@ namespace eosio {
         class pbft_database {
         public:
             explicit pbft_database(controller& ctrl);
-
             ~pbft_database();
-
-            void close();
 
             void add_pbft_prepare(const pbft_prepare& p, const public_key_type& pk);
             void add_pbft_commit(const pbft_commit& c, const public_key_type& pk);
@@ -473,13 +469,14 @@ namespace eosio {
             bool should_recv_pbft_msg(const public_key_type& pub_key);
 
             bool pending_pbft_lib();
-            chain_id_type& get_chain_id() {return chain_id;}
+            chain_id_type& get_chain_id() { return chain_id; }
             pbft_stable_checkpoint get_stable_checkpoint_by_id(const block_id_type& block_id, bool incl_blk_extn = true);
             pbft_stable_checkpoint fetch_stable_checkpoint_from_blk_extn(const signed_block_ptr& b);
 
             void cleanup_on_new_view();
             void update_fork_schedules();
             uint16_t get_view_change_timeout() const;
+            uint16_t get_checkpoint_interval() const;
             const pbft_view_type get_current_view() { return _current_view; }
             void set_current_view(pbft_view_type view) { _current_view = view; }
 
@@ -500,7 +497,7 @@ namespace eosio {
             vector<block_num_type>                      prepare_watermarks;
             flat_map<public_key_type, block_num_type>   fork_schedules;
             chain_id_type                               chain_id = ctrl.get_chain_id();
-            pbft_view_type                              _current_view;
+            pbft_view_type                              _current_view = 0;
 
             block_info_type cal_pending_stable_checkpoint() const;
             bool is_less_than_high_watermark(block_num_type bnum);

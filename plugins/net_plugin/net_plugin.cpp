@@ -1602,6 +1602,7 @@ namespace eosio {
           || last_req_scp_num == 0
           || last_req_scp_num > target) last_req_scp_num = lscb_num;
 
+       auto pbft_checkpoint_granularity = chain_plug->pbft_ctrl().pbft_db.get_checkpoint_interval();
        auto end = target;
        auto max_target_scp_num = last_req_scp_num + pbft_checkpoint_granularity * 10;
        if (target > max_target_scp_num) end = std::min(max_target_scp_num, head_num);
@@ -2830,18 +2831,18 @@ namespace eosio {
 
        fc_dlog(logger, "received checkpoint request message ${m}, from ${p}", ("m", msg)("p", c->peer_name()));
 
-       if ( msg.end_block - msg.start_block > pbft_checkpoint_granularity * 100) {
+       if ( msg.end_block - msg.start_block > chain_plug->pbft_ctrl().pbft_db.get_checkpoint_interval() * 100) {
            fc_dlog(logger, "request range too large");
            return;
        }
 
        vector<pbft_stable_checkpoint> scp_stack;
-       controller &cc = my_impl->chain_plug->chain();
-       pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
+       controller& cc = my_impl->chain_plug->chain();
+       pbft_controller& pcc = my_impl->chain_plug->pbft_ctrl();
 
        auto end_block = std::min(msg.end_block, cc.last_stable_checkpoint_block_num());
 
-       for (auto i = end_block; i >= msg.start_block && i>0; --i) {
+       for (auto i = end_block; i >= msg.start_block && i > 0; --i) {
            try {
                auto bid = cc.get_block_id_for_num(i);
                auto scp = pcc.pbft_db.get_stable_checkpoint_by_id(bid);

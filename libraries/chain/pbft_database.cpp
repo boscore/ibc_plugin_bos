@@ -61,7 +61,7 @@ namespace eosio {
             fc::remove(checkpoints_db);
         }
 
-        void pbft_database::close() {
+        pbft_database::~pbft_database() {
 
             fc::path checkpoints_db = checkpoints_dir / config::checkpoints_filename;
             std::ofstream c_out(checkpoints_db.generic_string().c_str(),
@@ -88,10 +88,6 @@ namespace eosio {
 
             pbft_state_index.clear();
             checkpoint_index.clear();
-        }
-
-        pbft_database::~pbft_database() {
-            close();
         }
 
         void pbft_database::add_pbft_prepare(const pbft_prepare& p, const public_key_type& pk) {
@@ -1215,7 +1211,7 @@ namespace eosio {
                 if (in <= ucb) return false;
                 auto watermarks = get_updated_watermarks();
                 return in == ucb + 1 // checkpoint on first pbft block;
-                       || in % pbft_checkpoint_granularity == 1 // checkpoint on every 100 block;
+                       || in % get_checkpoint_interval() == 1 // checkpoint on every 100 block;
                        || std::find(watermarks.begin(), watermarks.end(), in) != watermarks.end(); // checkpoint on bp schedule change;
             };
 
@@ -1529,6 +1525,9 @@ namespace eosio {
             return ctrl.get_pbft_properties().configuration.view_change_timeout;
         }
 
+        uint16_t pbft_database::get_checkpoint_interval() const {
+            return ctrl.get_pbft_properties().configuration.pbft_checkpoint_granularity;
+        }
 
         bool pbft_database::is_less_than_high_watermark(block_num_type bnum) {
             auto current_watermark = get_current_pbft_watermark();
