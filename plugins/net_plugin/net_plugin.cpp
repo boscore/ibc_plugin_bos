@@ -173,8 +173,6 @@ namespace eosio {
 
       node_transaction_index        local_txns;
 
-      shared_ptr<tcp::resolver>     resolver;
-
       bool                          use_socket_read_watermark = false;
 
       std::unordered_map<string, time_point_sec> pbft_message_cache{};
@@ -194,8 +192,8 @@ namespace eosio {
       eosio::chain::plugin_interface::pbft::incoming::new_view_channel::channel_type& pbft_incoming_new_view_channel;
       eosio::chain::plugin_interface::pbft::incoming::checkpoint_channel::channel_type& pbft_incoming_checkpoint_channel;
 
-      void connect(const connection_ptr& c);
-      void connect(const connection_ptr& c, tcp::resolver::iterator endpoint_itr);
+      void connect( const connection_ptr& c );
+      void connect( const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints );
       bool start_session(const connection_ptr& c);
       void start_listen_loop();
       void start_read_message(const connection_ptr& c);
@@ -917,6 +915,7 @@ namespace eosio {
    void connection::close() {
       if(socket) {
          socket->close();
+         socket.reset( new tcp::socket( app().get_io_service()) );
       }
       else {
          wlog("no socket to close!");
@@ -1498,43 +1497,46 @@ namespace eosio {
          source = conn;
       }
       else {
-         if (my_impl->connections.size() == 1) {
+         if( my_impl->connections.size() == 0 ) {
+            source.reset();
+         } else if( my_impl->connections.size() == 1 ) {
             if (!source) {
                source = *my_impl->connections.begin();
             }
-         }
-         else {
+         } else {
             // init to a linear array search
             auto cptr = my_impl->connections.begin();
             auto cend = my_impl->connections.end();
             // do we remember the previous source?
-            if (source) {
+            if( source ) {
                //try to find it in the list
-               cptr = my_impl->connections.find(source);
+               cptr = my_impl->connections.find( source );
                cend = cptr;
-               if (cptr == my_impl->connections.end()) {
+               if( cptr == my_impl->connections.end() ) {
                   //not there - must have been closed! cend is now connections.end, so just flatten the ring.
                   source.reset();
                   cptr = my_impl->connections.begin();
                } else {
                   //was found - advance the start to the next. cend is the old source.
-                  if (++cptr == my_impl->connections.end() && cend != my_impl->connections.end() ) {
+                  if( ++cptr == my_impl->connections.end() && cend != my_impl->connections.end() ) {
                      cptr = my_impl->connections.begin();
                   }
                }
             }
 
             //scan the list of peers looking for another able to provide sync blocks.
-            auto cstart_it = cptr;
-            do {
-               //select the first one which is current and break out.
-               if((*cptr)->current()) {
-                  source = *cptr;
-                  break;
-               }
-               if(++cptr == my_impl->connections.end())
+            if( cptr != my_impl->connections.end() ) {
+               auto cstart_it = cptr;
+               do {
+                  //select the first one which is current and break out.
+                  if( (*cptr)->current() ) {
+                     source = *cptr;
+                     break;
+                  }
+                  if( ++cptr == my_impl->connections.end() )
                      cptr = my_impl->connections.begin();
-            } while(cptr != cstart_it);
+               } while( cptr != cstart_it );
+            }
             // no need to check the result, either source advanced or the whole list was checked and the old source is reused.
          }
       }
@@ -1641,8 +1643,8 @@ namespace eosio {
       // 1. my head block num < peer lib - start sync locally
       // 2. my lib > peer head num - send an last_irr_catch_up notice if not the first generation
       //
-      // 3  my head block num <= peer head block num - update sync state and send a catchup request
-      // 4  my head block num > peer block num send a notice catchup if this is not the first generation
+      // 3  my head block num < peer head block num - update sync state and send a catchup request
+      // 4  my head block num >= peer block num send a notice catchup if this is not the first generation
       //
       //-----------------------------
 
@@ -1761,7 +1763,7 @@ namespace eosio {
 
    void sync_manager::rejected_block(const connection_ptr& c, uint32_t blk_num) {
       if (state != in_sync ) {
-         fc_ilog(logger, "block ${bn} not accepted from ${p}",("bn",blk_num)("p",c->peer_name()));
+         fc_wlog( logger, "block ${bn} not accepted from ${p}, closing connection", ("bn",blk_num)("p",c->peer_name()) );
          sync_last_requested_num = 0;
          source.reset();
          my_impl->close(c);
@@ -1770,10 +1772,11 @@ namespace eosio {
       }
    }
    void sync_manager::recv_block(const connection_ptr& c, const block_id_type& blk_id, uint32_t blk_num) {
-      fc_dlog(logger," got block ${bn} from ${p}",("bn",blk_num)("p",c->peer_name()));
+      fc_dlog(logger, "got block ${bn} from ${p}",("bn",blk_num)("p",c->peer_name()));
       if (state == lib_catchup) {
          if (blk_num != sync_next_expected_num) {
-            fc_ilog(logger, "expected block ${ne} but got ${bn}",("ne",sync_next_expected_num)("bn",blk_num));
+            fc_wlog( logger, "expected block ${ne} but got ${bn}, closing connection: ${p}",
+                     ("ne",sync_next_expected_num)("bn",blk_num)("p",c->peer_name()) );
             my_impl->close(c);
             return;
          }
@@ -2158,20 +2161,19 @@ namespace eosio {
       // Note: need to add support for IPv6 too
 
       resolver->async_resolve( query,
-                               [weak_conn, this]( const boost::system::error_code& err,
-                                          tcp::resolver::iterator endpoint_itr ){
-                                  auto c = weak_conn.lock();
-                                  if (!c) return;
-                                  if( !err ) {
-                                     connect( c, endpoint_itr );
-                                  } else {
-                                     elog( "Unable to resolve ${peer_addr}: ${error}",
-                                           (  "peer_addr", c->peer_name() )("error", err.message() ) );
-                                  }
-                               });
+              [weak_conn, this]( const boost::system::error_code& err, tcp::resolver::iterator endpoint_itr ){
+                 auto c = weak_conn.lock();
+                 if (!c) return;
+                 if( !err ) {
+                    connect( c, endpoint_itr );
+                 } else {
+                    elog( "Unable to resolve ${peer_addr}: ${error}",
+                           (  "peer_addr", c->peer_name() )("error", err.message() ) );
+                 }
+      });
    }
 
-   void net_plugin_impl::connect(const connection_ptr& c, tcp::resolver::iterator endpoint_itr) {
+   void net_plugin_impl::connect( const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints ) {
       if( c->no_retry != go_away_reason::no_reason) {
          string rsn = reason_str(c->no_retry);
          return;
@@ -2238,7 +2240,6 @@ namespace eosio {
    }
 
    bool net_plugin_impl::start_session(const connection_ptr& con) {
-
       boost::asio::ip::tcp::no_delay nodelay( true );
       boost::system::error_code ec;
       con->socket->set_option( nodelay, ec );
@@ -2266,9 +2267,10 @@ namespace eosio {
             if( !ec ) {
                uint32_t visitors = 0;
                uint32_t from_addr = 0;
-               auto paddr = socket->remote_endpoint(ec).address();
-               if (ec) {
-                  fc_elog(logger,"Error getting remote endpoint: ${m}",("m", ec.message()));
+               boost::system::error_code rec;
+               auto paddr = socket->remote_endpoint(rec).address();
+               if (rec) {
+                  fc_elog(logger,"Error getting remote endpoint: ${m}",("m", rec.message()));
                }
                else {
                   for (auto &conn : connections) {
@@ -2283,7 +2285,7 @@ namespace eosio {
                      }
                   }
                   if (num_clients != visitors) {
-                     ilog("checking max client, visitors = ${v} num clients ${n}",("v",visitors)("n",num_clients));
+                     fc_ilog( logger,"checking max client, visitors = ${v} num clients ${n}",("v",visitors)("n",num_clients) );
                      num_clients = visitors;
                   }
                   if( from_addr < max_nodes_per_host && (max_client_count == 0 || num_clients < max_client_count )) {
@@ -2306,7 +2308,7 @@ namespace eosio {
                   }
                }
             } else {
-               elog( "Error accepting connection: ${m}",( "m", ec.message() ) );
+               fc_elog( logger, "Error accepting connection: ${m}",( "m", ec.message() ) );
                // For the listed error codes below, recall start_listen_loop()
                switch (ec.value()) {
                   case ECONNABORTED:
@@ -2395,8 +2397,8 @@ namespace eosio {
                try {
                   if( !ec ) {
                      if (bytes_transferred > conn->pending_message_buffer.bytes_to_write()) {
-                        elog("async_read_some callback: bytes_transfered = ${bt}, buffer.bytes_to_write = ${btw}",
-                             ("bt",bytes_transferred)("btw",conn->pending_message_buffer.bytes_to_write()));
+                        fc_elog( logger,"async_read_some callback: bytes_transfered = ${bt}, buffer.bytes_to_write = ${btw}",
+                                 ("bt",bytes_transferred)("btw",conn->pending_message_buffer.bytes_to_write()) );
                      }
                      EOS_ASSERT(bytes_transferred <= conn->pending_message_buffer.bytes_to_write(), plugin_exception, "");
                      conn->pending_message_buffer.advance_write_ptr(bytes_transferred);
@@ -2441,32 +2443,32 @@ namespace eosio {
                   } else {
                      auto pname = conn->peer_name();
                      if (ec.value() != boost::asio::error::eof) {
-                        elog( "Error reading message from ${p}: ${m}",("p",pname)( "m", ec.message() ) );
+                        fc_elog( logger, "Error reading message from ${p}: ${m}",("p",pname)( "m", ec.message() ) );
                      } else {
-                        ilog( "Peer ${p} closed connection",("p",pname) );
+                        fc_ilog( logger, "Peer ${p} closed connection",("p",pname) );
                      }
                      close( conn );
                   }
                }
                catch(const std::exception &ex) {
-                  string pname = conn ? conn->peer_name() : "no connection name";
-                  elog("Exception in handling read data from ${p} ${s}",("p",pname)("s",ex.what()));
+                  fc_elog( logger, "Exception in handling read data from ${p}: ${s}",
+                           ("p",conn->peer_name())("s",ex.what()) );
                   close( conn );
                }
                catch(const fc::exception &ex) {
-                  string pname = conn ? conn->peer_name() : "no connection name";
-                  elog("Exception in handling read data ${s}", ("p",pname)("s",ex.to_string()));
+                  fc_elog( logger, "Exception in handling read data from ${p}: ${s}",
+                           ("p",conn->peer_name())("s",ex.to_string()) );
                   close( conn );
                }
                catch (...) {
-                  string pname = conn ? conn->peer_name() : "no connection name";
-                  elog( "Undefined exception hanlding the read data from connection ${p}",( "p",pname));
+                  fc_elog( logger, "Undefined exception handling the read data from ${p}",( "p",conn->peer_name()) );
                   close( conn );
                }
-            } );
+            });
+         }));
       } catch (...) {
          string pname = conn ? conn->peer_name() : "no connection name";
-         elog( "Undefined exception handling reading ${p}",("p",pname) );
+         fc_elog( logger, "Undefined exception handling reading ${p}",("p",pname) );
          close( conn );
       }
    }
@@ -2497,20 +2499,20 @@ namespace eosio {
       // affecting state.
       bool valid = true;
       if (msg.last_irreversible_block_num > msg.head_num) {
-         wlog("Handshake message validation: last irreversible block (${i}) is greater than head block (${h})",
-              ("i", msg.last_irreversible_block_num)("h", msg.head_num));
+         fc_wlog( logger, "Handshake message validation: last irreversible block (${i}) is greater than head block (${h})",
+                  ("i", msg.last_irreversible_block_num)("h", msg.head_num) );
          valid = false;
       }
       if (msg.p2p_address.empty()) {
-         wlog("Handshake message validation: p2p_address is null string");
+         fc_wlog( logger, "Handshake message validation: p2p_address is null string" );
          valid = false;
       }
       if (msg.os.empty()) {
-         wlog("Handshake message validation: os field is null string");
+         fc_wlog( logger, "Handshake message validation: os field is null string" );
          valid = false;
       }
       if ((msg.sig != chain::signature_type() || msg.token != sha256()) && (msg.token != fc::sha256::hash(msg.time))) {
-         wlog("Handshake message validation: token field invalid");
+         fc_wlog( logger, "Handshake message validation: token field invalid" );
          valid = false;
       }
       return valid;
@@ -2573,7 +2575,6 @@ namespace eosio {
 
 
    void net_plugin_impl::handle_message(const connection_ptr& c, const handshake_message& msg) {
-
       peer_ilog(c, "received handshake_message");
       if (!is_valid(msg)) {
          peer_elog( c, "bad handshake message");
@@ -2588,7 +2589,7 @@ namespace eosio {
       }
       if (msg.generation == 1) {
          if( msg.node_id == node_id) {
-            elog( "Self connection detected. Closing connection");
+            fc_elog( logger, "Self connection detected. Closing connection" );
             c->enqueue( go_away_message( self ) );
             return;
          }
@@ -2681,10 +2682,7 @@ namespace eosio {
    }
 
    void net_plugin_impl::handle_message(const connection_ptr& c, const go_away_message& msg) {
-      string rsn = reason_str( msg.reason );
-      peer_ilog(c, "received go_away_message");
-      ilog( "received a go away message from ${p}, reason = ${r}",
-            ("p", c->peer_name())("r",rsn));
+      peer_wlog(c, "received go_away_message, reason = ${r}", ("r",reason_str( msg.reason )) );
       c->no_retry = msg.reason;
       if(msg.reason == duplicate ) {
          c->node_id = msg.node_id;
@@ -2746,6 +2744,17 @@ namespace eosio {
          break;
       }
       case catch_up : {
+         if( msg.known_trx.pending > 0) {
+            // plan to get all except what we already know about.
+            req.req_trx.mode = catch_up;
+            send_req = true;
+            size_t known_sum = local_txns.size();
+            if( known_sum ) {
+               for( const auto& t : local_txns.get<by_id>() ) {
+                  req.req_trx.ids.push_back( t.id );
+               }
+            }
+         }
          break;
       }
       case normal: {
@@ -2806,17 +2815,14 @@ namespace eosio {
 
       switch (msg.req_trx.mode) {
       case catch_up :
+         c->txn_send_pending(msg.req_trx.ids);
+         break;
+      case normal :
+         c->txn_send(msg.req_trx.ids);
          break;
       case none :
          if(msg.req_blocks.mode == none)
             c->stop_send();
-         // no break
-      case normal :
-         if( !msg.req_trx.ids.empty() ) {
-            elog( "Invalid request_message, req_trx.ids.size ${s}", ("s", msg.req_trx.ids.size()) );
-            close(c);
-            return;
-         }
          break;
       default:;
       }
@@ -2893,7 +2899,6 @@ namespace eosio {
       auto ptrx = std::make_shared<transaction_metadata>( trx );
       const auto& tid = ptrx->id;
 
-      c->cancel_wait();
       if(local_txns.get<by_id>().find(tid) != local_txns.end()) {
          fc_dlog(logger, "got a duplicate transaction - dropping");
          return;
@@ -2947,7 +2952,7 @@ namespace eosio {
          }
       } catch( ...) {
          // should this even be caught?
-         elog("Caught an unknown exception trying to recall blockID");
+         fc_elog( logger,"Caught an unknown exception trying to recall blockID" );
       }
 
       dispatcher->recv_block(c, blk_id, blk_num);
@@ -3454,11 +3459,12 @@ namespace eosio {
 
    void
    handshake_initializer::populate( handshake_message &hello) {
+      namespace sc = std::chrono;
       hello.network_version = net_version_base + net_version;
       hello.chain_id = my_impl->chain_id;
       hello.node_id = my_impl->node_id;
       hello.key = my_impl->get_authentication_key();
-      hello.time = std::chrono::system_clock::now().time_since_epoch().count();
+      hello.time = sc::duration_cast<sc::nanoseconds>(sc::system_clock::now().time_since_epoch()).count();
       hello.token = fc::sha256::hash(hello.time);
       hello.sig = my_impl->sign_compact(hello.key, hello.token);
       // If we couldn't sign, don't send a token.
@@ -3650,22 +3656,24 @@ namespace eosio {
          fc::rand_pseudo_bytes( my->node_id.data(), my->node_id.data_size());
          ilog( "my node_id is ${id}", ("id", my->node_id));
 
-         my->keepalive_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
-         my->ticker();
-         my->pbft_message_cache_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
-         my->pbft_message_cache_ticker();
       } FC_LOG_AND_RETHROW()
    }
 
    void net_plugin::plugin_startup() {
       my->producer_plug = app().find_plugin<producer_plugin>();
+
+      my->keepalive_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
+      my->ticker();
+      my->pbft_message_cache_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
+      my->pbft_message_cache_ticker();
+
       if( my->acceptor ) {
          my->acceptor->open(my->listen_endpoint.protocol());
          my->acceptor->set_option(tcp::acceptor::reuse_address(true));
          try {
            my->acceptor->bind(my->listen_endpoint);
          } catch (const std::exception& e) {
-           ilog("net_plugin::plugin_startup failed to bind to port ${port}",
+           elog("net_plugin::plugin_startup failed to bind to port ${port}",
              ("port", my->listen_endpoint.port()));
            throw e;
          }
@@ -3715,19 +3723,26 @@ namespace eosio {
 
    void net_plugin::plugin_shutdown() {
       try {
-         ilog( "shutdown.." );
+         fc_ilog( logger, "shutdown.." );
+         if( my->connector_check )
+            my->connector_check->cancel();
+         if( my->transaction_check )
+            my->transaction_check->cancel();
+         if( my->keepalive_timer )
+            my->keepalive_timer->cancel();
+
          my->done = true;
          if( my->acceptor ) {
-            ilog( "close acceptor" );
+            ilog( logger, "close acceptor" );
+            my->acceptor->cancel();
             my->acceptor->close();
 
-            ilog( "close ${s} connections",( "s",my->connections.size()) );
-            auto cons = my->connections;
-            for( auto con : cons ) {
-               my->close( con);
+            ilog( logger, "close ${s} connections",( "s",my->connections.size()) );
+            for( auto& con : my->connections ) {
+               fc_dlog( logger, "close: ${p}", ("p",con->peer_name()) );
+               my->close( con );
             }
-
-            my->acceptor.reset(nullptr);
+            my->connections.clear();
          }
          ilog( "exit shutdown" );
       }
@@ -3757,6 +3772,7 @@ namespace eosio {
       for( auto itr = my->connections.begin(); itr != my->connections.end(); ++itr ) {
          if( (*itr)->peer_addr == host ) {
             (*itr)->reset();
+            fc_ilog( logger, "disconnecting: ${p}", ("p", (*itr)->peer_name()) );
             my->close(*itr);
             my->connections.erase(itr);
             return "connection removed";
