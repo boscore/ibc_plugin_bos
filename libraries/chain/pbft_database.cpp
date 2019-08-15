@@ -499,7 +499,7 @@ namespace eosio {
                     }
                 }
                 //if contains self or view_change >= f+1, transit to view_change and send view change
-                if (vc_count >= active_bps.size() / 3 + 1) {
+                if (vc_count > (active_bps.size() - 1) / 3) {
                     nv = pvs->view;
                     break;
                 }

@@ -208,6 +208,7 @@ namespace eosio {
 
         private:
             fc::path    datadir;
+            uint16_t    view_change_timeout = 6;
         };
     }
 } /// namespace eosio::chain

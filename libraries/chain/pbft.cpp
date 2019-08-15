@@ -28,7 +28,14 @@ namespace eosio {
 
         void pbft_controller::maybe_pbft_view_change() {
             if (!pbft_db.should_send_pbft_msg()) return;
-            if (state_machine.get_view_change_timer() <= pbft_db.get_view_change_timeout()) {
+
+            if (view_change_timeout != pbft_db.get_view_change_timeout()) {
+                ///if there is a change in global states, update timeout and reset timer.
+                view_change_timeout = pbft_db.get_view_change_timeout();
+                state_machine.set_view_change_timer(0);
+            }
+
+            if (state_machine.get_view_change_timer() <= view_change_timeout) {
                 if (!state_machine.get_view_change_cache().empty()) {
                     pbft_db.generate_and_add_pbft_view_change(state_machine.get_view_change_cache());
                 }
@@ -198,14 +205,14 @@ namespace eosio {
 
             //do action add prepare
             pbft_db.add_pbft_prepare(e->msg, e->sender_key);
-            //if prepare >= 2f+1, transit to prepared
+            //if prepare >= n-f, transit to prepared
             if (pbft_db.should_prepared()) m.transit_to_prepared_state();
         }
 
         void psm_committed_state::send_prepare() {
 
             m.do_send_prepare();
-            //if prepare >= 2f+1, transit to prepared
+            //if prepare >= n-f, transit to prepared
             if (pbft_db.should_prepared()) m.transit_to_prepared_state();
         }
 
@@ -344,7 +351,7 @@ namespace eosio {
         }
 
         bool psm_machine::maybe_new_view() {
-            //if view_change >= 2f+1, calculate next primary, send new view if is primary
+            //if view_change >= n-f, calculate next primary, send new view if is primary
             auto nv = get_target_view();
             auto pk = pbft_db.get_new_view_primary_key(nv);
             if (pbft_db.should_new_view(nv) && pbft_db.has_new_primary(pk)) {
