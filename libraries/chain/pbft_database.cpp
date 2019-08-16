@@ -176,14 +176,18 @@ namespace eosio {
             auto my_prepare = ctrl.get_pbft_my_prepare();
 
             auto reserve_prepare = [&](const block_id_type& in) {
-                if (in == block_id_type() || !ctrl.fetch_block_state_by_id(in)) return false;
+                if (in == block_id_type()) return false;
+                auto bs = ctrl.fetch_block_state_by_id(in);
+                if (!bs) return false;
                 auto lib = ctrl.last_irreversible_block_id();
                 if (lib == block_id_type()) return true;
                 auto forks = ctrl.fork_db().fetch_branch_from(in, lib);
 
                 //`branch_type` will always contain at least themselves.
                 //`in` block num should be higher than lib, yet fall on the same branch with lib.
-                return forks.first.size() > 1 && forks.second.size() == 1;
+                return forks.first.size() > 1
+                && forks.second.size() == 1
+                && !bs->in_current_chain;
             };
 
 
@@ -197,7 +201,7 @@ namespace eosio {
                         prepares_to_be_cached.emplace_back(retry_p);
                     }
                 }
-            } else if (reserve_prepare(my_prepare)) {
+            } else if (reserve_prepare(my_prepare) ) {
                 for (const auto& sp : my_sps) {
                     pbft_prepare reserve_p;
                     reserve_p.view = _current_view;
