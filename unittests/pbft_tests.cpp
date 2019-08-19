@@ -551,6 +551,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 	c1.produce_block();
 	c1_pbft_controller.maybe_pbft_commit();
 	BOOST_CHECK_EQUAL(c1.control->last_irreversible_block_num(), 98);
+//		c1_ctrl.set_pbft_my_prepare(c1_ctrl.get_block_id_for_num(99));
 
 	c2_pbft_controller.maybe_pbft_commit();
 
@@ -612,12 +613,12 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 	c3_final.produce_block();
 
 	BOOST_CHECK_EQUAL(c1_prepare.block_info.block_num(), 100);
-	/// set c3 my prepare at 101
+	/// set c3 my preprare at 101
 	c3_final_ctrl.set_pbft_my_prepare(c3_final_ctrl.get_block_id_for_num(101));
 	c3_final_pbft_controller.state_machine.on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c1_prepare, c1_pbft_controller.pbft_db.get_chain_id()));
 
 	pbft_prepare c3_final_prepare = c3_final_pbft_controller.state_machine.get_prepare_cache();
-	// check c3 prepare at 100
+	// check c3 prepare at 101
 	BOOST_CHECK_EQUAL(c3_final_prepare.block_info.block_num(), 101);
 	curr_state = c3_final_pbft_controller.state_machine.get_current()->get_name();
 	BOOST_CHECK_EQUAL(curr_state, "{==== PREPARED ====}");
@@ -625,11 +626,12 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 
 	c3_final_pbft_controller.maybe_pbft_commit();
 
+	c2_prime.produce_block();
 	c2_prime.create_accounts({N(tester1)});
-	c2_prime.produce_blocks(5);
+	c2_prime.produce_blocks(6);
 
 	//push fork to c3_final
-	for(int i = 100; i <= 104; i++) {
+	for(int i = 101; i <= 106; i++) {
 		auto fb = c2_prime.control->fetch_block_by_number(i);
 		c3_final.push_block(fb);
 	}
@@ -642,7 +644,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 	BOOST_CHECK_EQUAL(tmp_c2_prime_prepared_fork->pbft_my_prepare, true);
 	BOOST_CHECK_EQUAL(c3_final.control->last_irreversible_block_num(), 98);
 
-	BOOST_CHECK_EQUAL(c3_final.control->head_block_num(), 104);
+	BOOST_CHECK_EQUAL(c3_final.control->head_block_num(), 106);
 
 	c3_final_pbft_controller.maybe_pbft_commit();
 	c3_final.produce_block();
@@ -658,7 +660,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 
 	c3_final_pbft_controller.maybe_pbft_prepare();
 	c3_final_prepare = c3_final_pbft_controller.state_machine.get_prepare_cache();
-	BOOST_CHECK_EQUAL(c3_final_prepare.block_info.block_num(), 103);
+	BOOST_CHECK_EQUAL(c3_final_prepare.block_info.block_num(), 101);
 
 }
 
