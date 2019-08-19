@@ -613,7 +613,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 	c3_final.produce_block();
 
 	BOOST_CHECK_EQUAL(c1_prepare.block_info.block_num(), 100);
-	/// set c3 my preprare at 101
+	/// set c3 my prepare at 101
 	c3_final_ctrl.set_pbft_my_prepare(c3_final_ctrl.get_block_id_for_num(101));
 	c3_final_pbft_controller.state_machine.on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c1_prepare, c1_pbft_controller.pbft_db.get_chain_id()));
 
