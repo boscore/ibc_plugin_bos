@@ -174,8 +174,6 @@ namespace eosio {
 
       node_transaction_index        local_txns;
 
-      shared_ptr<tcp::resolver>     resolver;
-
       bool                          use_socket_read_watermark = false;
 
       std::unordered_map<string, time_point_sec> pbft_message_cache{};
@@ -195,8 +193,8 @@ namespace eosio {
       eosio::chain::plugin_interface::pbft::incoming::new_view_channel::channel_type& pbft_incoming_new_view_channel;
       eosio::chain::plugin_interface::pbft::incoming::checkpoint_channel::channel_type& pbft_incoming_checkpoint_channel;
 
-      void connect(const connection_ptr& c);
-      void connect(const connection_ptr& c, tcp::resolver::iterator endpoint_itr);
+      void connect( const connection_ptr& c );
+      void connect( const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints );
       bool start_session(const connection_ptr& c);
       void start_listen_loop();
       void start_read_message(const connection_ptr& c);
@@ -358,7 +356,6 @@ namespace eosio {
    constexpr auto     def_send_buffer_size = 1024*1024*def_send_buffer_size_mb;
    constexpr auto     def_max_write_queue_size = def_send_buffer_size*10;
    constexpr boost::asio::chrono::milliseconds def_read_delay_for_full_write_queue{100};
-   constexpr auto     def_max_reads_in_flight = 1000;
    constexpr auto     def_max_trx_in_progress_size = 100*1024*1024; // 100 MB
    constexpr auto     def_max_clients = 25; // 0 for unlimited clients
    constexpr auto     def_max_nodes_per_host = 1;
@@ -592,7 +589,6 @@ namespace eosio {
 
       queued_buffer           buffer_queue;
 
-      uint32_t                reads_in_flight = 0;
       uint32_t                trx_in_progress_size = 0;
       fc::sha256              node_id;
       handshake_message       last_handshake_recv;
@@ -932,6 +928,7 @@ namespace eosio {
       }
       reset();
       sent_handshake_count = 0;
+      trx_in_progress_size = 0;
       node_id = fc::sha256();
       last_handshake_recv = handshake_message();
       last_handshake_sent = handshake_message();
@@ -2181,49 +2178,43 @@ namespace eosio {
       connection_wptr weak_conn = c;
       // Note: need to add support for IPv6 too
 
+      auto resolver = std::make_shared<tcp::resolver>( app().get_io_service() );
       resolver->async_resolve( query,
-              [weak_conn, this]( const boost::system::error_code& err, tcp::resolver::iterator endpoint_itr ){
-                 auto c = weak_conn.lock();
-                 if (!c) return;
-                 if( !err ) {
-                    connect( c, endpoint_itr );
-                 } else {
-                    elog( "Unable to resolve ${peer_addr}: ${error}",
-                           (  "peer_addr", c->peer_name() )("error", err.message() ) );
-                 }
-      });
+                [weak_conn, resolver, this]( const boost::system::error_code& err, tcp::resolver::results_type endpoints ) {
+                      auto c = weak_conn.lock();
+                      if( !c ) return;
+                      if( !err ) {
+                         connect( c, resolver, endpoints );
+                      } else {
+                         elog( "Unable to resolve ${peer_addr}: ${error}",
+                                  ("peer_addr", c->peer_name())( "error", err.message()) );
+                      }
+                   } );
    }
 
-   void net_plugin_impl::connect( const connection_ptr& c, tcp::resolver::iterator endpoint_itr ) {
+   void net_plugin_impl::connect( const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints ) {
       if( c->no_retry != go_away_reason::no_reason) {
          string rsn = reason_str(c->no_retry);
          return;
       }
-      auto current_endpoint = *endpoint_itr;
-      ++endpoint_itr;
       c->connecting = true;
       c->pending_message_buffer.reset();
       c->connecting_deadline = fc::time_point::now()+fc::seconds(c->connecting_timeout_in_seconds);
+      c->buffer_queue.clear_out_queue();
       connection_wptr weak_conn = c;
-      c->socket->async_connect( current_endpoint, [weak_conn, endpoint_itr, this] ( const boost::system::error_code& err ) {
+      boost::asio::async_connect( *c->socket, endpoints,
+              [weak_conn, resolver, socket=c->socket, this]( const boost::system::error_code& err, const tcp::endpoint& endpoint ) {
             auto c = weak_conn.lock();
-            if (!c) return;
-            if( !err && c->socket->is_open() ) {
-               if (start_session( c )) {
+            if( !c ) return;
+            if( !err && c->socket->is_open()) {
+               if( start_session( c )) {
                   c->send_handshake();
                   send_p2p_request(c);
-                  }
+               }
             } else {
-               if( endpoint_itr != tcp::resolver::iterator() ) {
-                  close(c);
-                  connect( c, endpoint_itr );
-               }
-               else {
-                  elog( "connection failed to ${peer}: ${error}",
-                        ( "peer", c->peer_name())("error",err.message()));
-                  c->connecting = false;
-                  my_impl->close(c);
-               }
+               elog( "connection failed to ${peer}: ${error}", ("peer", c->peer_name())( "error", err.message()) );
+               c->connecting = false;
+               my_impl->close( c );
             }
          } );
    }
@@ -2373,37 +2364,39 @@ namespace eosio {
          };
 
          if( conn->buffer_queue.write_queue_size() > def_max_write_queue_size ||
-             conn->reads_in_flight > def_max_reads_in_flight   ||
              conn->trx_in_progress_size > def_max_trx_in_progress_size )
          {
             // too much queued up, reschedule
             if( conn->buffer_queue.write_queue_size() > def_max_write_queue_size ) {
                peer_wlog( conn, "write_queue full ${s} bytes", ("s", conn->buffer_queue.write_queue_size()) );
-            } else if( conn->reads_in_flight > def_max_reads_in_flight ) {
-               peer_wlog( conn, "max reads in flight ${s}", ("s", conn->reads_in_flight) );
             } else {
                peer_wlog( conn, "max trx in progress ${s} bytes", ("s", conn->trx_in_progress_size) );
             }
             if( conn->buffer_queue.write_queue_size() > 2*def_max_write_queue_size ||
-                conn->reads_in_flight > 2*def_max_reads_in_flight   ||
                 conn->trx_in_progress_size > 2*def_max_trx_in_progress_size )
             {
-               fc_wlog( logger, "queues over full, giving up on connection ${p}", ("p", conn->peer_name()) );
+               fc_elog( logger, "queues over full, giving up on connection ${p}", ("p", conn->peer_name()) );
+               fc_elog( logger, "  write_queue ${s} bytes", ("s", conn->buffer_queue.write_queue_size()) );
+               fc_elog( logger, "  max trx in progress ${s} bytes", ("s", conn->trx_in_progress_size) );
                my_impl->close( conn );
                return;
             }
             if( !conn->read_delay_timer ) return;
             conn->read_delay_timer->expires_from_now( def_read_delay_for_full_write_queue );
-            conn->read_delay_timer->async_wait([this, weak_conn]( boost::system::error_code ec ) {
-               if ( ec == boost::asio::error::operation_aborted ) return;
-               auto conn = weak_conn.lock();
-               if( !conn ) return;
-               start_read_message( conn );
+            conn->read_delay_timer->async_wait( [this, weak_conn]( boost::system::error_code ec ) {
+                  auto conn = weak_conn.lock();
+                  if( !conn ) return;
+                  if( !ec ) {
+                     start_read_message( conn );
+                  } else {
+                     fc_elog( logger, "Read delay timer error: ${e}, closing connection: ${p}",
+                              ("e", ec.message())("p",conn->peer_name()) );
+                     close( conn );
+                  }
             } );
             return;
          }
 
-         ++conn->reads_in_flight;
          boost::asio::async_read(*conn->socket,
             conn->pending_message_buffer.get_buffer_sequence_for_boost_async_read(), completion_handler,
             [this,weak_conn]( boost::system::error_code ec, std::size_t bytes_transferred ) {
@@ -2412,7 +2405,6 @@ namespace eosio {
                   return;
                }
 
-               --conn->reads_in_flight;
                conn->outstanding_read_bytes.reset();
 
                try {
@@ -3683,6 +3675,39 @@ namespace eosio {
       try {
           my->producer_plug = app().find_plugin<producer_plugin>();
 
+      auto resolver = std::make_shared<tcp::resolver>( app().get_io_service() );
+      if( my->p2p_address.size() > 0 ) {
+         auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
+         auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
+         tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
+         // Note: need to add support for IPv6 too?
+
+         my->listen_endpoint = *resolver->resolve( query );
+
+         my->acceptor.reset( new tcp::acceptor( app().get_io_service() ) );
+
+         if( !my->p2p_server_address.empty() ) {
+            my->p2p_address = my->p2p_server_address;
+         } else {
+            if( my->listen_endpoint.address().to_v4() == address_v4::any()) {
+               boost::system::error_code ec;
+               auto host = host_name( ec );
+               if( ec.value() != boost::system::errc::success ) {
+
+                  FC_THROW_EXCEPTION( fc::invalid_arg_exception,
+                                      "Unable to retrieve host_name. ${msg}", ("msg", ec.message()));
+
+               }
+               auto port = my->p2p_address.substr( my->p2p_address.find( ':' ), my->p2p_address.size());
+               my->p2p_address = host + port;
+            }
+         }
+      }
+
+          my->keepalive_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
+          my->ticker();
+          my->pbft_message_cache_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
+          my->pbft_message_cache_ticker();
 
           if (my->acceptor) {
               my->acceptor->open(my->listen_endpoint.protocol());
@@ -3716,11 +3741,6 @@ namespace eosio {
                   boost::bind(&net_plugin_impl::pbft_outgoing_new_view, my.get(), _1));
           my->pbft_outgoing_checkpoint_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::checkpoint_channel>().subscribe(
                   boost::bind(&net_plugin_impl::pbft_outgoing_checkpoint, my.get(), _1));
-
-          my->keepalive_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
-          my->ticker();
-          my->pbft_message_cache_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
-          my->pbft_message_cache_ticker();
 
           if (cc.get_read_mode() == chain::db_read_mode::READ_ONLY) {
               my->max_nodes_per_host = 0;
