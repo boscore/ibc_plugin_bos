@@ -117,6 +117,14 @@ struct chain_config2 {
    void validate()const;
 };
 
+struct chain_config3 {
+
+    uint16_t             view_change_timeout = 6; /// the actual wait time will be `num * 5`
+    uint16_t             pbft_checkpoint_granularity = 100; /// the interval of normal checkpoints must be a multiple of 100 * n;
+
+    void validate()const;
+};
+
 // *bos*
 struct guaranteed_minimum_resources {
    uint64_t ram_byte;
@@ -140,3 +148,5 @@ FC_REFLECT(eosio::chain::chain_config,
 // *bos*
 FC_REFLECT( eosio::chain::chain_config2, (actor_blacklist)(contract_blacklist)(resource_greylist) )
 FC_REFLECT( eosio::chain::guaranteed_minimum_resources, (ram_byte)(cpu_us)(net_byte) )
+
+FC_REFLECT( eosio::chain::chain_config3, (view_change_timeout) )

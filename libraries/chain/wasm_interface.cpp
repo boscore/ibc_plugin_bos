@@ -210,6 +210,17 @@ class privileged_api : public context_aware_api {
          });
       }
 
+      void set_pbft_parameters_packed( array_ptr<char> packed_pbft_parameters, size_t datalen) {
+        datastream<const char*> ds( packed_pbft_parameters, datalen );
+        chain::chain_config3 cfg;
+        fc::raw::unpack(ds, cfg);
+        cfg.validate();
+        context.db.modify( context.control.get_pbft_properties(),
+                           [&]( auto& gpp ) {
+                               gpp.configuration = cfg;
+                           });
+      }
+
       // *bos  begin*
       void set_name_list_packed(int64_t list, int64_t action, array_ptr<char> packed_name_list, size_t datalen)
       {
