@@ -3,15 +3,16 @@ ARG branch=master
 ARG symbol=SYS
 
 ENV OPENSSL_ROOT_DIR /usr/include/openssl
+ENV INSTALL_PREFIX=/usr/local/eosio
 
+RUN mkdir -p "${INSTALL_PREFIX}"
 
 RUN git clone -b $branch https://github.com/boscore/bos.git --recursive \
     && cd bos && echo "$branch:$(git rev-parse HEAD)" > /etc/eosio-version \
-    && cmake -H. -B"/tmp/build" -GNinja -DCMAKE_BUILD_TYPE=Release -DWASM_ROOT=/opt/wasm -DCMAKE_CXX_COMPILER=clang++ \
-       -DCMAKE_C_COMPILER=clang -DCMAKE_INSTALL_PREFIX=/tmp/build -DBUILD_MONGO_DB_PLUGIN=true -DCORE_SYMBOL_NAME=$symbol \
-       -DOPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR}" \
-    && cmake --build /tmp/build --target install
-
+    && cmake -H. -B"${INSTALL_PREFIX}" -GNinja -DCMAKE_BUILD_TYPE=Release -DWASM_ROOT=/opt/wasm -DCMAKE_CXX_COMPILER=clang++ \
+       -DCMAKE_C_COMPILER=clang -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" -DBUILD_MONGO_DB_PLUGIN=true -DCORE_SYMBOL_NAME=$symbol \
+       -DOPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR}" -DCMAKE_CXX_STANDARD_LIBRARIES="-lpthread" \
+    && cmake --build "${INSTALL_PREFIX}" --target install
 
 
 FROM ubuntu:18.04
