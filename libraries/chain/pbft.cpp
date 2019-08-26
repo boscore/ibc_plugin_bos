@@ -301,7 +301,9 @@ namespace eosio {
             set_view_change_timer(0);
 
             set_current(std::make_shared<psm_committed_state>(*this, pbft_db));
-            emit(pbft_transit_to_committed, true);
+            if (!get_prepare_cache().empty()) {
+                emit(pbft_transit_to_committed, true);
+            }
         }
 
         void psm_machine::transit_to_prepared_state() {
