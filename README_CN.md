@@ -1,7 +1,7 @@
 # BOSCore - 更可用的链，为DApp而生。
 
-## BOSCore Version: v2.0.3
-### Basic EOSIO Version: v1.6.4 (support REX)
+## BOSCore Version: v3.0.2
+### Basic EOSIO Version: v1.6.6 (support REX)
 
 # 背景
 EOS的出现给区块链带来了新的想象力，主网启动短短几个月以来，版本经历了几十次升级，不仅稳定性得到了很大提高，并且新功能也逐步实现，各个节点团队也积极参与建设EOSIO生态。让人更加兴奋的是，EOS已经吸引了越来越多的开发团队，当前已经有数百个DApp在EOS主网上面运行，其交易量和流通市值远超以太坊，可发展的空间愈来愈广阔。
@@ -29,15 +29,11 @@ BOS链的代码完全由社区贡献并维护，每个生态参与者都可以�
 1. 源码直接编译: `bash ./eosio_build.sh -s BOS`
 2. Docker方式部署，参看 [Docker](./Docker/README.md)
 
-## BOSCore 开发流程 
-BOSCore 鼓励社区开发者参与代码贡献，社区成员应当遵循以下工作流：
-![BOSCore Workflow](./images/bos-workflow.png)
-
-注意:
-1. 只有待发布的 Feature Branch 或者Bug修复才应该向 Develop Branch 提交
-2. 向 Develop Branch 提交 PR 之前需要现在本地执行 rebase 操作
-3. EOSIO 主网版本作为一个 Feature Branch 来对待
-4. 紧急问题修复采用 hotfixes 模式 
+## Tips:
+- HTTP&P2P 列表可以从 EOS Nation 提供的[验证页面](https://validate.eosnation.io/bos/reports/endpoints.html)获取
+- BOS Mainnet [genesis.json](https://github.com/boscore/bosres/blob/master/genesis.json)
+- BOS Mainnet [创世纪](https://github.com/boscore/bosres/blob/master/BOS_Genesis.md)
+- EOS Mainnet [账户空投信息](https://github.com/boscore/bos-airdrop-snapshots/blob/master/README.md)
 
 ## BOSCore 开发流程 
 BOSCore 鼓励社区开发者参与代码贡献，社区成员应当遵循以下工作流：

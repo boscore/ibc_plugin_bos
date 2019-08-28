@@ -1,7 +1,7 @@
 # BOSCore - Born for DApps. Born for Usability.
 
-## BOSCore Version: v2.0.3
-### Basic EOSIO Version: v1.6.4 (support REX)
+## BOSCore Version: v3.0.2
+### Basic EOSIO Version: v1.6.6 (support REX)
 
 # Background
 The emergence of EOS has brought new imagination to the blockchain. In just a few months since the main network was launched, the version has undergone dozens of upgrades, not only the stability has been greatly improved, but also the new functions have been gradually realized. The node team is also actively involved in building the EOSIO ecosystem. What is even more exciting is that EOS has attracted more and more development teams. There are already hundreds of DApp running on the EOS main network. The transaction volume and circulation market value far exceed Ethereum, and the space for development is growing broader.
@@ -29,15 +29,11 @@ As BOS continues to develop, developer rewards will be appropriately adjusted to
 1. Build from code : `bash ./eosio_build.sh -s BOS`
 2. Docker Style，check [Docker](./Docker/README.md)
 
-## BOSCore Workflow
-BOSCore encourage community developer actively participate in contributing the code, members should follow the workflow below.
-![BOSCore Workflow](./images/bos-workflow.png)
-
-Attention: 
-1. Only allow Feature Branch or bug fix to submit PR to Develop Branch.
-2. Rebase is required before submitting PR to Develop Branch.
-3. Treat update of eosio/eos code as new feature.
-4. Emergent issues must repaired by adopting hotfixes mode.
+## Tips:
+- HTTP&P2P endpoints can be get from the [validator](https://validate.eosnation.io/bos/reports/endpoints.html) by EOS Nation
+- BOS Mainnet [genesis.json](https://github.com/boscore/bosres/blob/master/genesis.json)
+- BOS Mainnet [Genesis](https://github.com/boscore/bosres/blob/master/BOS_Genesis.md)
+- EOS Mainnet [snapshot](https://github.com/boscore/bos-airdrop-snapshots/blob/master/README.md)
 
 ## BOSCore Workflow
 BOSCore encourage community developer actively participate in contributing the code, members should follow the workflow below.
