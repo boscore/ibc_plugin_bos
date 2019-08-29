@@ -223,7 +223,8 @@ namespace eosio {
 
                 if (high_watermark_block_num <= lib) return prepares_to_be_cached;
 
-                if (auto hwbs = ctrl.fork_db().get_block_in_current_chain_by_num(high_watermark_block_num)) {
+                auto hwbs = ctrl.fork_db().get_block_in_current_chain_by_num(high_watermark_block_num);
+                if ( hwbs && hwbs->id != my_prepare) {
                     auto sent = false;
                     for (const auto& sp : my_sps) {
                         pbft_prepare new_p;
