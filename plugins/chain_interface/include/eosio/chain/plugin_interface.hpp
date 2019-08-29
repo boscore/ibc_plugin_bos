@@ -80,6 +80,9 @@ namespace eosio { namespace chain { namespace plugin_interface {
            using checkpoint_channel = channel_decl<struct pbft_checkpoint_tag, pbft_checkpoint_ptr>;
 
        }
+
+       using committed_transition_channel = channel_decl<struct pbft_comitted_tag, bool>;
+       using prepared_transition_channel = channel_decl<struct pbft_prepared_tag, bool>;
    }
 
 } } }

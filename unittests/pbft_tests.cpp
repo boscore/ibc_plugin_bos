@@ -209,13 +209,13 @@ BOOST_AUTO_TEST_CASE(view_change_validation) {
     BOOST_CHECK_EQUAL(ctrl.head_block_num(), 102);
 
 
-    for(int i = 0; i< pbft_ctrl.view_change_timeout; i++){
+    for(int i = 0; i< pbft_ctrl.pbft_db.get_view_change_timeout(); i++){
         pbft_ctrl.maybe_pbft_view_change();
     }
-        pbft_ctrl.state_machine->do_send_view_change();
+        pbft_ctrl.state_machine.do_send_view_change();
     auto new_view = pbft_ctrl.pbft_db.get_proposed_new_view_num();
     auto vcc = pbft_ctrl.pbft_db.generate_view_changed_certificate(new_view);
-    auto nv_msg = pbft_ctrl.pbft_db.send_pbft_new_view(vcc, new_view);
+    auto nv_msg = pbft_ctrl.pbft_db.generate_pbft_new_view(vcc, new_view);
 
     bool nv_flag;
     try {
@@ -302,19 +302,19 @@ BOOST_AUTO_TEST_CASE(switch_fork_when_accept_new_view_with_prepare_certificate_o
     BOOST_CHECK_EQUAL(ctrl_long_non_prepared_fork.last_irreversible_block_num(), 101);
 
     //generate new view with short fork prepare certificate
-    pbft_new_view_generator.state_machine->set_prepares_cache(pbft_prepare());
+        pbft_new_view_generator.state_machine.set_prepare_cache(pbft_prepare());
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_send_pbft_msg(), true);
     ctrl_new_view_generator.reset_pbft_my_prepare();
     pbft_new_view_generator.maybe_pbft_prepare();
     BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_prepared(), true);
     BOOST_CHECK_EQUAL(ctrl_new_view_generator.head_block_num(), 136);
-    for(int i = 0; i<pbft_new_view_generator.view_change_timeout; i++){
+    for(int i = 0; i < pbft_new_view_generator.pbft_db.get_view_change_timeout(); i++){
         pbft_new_view_generator.maybe_pbft_view_change();
     }
-    pbft_new_view_generator.state_machine->do_send_view_change();
+    pbft_new_view_generator.state_machine.do_send_view_change();
     auto new_view = pbft_new_view_generator.pbft_db.get_proposed_new_view_num();
     auto vcc = pbft_new_view_generator.pbft_db.generate_view_changed_certificate(new_view);
-    auto nv_msg = pbft_new_view_generator.pbft_db.send_pbft_new_view(
+    auto nv_msg = pbft_new_view_generator.pbft_db.generate_pbft_new_view(
             vcc,
             new_view);
 
@@ -393,7 +393,7 @@ BOOST_AUTO_TEST_CASE(new_view_with_committed_cert_call_two_times_maybe_switch_fo
 	c1.produce_blocks(6);
 	new_view_generator.produce_blocks(10);
 
-	c1_pbft_controller.state_machine->set_prepares_cache(pbft_prepare());
+        c1_pbft_controller.state_machine.set_prepare_cache(pbft_prepare());
 	c1_ctrl.reset_pbft_my_prepare();
 	c1_pbft_controller.maybe_pbft_prepare();
 	c1.produce_block();
@@ -410,7 +410,7 @@ BOOST_AUTO_TEST_CASE(new_view_with_committed_cert_call_two_times_maybe_switch_fo
 
 
 	//generate new view with long fork commit certificate
-	pbft_new_view_generator.state_machine->set_prepares_cache(pbft_prepare());
+        pbft_new_view_generator.state_machine.set_prepare_cache(pbft_prepare());
 	BOOST_CHECK_EQUAL(pbft_new_view_generator.pbft_db.should_send_pbft_msg(), true);
 	ctrl_new_view_generator.reset_pbft_my_prepare();
 	pbft_new_view_generator.maybe_pbft_prepare();
@@ -424,24 +424,22 @@ BOOST_AUTO_TEST_CASE(new_view_with_committed_cert_call_two_times_maybe_switch_fo
 	new_view_generator.produce_block();
 	BOOST_CHECK_EQUAL(ctrl_new_view_generator.last_irreversible_block_num(), 137);
 
-	for(int i = 0; i<pbft_new_view_generator.view_change_timeout; i++){
+	for(int i = 0; i < pbft_new_view_generator.pbft_db.get_view_change_timeout(); i++){
 		pbft_new_view_generator.maybe_pbft_view_change();
 	}
-	pbft_new_view_generator.state_machine->do_send_view_change();
+	pbft_new_view_generator.state_machine.do_send_view_change();
 	auto new_view = pbft_new_view_generator.pbft_db.get_proposed_new_view_num();
 	auto vcc = pbft_new_view_generator.pbft_db.generate_view_changed_certificate(new_view);
-	auto nv_msg = pbft_new_view_generator.pbft_db.send_pbft_new_view(vcc, new_view);
+	auto nv_msg = pbft_new_view_generator.pbft_db.generate_pbft_new_view(vcc, new_view);
 
 	//can switch fork after apply prepare certificate in new view
 	auto pmm = pbft_message_metadata<pbft_new_view>(nv_msg, c1_pbft_controller.pbft_db.get_chain_id());
 
-	/// boscore issue https://github.com/boscore/bos/issues/114.
-	/// It will never throw exception block_validate_exception, "next block must be in the future" in the version 20e08dba
 	c1_pbft_controller.on_pbft_new_view(std::make_shared<pbft_message_metadata<pbft_new_view>>(pmm));
 	c1_pbft_controller.maybe_pbft_commit();
 	c1.produce_blocks(2);
 	BOOST_CHECK_EQUAL(c1_ctrl.last_irreversible_block_num(), 137);
-	// make sure commited block same with new view generator lib block
+	// make sure committed block same with new view generator lib block
 	BOOST_CHECK_EQUAL(c1_ctrl.fetch_block_by_number(137)->id(), ctrl_new_view_generator.fetch_block_by_number(137)->id());
 }
 
@@ -542,28 +540,33 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 	push_blocks(c2, c1);
 	/// make c1 lib 98
 	c1_pbft_controller.maybe_pbft_prepare();
-	pbft_prepare c2_prepare_ = c2_pbft_controller.state_machine->get_prepares_cache();
+	pbft_prepare c2_prepare_ = c2_pbft_controller.state_machine.get_prepare_cache();
 	BOOST_CHECK_EQUAL(c2_prepare_.block_info.block_num(), 98);
-	c1_pbft_controller.state_machine->on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c2_prepare_, c2_pbft_controller.pbft_db.get_chain_id()));
+	c1_pbft_controller.state_machine.on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c2_prepare_, c2_pbft_controller.pbft_db.get_chain_id()));
 	c1_pbft_controller.maybe_pbft_commit();
 
-	pbft_commit c2_commit_ = c2_pbft_controller.state_machine->get_commits_cache();
-	c1_pbft_controller.state_machine->on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c2_commit_, c2_pbft_controller.pbft_db.get_chain_id()));
+	pbft_commit c2_commit_ = c2_pbft_controller.state_machine.get_commit_cache();
+	c1_pbft_controller.state_machine.on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c2_commit_, c2_pbft_controller.pbft_db.get_chain_id()));
+	auto c1_my_prepare_block = c1_ctrl.get_pbft_my_prepare();
 	c1.produce_block();
 	c1_pbft_controller.maybe_pbft_commit();
 	BOOST_CHECK_EQUAL(c1.control->last_irreversible_block_num(), 98);
+//		c1_ctrl.set_pbft_my_prepare(c1_ctrl.get_block_id_for_num(99));
 
 	c2_pbft_controller.maybe_pbft_commit();
 
 	/// make c3_final lib 98
 	c3_final_pbft_controller.maybe_pbft_prepare();
-	pbft_prepare c1_prepare_ = c1_pbft_controller.state_machine->get_prepares_cache();
-	BOOST_CHECK_EQUAL(c1_prepare_.block_info.block_num(), 99);
-	c3_final_pbft_controller.state_machine->on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c1_prepare_, c1_pbft_controller.pbft_db.get_chain_id()));
+	pbft_prepare c1_prepare_ = c1_pbft_controller.state_machine.get_prepare_cache();
+
+	auto forks = c1_ctrl.fork_db().fetch_branch_from(c1_prepare_.block_info.block_id, c1_my_prepare_block);
+	BOOST_CHECK_EQUAL(forks.first.size() >= 1 && forks.second.size() == 1, true);
+	c3_final.produce_block();
+	c3_final_pbft_controller.state_machine.on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c1_prepare_, c1_pbft_controller.pbft_db.get_chain_id()));
 	c3_final_pbft_controller.maybe_pbft_commit();
 
-	pbft_commit c1_commit_ = c1_pbft_controller.state_machine->get_commits_cache();
-	c3_final_pbft_controller.state_machine->on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c1_commit_, c1_pbft_controller.pbft_db.get_chain_id()));
+	pbft_commit c1_commit_ = c1_pbft_controller.state_machine.get_commit_cache();
+	c3_final_pbft_controller.state_machine.on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c1_commit_, c1_pbft_controller.pbft_db.get_chain_id()));
 	c3_final.produce_block();
 	c3_final_pbft_controller.maybe_pbft_commit();
 	BOOST_CHECK_EQUAL(c3_final.control->last_irreversible_block_num(), 98);
@@ -572,36 +575,36 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 	push_blocks(c2, c2_prime);
 
 	pbft_prepare c1_prepare;
-	c1_prepare_ = c1_pbft_controller.state_machine->get_prepares_cache();
+	c1_prepare_ = c1_pbft_controller.state_machine.get_prepare_cache();
 	c1_prepare = c1_prepare_;
 
 	/// for set pbft commit cache to 99
 	c2.produce_block();
 
 	c2_pbft_controller.maybe_pbft_prepare();
-	c2_prepare_ = c2_pbft_controller.state_machine->get_prepares_cache();
+	c2_prepare_ = c2_pbft_controller.state_machine.get_prepare_cache();
 	BOOST_CHECK_EQUAL(c2_prepare_.block_info.block_num(), 99);
 	c2_pbft_controller.maybe_pbft_commit();
 	c2.produce_block();
 	c2_pbft_controller.maybe_pbft_commit();
 
-	c2_commit_ = c2_pbft_controller.state_machine->get_commits_cache();
+	c2_commit_ = c2_pbft_controller.state_machine.get_commit_cache();
 	BOOST_CHECK_EQUAL(c2_commit_.block_info.block_num(), 99);
 	BOOST_CHECK_EQUAL(c2.control->last_irreversible_block_num(), 99);
 
 	push_blocks(c2, c1);
 	c1_pbft_controller.maybe_pbft_prepare();
-	c2_prepare_ = c2_pbft_controller.state_machine->get_prepares_cache();
-	c1_pbft_controller.state_machine->on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c2_prepare_, c2_pbft_controller.pbft_db.get_chain_id()));
+	c2_prepare_ = c2_pbft_controller.state_machine.get_prepare_cache();
+	c1_pbft_controller.state_machine.on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c2_prepare_, c2_pbft_controller.pbft_db.get_chain_id()));
 	c1_pbft_controller.maybe_pbft_commit();
-	c2_commit_ = c2_pbft_controller.state_machine->get_commits_cache();
-	c1_pbft_controller.state_machine->on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c2_commit_, c2_pbft_controller.pbft_db.get_chain_id()));
+	c2_commit_ = c2_pbft_controller.state_machine.get_commit_cache();
+	c1_pbft_controller.state_machine.on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c2_commit_, c2_pbft_controller.pbft_db.get_chain_id()));
 	c1.produce_block();
 	c1_pbft_controller.maybe_pbft_commit();
 
-	c1_prepare_ = c1_pbft_controller.state_machine->get_prepares_cache();
-	c1_commit_ = c1_pbft_controller.state_machine->get_commits_cache();
-	BOOST_CHECK_EQUAL(c1_commit_.block_info.block_num(), 99);
+	c1_prepare_ = c1_pbft_controller.state_machine.get_prepare_cache();
+	c1_commit_ = c1_pbft_controller.state_machine.get_commit_cache();
+	BOOST_CHECK_EQUAL(c1_commit_.block_info.block_num(), 100);
 	BOOST_CHECK_EQUAL(c1.control->last_irreversible_block_num(), 99);
 
 	c3_final_pbft_controller.maybe_pbft_prepare();
@@ -609,25 +612,26 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 	c3_final.produce_block();
 	c3_final.produce_block();
 
-	BOOST_CHECK_EQUAL(c1_prepare.block_info.block_num(), 99);
-	/// set c3 my preprare at 100
-	c3_final_ctrl.set_pbft_my_prepare(c3_final_ctrl.get_block_id_for_num(100));
-	c3_final_pbft_controller.state_machine->on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c1_prepare, c1_pbft_controller.pbft_db.get_chain_id()));
+	BOOST_CHECK_EQUAL(c1_prepare.block_info.block_num(), 100);
+	/// set c3 my prepare at 101
+	c3_final_ctrl.set_pbft_my_prepare(c3_final_ctrl.get_block_id_for_num(101));
+	c3_final_pbft_controller.state_machine.on_prepare(std::make_shared<pbft_message_metadata<pbft_prepare>>(c1_prepare, c1_pbft_controller.pbft_db.get_chain_id()));
 
-	pbft_prepare c3_final_prepare = c3_final_pbft_controller.state_machine->get_prepares_cache();
-	// check c3 prepare at 99
-	BOOST_CHECK_EQUAL(c3_final_prepare.block_info.block_num(), 99);
-	curr_state = c3_final_pbft_controller.state_machine->get_current()->get_name();
+	pbft_prepare c3_final_prepare = c3_final_pbft_controller.state_machine.get_prepare_cache();
+	// check c3 prepare at 101
+	BOOST_CHECK_EQUAL(c3_final_prepare.block_info.block_num(), 101);
+	curr_state = c3_final_pbft_controller.state_machine.get_current()->get_name();
 	BOOST_CHECK_EQUAL(curr_state, "{==== PREPARED ====}");
 
 
 	c3_final_pbft_controller.maybe_pbft_commit();
 
+	c2_prime.produce_block();
 	c2_prime.create_accounts({N(tester1)});
-	c2_prime.produce_blocks(5);
+	c2_prime.produce_blocks(6);
 
 	//push fork to c3_final
-	for(int i = 100; i <= 104; i++) {
+	for(int i = 101; i <= 106; i++) {
 		auto fb = c2_prime.control->fetch_block_by_number(i);
 		c3_final.push_block(fb);
 	}
@@ -640,23 +644,23 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 	BOOST_CHECK_EQUAL(tmp_c2_prime_prepared_fork->pbft_my_prepare, true);
 	BOOST_CHECK_EQUAL(c3_final.control->last_irreversible_block_num(), 98);
 
-	BOOST_CHECK_EQUAL(c3_final.control->head_block_num(), 104);
+	BOOST_CHECK_EQUAL(c3_final.control->head_block_num(), 106);
 
 	c3_final_pbft_controller.maybe_pbft_commit();
 	c3_final.produce_block();
-	pbft_commit c3_final_commit = c3_final_pbft_controller.state_machine->get_commits_cache();
+	pbft_commit c3_final_commit = c3_final_pbft_controller.state_machine.get_commit_cache();
 	/// on commit will prepare next block immediately will trigger reserve prepare
-	c3_final_pbft_controller.state_machine->on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c1_commit_, c1_pbft_controller.pbft_db.get_chain_id()));
+	c3_final_pbft_controller.state_machine.on_commit(std::make_shared<pbft_message_metadata<pbft_commit>>(c1_commit_, c1_pbft_controller.pbft_db.get_chain_id()));
 	// for sync
 	c3_final.produce_block();
 	c3_final_pbft_controller.maybe_pbft_commit();
-	curr_state = c3_final_pbft_controller.state_machine->get_current()->get_name();
+	curr_state = c3_final_pbft_controller.state_machine.get_current()->get_name();
 	BOOST_CHECK_EQUAL(curr_state, "{==== COMMITTED ====}");
-	BOOST_CHECK_EQUAL(c3_final.control->last_irreversible_block_num(), 99);
+	BOOST_CHECK_EQUAL(c3_final.control->last_irreversible_block_num(), 100);
 
 	c3_final_pbft_controller.maybe_pbft_prepare();
-	c3_final_prepare = c3_final_pbft_controller.state_machine->get_prepares_cache();
-	BOOST_CHECK_EQUAL(c3_final_prepare.block_info.block_num(), 100);
+	c3_final_prepare = c3_final_pbft_controller.state_machine.get_prepare_cache();
+	BOOST_CHECK_EQUAL(c3_final_prepare.block_info.block_num(), 101);
 
 }
 

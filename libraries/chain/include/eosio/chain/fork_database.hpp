@@ -70,9 +70,9 @@ namespace eosio { namespace chain {
           */
          signal<void(block_state_ptr)> irreversible;
          
-         void set_bft_irreversible( block_id_type id );
+         void set_bft_irreversible( const block_id_type& id );
 
-         void set_latest_checkpoint( block_id_type id);
+         void set_latest_checkpoint( const block_id_type& id);
 
          void mark_pbft_prepared_fork(const block_state_ptr& h);
 
