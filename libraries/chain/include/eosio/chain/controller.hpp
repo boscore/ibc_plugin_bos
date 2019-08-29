@@ -31,6 +31,7 @@ namespace eosio { namespace chain {
    class global_property_object;
    class global_property2_object;     // *bos*
    class upgrade_property_object;
+   class global_property3_object;     // *bos*
    class permission_object;
    class account_object;
    using resource_limits::resource_limits_manager;
@@ -305,7 +306,8 @@ namespace eosio { namespace chain {
          signal<void(const header_confirmation&)>      accepted_confirmation;
          signal<void(const int&)>                      bad_alloc;
 
-         const upgrade_property_object&        get_upgrade_properties()const;
+         const upgrade_property_object& get_upgrade_properties()const;
+         const global_property3_object& get_pbft_properties()const;
          bool is_pbft_enabled()const;
          bool under_maintenance()const;
          void set_upo(uint32_t target_block_num);

@@ -26,15 +26,15 @@ public:
 
 
    pbft_state get_pbft_record( const block_id_type& bid )const;
-   vector<pbft_checkpoint_state> get_pbft_checkpoints_record(const block_num_type &bnum)const;
-   pbft_view_change_state get_view_change_record(const pbft_view_type& view)const;
+   vector<pbft_checkpoint_state> get_pbft_checkpoints_record(block_num_type bnum)const;
+   pbft_view_change_state get_view_change_record(pbft_view_type view)const;
    vector<block_num_type> get_watermarks()const;
    flat_map<public_key_type, uint32_t> get_fork_schedules()const;
    const char* get_pbft_status()const;
    block_id_type get_pbft_prepared_id()const;
    block_id_type get_pbft_my_prepare_id()const;
 
-   void set_pbft_current_view(const pbft_view_type &view);
+   void set_pbft_current_view(pbft_view_type view);
 
 
 private:

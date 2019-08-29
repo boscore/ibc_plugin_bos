@@ -54,6 +54,14 @@ namespace eosio { namespace chain {
       block_num_type                upgrade_complete_block_num = 0;
    };
 
+   class global_property3_object : public chainbase::object<global_property3_object_type, global_property3_object>
+   {
+      OBJECT_CTOR(global_property3_object)
+
+      id_type                       id;
+      chain_config3                 configuration;
+   };
+
 
    /**
     * @class dynamic_global_property_object
@@ -108,6 +116,15 @@ namespace eosio { namespace chain {
          >
       >
    >;
+
+   using global_property3_multi_index = chainbase::shared_multi_index_container<
+      global_property3_object,
+      indexed_by<
+         ordered_unique<tag<by_id>,
+            BOOST_MULTI_INDEX_MEMBER(global_property3_object, global_property3_object::id_type, id)
+         >
+      >
+   >;
 }}
 
 CHAINBASE_SET_INDEX_TYPE(eosio::chain::global_property_object, eosio::chain::global_property_multi_index)
@@ -116,6 +133,7 @@ CHAINBASE_SET_INDEX_TYPE(eosio::chain::dynamic_global_property_object,
 // *bos*
 CHAINBASE_SET_INDEX_TYPE(eosio::chain::global_property2_object, eosio::chain::global_property2_multi_index)
 CHAINBASE_SET_INDEX_TYPE(eosio::chain::upgrade_property_object, eosio::chain::upgrade_property_multi_index)
+CHAINBASE_SET_INDEX_TYPE(eosio::chain::global_property3_object, eosio::chain::global_property3_multi_index)
 
 FC_REFLECT(eosio::chain::dynamic_global_property_object,
            (global_action_sequence)
@@ -131,3 +149,6 @@ FC_REFLECT(eosio::chain::global_property2_object,
 FC_REFLECT(eosio::chain::upgrade_property_object,
            (upgrade_target_block_num)(upgrade_complete_block_num)
           )
+FC_REFLECT(eosio::chain::global_property3_object,
+           (configuration)
+)

@@ -36,6 +36,7 @@ using controller_index_set = index_set<
    global_property2_multi_index,
    dynamic_global_property_multi_index,
    upgrade_property_multi_index,
+   global_property3_multi_index,
    block_summary_multi_index,
    transaction_multi_index,
    generated_transaction_multi_index,
@@ -455,6 +456,13 @@ struct controller_impl {
           wlog("no upo found, generating...");
           db.create<upgrade_property_object>([](auto&){});
       }
+
+      try {
+          db.get<global_property3_object>();
+      } catch( const boost::exception& e) {
+          wlog("no gpo3 found, generating...");
+          db.create<global_property3_object>([](auto&){});
+      }
    }
 
    ~controller_impl() {
@@ -746,6 +754,7 @@ struct controller_impl {
 
       // *bos end*
 
+      db.create<global_property3_object>([](auto&) {});
 
       authorization.initialize_database();
       resource_limits.initialize_database();
@@ -2526,13 +2535,15 @@ void controller::set_pbft_my_prepare(const block_id_type& id) {
 }
 
 block_id_type controller::get_pbft_prepared() const {
-    if (my->pbft_prepared) return my->pbft_prepared->id;
-    return block_id_type{};
+   block_id_type pp;
+   if (my->pbft_prepared) pp = my->pbft_prepared->id;
+   return pp;
 }
 
 block_id_type controller::get_pbft_my_prepare() const {
-   if (my->my_prepare) return my->my_prepare->id;
-   return block_id_type{};
+   block_id_type mp;
+   if (my->my_prepare) mp = my->my_prepare->id;
+   return mp;
 }
 
 void controller::reset_pbft_my_prepare() {
@@ -2699,6 +2710,10 @@ void controller::set_name_list(int64_t list, int64_t action, std::vector<account
 
 const upgrade_property_object& controller::get_upgrade_properties()const {
     return my->db.get<upgrade_property_object>();
+}
+
+const global_property3_object& controller::get_pbft_properties()const {
+    return my->db.get<global_property3_object>();
 }
 
 bool controller::is_pbft_enabled() const {
