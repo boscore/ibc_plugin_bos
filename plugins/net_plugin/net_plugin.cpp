@@ -173,6 +173,8 @@ namespace eosio {
 
       node_transaction_index        local_txns;
 
+      shared_ptr<tcp::resolver>     resolver;
+
       bool                          use_socket_read_watermark = false;
 
       std::unordered_map<string, time_point_sec> pbft_message_cache{};
@@ -192,8 +194,8 @@ namespace eosio {
       eosio::chain::plugin_interface::pbft::incoming::new_view_channel::channel_type& pbft_incoming_new_view_channel;
       eosio::chain::plugin_interface::pbft::incoming::checkpoint_channel::channel_type& pbft_incoming_checkpoint_channel;
 
-      void connect( const connection_ptr& c );
-      void connect( const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints );
+      void connect(const connection_ptr& c);
+      void connect(const connection_ptr& c, tcp::resolver::iterator endpoint_itr);
       bool start_session(const connection_ptr& c);
       void start_listen_loop();
       void start_read_message(const connection_ptr& c);
@@ -2173,7 +2175,7 @@ namespace eosio {
       });
    }
 
-   void net_plugin_impl::connect( const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints ) {
+   void net_plugin_impl::connect( const connection_ptr& c, tcp::resolver::iterator endpoint_itr ) {
       if( c->no_retry != go_away_reason::no_reason) {
          string rsn = reason_str(c->no_retry);
          return;
@@ -2465,7 +2467,6 @@ namespace eosio {
                   close( conn );
                }
             });
-         }));
       } catch (...) {
          string pname = conn ? conn->peer_name() : "no connection name";
          fc_elog( logger, "Undefined exception handling reading ${p}",("p",pname) );
@@ -2815,14 +2816,17 @@ namespace eosio {
 
       switch (msg.req_trx.mode) {
       case catch_up :
-         c->txn_send_pending(msg.req_trx.ids);
-         break;
-      case normal :
-         c->txn_send(msg.req_trx.ids);
          break;
       case none :
          if(msg.req_blocks.mode == none)
             c->stop_send();
+         // no break
+      case normal :
+         if( !msg.req_trx.ids.empty() ) {
+            elog( "Invalid request_message, req_trx.ids.size ${s}", ("s", msg.req_trx.ids.size()) );
+            close(c);
+            return;
+         }
          break;
       default:;
       }
@@ -3733,11 +3737,11 @@ namespace eosio {
 
          my->done = true;
          if( my->acceptor ) {
-            ilog( logger, "close acceptor" );
+            ilog( "close acceptor" );
             my->acceptor->cancel();
             my->acceptor->close();
 
-            ilog( logger, "close ${s} connections",( "s",my->connections.size()) );
+            ilog( "close ${s} connections",( "s",my->connections.size()) );
             for( auto& con : my->connections ) {
                fc_dlog( logger, "close: ${p}", ("p",con->peer_name()) );
                my->close( con );
