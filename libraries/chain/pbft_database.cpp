@@ -1094,14 +1094,24 @@ namespace eosio {
 
             auto forks = fetch_fork_from(block_infos);
             fork_info_type longest_fork;
+            longest_fork.reserve(threshold);
             for (const auto& f : forks) {
                 if (f.size() > longest_fork.size()) {
                     longest_fork = f;
                 }
             }
 
-            return longest_fork.empty()
-            || (longest_fork.size() + non_fork_bp_count >= threshold && bi.block_id == longest_fork.back().block_id);
+            if (longest_fork.empty()) {
+                return true;
+            } else if (longest_fork.size() + non_fork_bp_count < threshold) {
+                return false;
+            } else {
+                while (non_fork_bp_count) {
+                    longest_fork.emplace_back(block_info_type{});
+                    --non_fork_bp_count;
+                }
+                return longest_fork[2/3*threshold].block_id == bi.block_id;
+            }
         }
 
         pbft_stable_checkpoint pbft_database::fetch_stable_checkpoint_from_blk_extn(const signed_block_ptr& b) {
