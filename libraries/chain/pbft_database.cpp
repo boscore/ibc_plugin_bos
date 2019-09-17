@@ -650,12 +650,14 @@ namespace eosio {
 
                 for (const auto& pre: prepares) {
                     if (prepare_count.find(pre.first.first) == prepare_count.end()) prepare_count[pre.first.first] = 0;
-                    prepare_msg[pre.first.first].emplace_back(pre.second);
                 }
 
                 for (const auto& bp: as) {
                     for (const auto& pp: prepares) {
-                        if (bp.block_signing_key == pp.first.second) prepare_count[pp.first.first] += 1;
+                        if (bp.block_signing_key == pp.first.second) {
+                            prepare_count[pp.first.first] += 1;
+                            prepare_msg[pp.first.first].emplace_back(pp.second);
+                        }
                     }
                 }
 
@@ -737,12 +739,14 @@ namespace eosio {
 
                 for (const auto& com: commits) {
                     if (commit_count.find(com.first.first) == commit_count.end()) commit_count[com.first.first] = 0;
-                    commit_msg[com.first.first].emplace_back(com.second);
                 }
 
                 for (const auto& bp: as) {
                     for (const auto& cc: commits) {
-                        if (bp.block_signing_key == cc.first.second) commit_count[cc.first.first] += 1;
+                        if (bp.block_signing_key == cc.first.second) {
+                            commit_count[cc.first.first] += 1;
+                            commit_msg[cc.first.first].emplace_back(cc.second);
+                        }
                     }
                 }
 
@@ -773,11 +777,15 @@ namespace eosio {
 
             auto pvs = *itr;
 
+            auto lscb_bps = lscb_active_producers().producers;
+
             if (pvs->is_view_changed) {
                 pvcc.target_view=pvs->view;
                 pvcc.view_changes.reserve(pvs->view_changes.size());
-                for(auto& view_change : pvs->view_changes) {
-                    pvcc.view_changes.emplace_back( view_change.second );
+                for (auto& bp : lscb_bps) {
+                    for(auto& view_change : pvs->view_changes) {
+                        if (bp.block_signing_key == view_change.first) pvcc.view_changes.emplace_back(view_change.second);
+                    }
                 }
             }
             return pvcc;
@@ -798,8 +806,7 @@ namespace eosio {
             for (auto& p : prepares) {
                 auto pmm = pbft_message_metadata<pbft_prepare>(p, chain_id);
                 prepares_metadata.emplace_back(pmm);
-                if (!is_valid_prepare(p, pmm.sender_key)) return false;
-                if (add_to_pbft_db) add_pbft_prepare(p, pmm.sender_key);
+                if ( add_to_pbft_db && is_valid_prepare(p, pmm.sender_key) ) add_pbft_prepare(p, pmm.sender_key);
             }
 
             auto cert_id = certificate.block_info.block_id;
@@ -861,8 +868,7 @@ namespace eosio {
             for (auto& c : commits) {
                 auto pmm = pbft_message_metadata<pbft_commit>(c, chain_id);
                 commits_metadata.emplace_back(pmm);
-                if (!is_valid_commit(c, pmm.sender_key)) return false;
-                if (add_to_pbft_db) add_pbft_commit(c, pmm.sender_key);
+                if (add_to_pbft_db && is_valid_commit(c, pmm.sender_key)) add_pbft_commit(c, pmm.sender_key);
             }
 
             auto cert_id = certificate.block_info.block_id;
