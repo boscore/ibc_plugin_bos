@@ -503,15 +503,11 @@ namespace eosio {
             bool is_less_than_high_watermark(block_num_type bnum);
             bool is_valid_prepared_certificate(const pbft_prepared_certificate& certificate, bool add_to_pbft_db = false);
             bool is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db = false);
-            bool is_valid_longest_fork(const block_info_type& bi, fork_info_type& block_infos, unsigned long threshold, unsigned long non_fork_bp_count);
 
             producer_schedule_type lscb_active_producers() const;
             vector<block_num_type>& get_updated_watermarks();
             flat_map<public_key_type, uint32_t>& get_updated_fork_schedules();
             block_num_type get_current_pbft_watermark();
-
-            vector<fork_info_type> fetch_fork_from(fork_info_type& block_infos);
-            fork_info_type fetch_first_fork_from(fork_info_type& bi);
 
             void set(const pbft_state_ptr& s);
             void set(const pbft_checkpoint_state_ptr& s);
