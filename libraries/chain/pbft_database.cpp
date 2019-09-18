@@ -1109,14 +1109,14 @@ namespace eosio {
 
             if (longest_fork.empty()) {
                 return true;
-            } else if (longest_fork.size() + non_fork_bp_count < threshold) {
+            } else if (longest_fork.size() + non_fork_bp_count < threshold || threshold == 0) {
                 return false;
             } else {
                 while (non_fork_bp_count) {
                     longest_fork.emplace_back(block_info_type{});
                     --non_fork_bp_count;
                 }
-                return longest_fork[2/3*threshold].block_id == bi.block_id;
+                return longest_fork[threshold-1].block_id == bi.block_id;
             }
         }
 
