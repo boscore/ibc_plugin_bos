@@ -818,7 +818,7 @@ namespace eosio {
             auto bp_threshold = producer_schedule.producers.size() * 2 / 3 + 1;
 
             flat_map<pbft_view_type, uint32_t> prepare_count;
-            flat_map<pbft_view_type, vector<pbft_message_metadata<pbft_prepare>>> prepare_msg;
+            flat_map<pbft_view_type, vector<producer_and_block_info>> prepare_msg;
 
             for (const auto& pm: prepares_metadata) {
                 if (prepare_count.find(pm.msg.view) == prepare_count.end()) {
@@ -831,13 +831,13 @@ namespace eosio {
                 for (const auto& pm: prepares_metadata) {
                     if (bp.block_signing_key == pm.sender_key) {
                         prepare_count[pm.msg.view] += 1;
-                        prepare_msg[pm.msg.view].emplace_back(pm);
+                        prepare_msg[pm.msg.view].emplace_back(std::make_pair(pm.sender_key, pm.msg.block_info));
                     }
                 }
             }
 
             auto should_prepared = false;
-            auto valid_prepares = vector<pbft_message_metadata<pbft_prepare>>{};
+            auto valid_prepares = vector<producer_and_block_info>{};
             valid_prepares.reserve(bp_threshold);
             for (const auto& e: prepare_count) {
                 if (e.second >= bp_threshold) {
@@ -846,77 +846,7 @@ namespace eosio {
                 }
             }
 
-            if (!should_prepared) return false;
-
-            auto local_index = pbft_state_multi_index_type{};
-            for (auto &p: valid_prepares) {
-                auto& by_block_id_index = local_index.get<by_block_id>();
-
-                auto current = ctrl.fetch_block_state_by_id(p.msg.block_info.block_id);
-
-                while ((current) && (current->block_num > ctrl.last_stable_checkpoint_block_num())) {
-                    auto curr_itr = by_block_id_index.find(current->id);
-
-                    if (curr_itr == by_block_id_index.end()) {
-                        try {
-                            flat_map<std::pair<pbft_view_type, public_key_type>, pbft_prepare> local_prepares;
-                            local_prepares[std::make_pair(p.msg.view, p.sender_key)] = p.msg;
-                            pbft_state curr_ps;
-                            curr_ps.block_id = current->id;
-                            curr_ps.block_num = current->block_num;
-                            curr_ps.prepares = local_prepares;
-                            auto curr_psp = std::make_shared<pbft_state>(move(curr_ps));
-                            local_index.insert(curr_psp);
-                        } catch (...) {
-                            elog("prepare insert failure: ${p}", ("p", p.msg));
-                        }
-                    } else {
-                        auto local_prepares = (*curr_itr)->prepares;
-                        if (local_prepares.find(std::make_pair(p.msg.view, p.sender_key)) == local_prepares.end()) {
-                            by_block_id_index.modify(curr_itr, [&](const pbft_state_ptr &psp) {
-                                psp->prepares[std::make_pair(p.msg.view, p.sender_key)] = p.msg;
-                            });
-                        }
-                    }
-                    curr_itr = by_block_id_index.find(current->id);
-                    if (curr_itr != by_block_id_index.end()) {
-
-                        auto cpsp = *curr_itr;
-                        auto local_prepares = cpsp->prepares;
-                        auto as = current->active_schedule.producers;
-                        auto threshold = as.size() * 2 / 3 + 1;
-                        if (local_prepares.size() >= threshold && !cpsp->is_prepared &&
-                            is_less_than_high_watermark(cpsp->block_num)) {
-                            flat_map<pbft_view_type, uint32_t> local_prepare_count;
-                            for (const auto &pre: local_prepares) {
-                                if (local_prepare_count.find(pre.second.view) == local_prepare_count.end())
-                                    local_prepare_count[pre.second.view] = 0;
-                            }
-
-                            for (const auto &bp: as) {
-                                for (const auto &pp: local_prepares) {
-                                    if (bp.block_signing_key == pp.first.second) local_prepare_count[pp.first.first] += 1;
-                                }
-                            }
-                            for (const auto &e: local_prepare_count) {
-                                if (e.second >= threshold) {
-                                    by_block_id_index.modify(curr_itr, [&](const pbft_state_ptr& p) { p->is_prepared = true; });
-                                }
-                            }
-                        }
-                        current = ctrl.fetch_block_state_by_id(current->prev());
-                    }
-                }
-            }
-
-            const auto& by_prepare_and_num_index = local_index.get<by_prepare_and_num>();
-            auto itr = by_prepare_and_num_index.begin();
-            if (itr == by_prepare_and_num_index.end()) return false;
-
-            pbft_state_ptr psp = *itr;
-
-            return psp->is_prepared
-            && psp->block_id == certificate.block_info.block_id;
+            return should_prepared && is_valid_longest_fork(valid_prepares, certificate.block_info);
         }
 
         bool pbft_database::is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db) {
@@ -944,7 +874,7 @@ namespace eosio {
             auto bp_threshold = producer_schedule.producers.size() * 2 / 3 + 1;
 
             flat_map<pbft_view_type, uint32_t> commit_count;
-            flat_map<pbft_view_type, vector<pbft_message_metadata<pbft_commit>>> commit_msg;
+            flat_map<pbft_view_type, vector<producer_and_block_info>> commit_msg;
 
             for (const auto& cm: commits_metadata) {
                 if (commit_count.find(cm.msg.view) == commit_count.end()) {
@@ -957,13 +887,13 @@ namespace eosio {
                 for (const auto& cm: commits_metadata) {
                     if (bp.block_signing_key == cm.sender_key) {
                         commit_count[cm.msg.view] += 1;
-                        commit_msg[cm.msg.view].emplace_back(cm);
+                        commit_msg[cm.msg.view].emplace_back(std::make_pair(cm.sender_key, cm.msg.block_info));
                     }
                 }
             }
 
             auto should_committed = false;
-            auto valid_commits = vector<pbft_message_metadata<pbft_commit>>{};
+            auto valid_commits = vector<producer_and_block_info>{};
             valid_commits.reserve(bp_threshold);
             for (const auto& e: commit_count) {
                 if (e.second >= bp_threshold) {
@@ -972,37 +902,39 @@ namespace eosio {
                 }
             }
 
-            if (!should_committed) return false;
+            return should_committed && is_valid_longest_fork(valid_commits, certificate.block_info);
+        }
 
-            auto local_index = pbft_state_multi_index_type{};
-            for (auto &c: valid_commits) {
+        bool pbft_database::is_valid_longest_fork(const vector<producer_and_block_info>& block_infos, const block_info_type& cert_info) {
+
+            //add all valid block_infos in to a temp multi_index, this implementation which might contains heavier computation
+            auto local_index = local_state_multi_index_type();
+            for (auto &e: block_infos) {
+
                 auto& by_block_id_index = local_index.get<by_block_id>();
+                auto current = ctrl.fetch_block_state_by_id(e.second.block_id);
 
-                auto current = ctrl.fetch_block_state_by_id(c.msg.block_info.block_id);
-
-                while ((current) && (current->block_num > ctrl.last_stable_checkpoint_block_num())) {
+                while ( current ) {
 
                     auto curr_itr = by_block_id_index.find(current->id);
 
                     if (curr_itr == by_block_id_index.end()) {
                         try {
-                            flat_map<std::pair<pbft_view_type, public_key_type>, pbft_commit> local_commits;
-                            local_commits[std::make_pair(c.msg.view, c.sender_key)] = c.msg;
-                            pbft_state curr_ps;
+                            vector<public_key_type> bis;
+                            bis.reserve(block_infos.size());
+                            bis.emplace_back(e.first);
+                            validation_state curr_ps;
                             curr_ps.block_id = current->id;
                             curr_ps.block_num = current->block_num;
-                            curr_ps.commits = local_commits;
-                            auto curr_psp = std::make_shared<pbft_state>(move(curr_ps));
+                            curr_ps.producers = bis;
+                            auto curr_psp = std::make_shared<validation_state>(move(curr_ps));
                             local_index.insert(curr_psp);
-                        } catch (...) {
-                            elog("commit insertion failure: ${c}", ("c", c.msg));
-                        }
+                        } catch (...) {}
                     } else {
-                        auto local_commits = (*curr_itr)->commits;
-                        if (local_commits.find(std::make_pair(c.msg.view, c.sender_key)) == local_commits.end()) {
-                            by_block_id_index.modify(curr_itr, [&](const pbft_state_ptr &psp) {
-                                psp->commits[std::make_pair(c.msg.view, c.sender_key)] = c.msg;
-                                std::sort(psp->commits.begin(), psp->commits.end(), less<>());
+                        auto keys = (*curr_itr)->producers;
+                        if (std::find(keys.begin(), keys.end(),e.first) == keys.end()) {
+                            by_block_id_index.modify(curr_itr, [&](const validation_state_ptr &lsp) {
+                                lsp->producers.emplace_back(e.first);
                             });
                         }
                     }
@@ -1014,40 +946,31 @@ namespace eosio {
 
                         auto as = current->active_schedule.producers;
                         auto threshold = as.size() * 2 / 3 + 1;
-                        auto local_commits = cpsp->commits;
-                        if (local_commits.size() >= threshold && !cpsp->is_committed &&
-                            is_less_than_high_watermark(cpsp->block_num)) {
-                            flat_map<pbft_view_type, uint32_t> local_commit_count;
-                            for (const auto &com: local_commits) {
-                                if (local_commit_count.find(com.second.view) == local_commit_count.end())
-                                    local_commit_count[com.second.view] = 0;
-                            }
+                        auto keys = cpsp->producers;
+                        if (keys.size() >= threshold && !cpsp->enough ) {
+                            uint32_t count = 0;
 
                             for (const auto &bp: as) {
-                                for (const auto &pc: local_commits) {
-                                    if (bp.block_signing_key == pc.first.second) local_commit_count[pc.first.first] += 1;
+                                for (const auto &k: keys) {
+                                    if (bp.block_signing_key == k) count += 1;
                                 }
                             }
 
-                            for (const auto &e: local_commit_count) {
-                                if (e.second >= threshold) {
-                                    by_block_id_index.modify(curr_itr, [&](const pbft_state_ptr& p) { p->is_committed = true; });
-                                }
+                            if (count >= threshold) {
+                                by_block_id_index.modify(curr_itr, [&](const validation_state_ptr& p) { p->enough = true; });
                             }
                         }
-                        current = ctrl.fetch_block_state_by_id(current->prev());
                     }
+                    current = ctrl.fetch_block_state_by_id(current->prev());
                 }
-
             }
-            const auto& by_commit_and_num_index = local_index.get<by_prepare_and_num>();
-            auto itr = by_commit_and_num_index.begin();
-            if (itr == by_commit_and_num_index.end()) return false;
+            const auto& by_status_and_num_index = local_index.get<by_status_and_num>();
+            auto itr = by_status_and_num_index.begin();
+            if (itr == by_status_and_num_index.end()) return false;
 
-            pbft_state_ptr psp = *itr;
+            auto psp = *itr;
 
-            return psp->is_committed
-            && psp->block_id == certificate.block_info.block_id;
+            return psp->enough && psp->block_id == cert_info.block_id;
         }
 
         bool pbft_database::is_valid_view_change(const pbft_view_change& vc, const public_key_type& pk) {
