@@ -910,54 +910,57 @@ namespace eosio {
             //add all valid block_infos in to a temp multi_index, this implementation might contains heavier computation
             auto local_index = local_state_multi_index_type();
             auto& by_block_id_index = local_index.get<by_block_id>();
+            auto watermark = get_current_pbft_watermark();
             for (auto &e: block_infos) {
 
                 auto current = ctrl.fetch_block_state_by_id(e.second.block_id);
 
                 while ( current ) {
+                    if (watermark == 0 || current->block_num <= watermark) {
+                        auto curr_itr = by_block_id_index.find(current->id);
 
-                    auto curr_itr = by_block_id_index.find(current->id);
-
-                    if (curr_itr == by_block_id_index.end()) {
-                        try {
-                            vector<public_key_type> keys;
-                            keys.reserve(block_infos.size());
-                            keys.emplace_back(e.first);
-                            validation_state curr_ps;
-                            curr_ps.block_id = current->id;
-                            curr_ps.block_num = current->block_num;
-                            curr_ps.producers = keys;
-                            auto curr_psp = std::make_shared<validation_state>(move(curr_ps));
-                            local_index.insert(curr_psp);
-                        } catch (...) {}
-                    } else {
-                        auto keys = (*curr_itr)->producers;
-                        if (std::find(keys.begin(), keys.end(),e.first) == keys.end()) {
-                            by_block_id_index.modify(curr_itr, [&](const validation_state_ptr &vsp) {
-                                vsp->producers.emplace_back(e.first);
-                            });
-                        }
-                    }
-
-                    curr_itr = by_block_id_index.find(current->id);
-                    if (curr_itr != by_block_id_index.end()) {
-
-                        auto cpsp = *curr_itr;
-
-                        auto as = current->active_schedule.producers;
-                        auto threshold = as.size() * 2 / 3 + 1;
-                        auto keys = cpsp->producers;
-                        if (keys.size() >= threshold && !cpsp->enough ) {
-                            uint32_t count = 0;
-
-                            for (const auto &bp: as) {
-                                for (const auto &k: keys) {
-                                    if (bp.block_signing_key == k) count += 1;
-                                }
+                        if (curr_itr == by_block_id_index.end()) {
+                            try {
+                                vector<public_key_type> keys;
+                                keys.reserve(block_infos.size());
+                                keys.emplace_back(e.first);
+                                validation_state curr_ps;
+                                curr_ps.block_id = current->id;
+                                curr_ps.block_num = current->block_num;
+                                curr_ps.producers = keys;
+                                auto curr_psp = std::make_shared<validation_state>(move(curr_ps));
+                                local_index.insert(curr_psp);
+                            } catch (...) {}
+                        } else {
+                            auto keys = (*curr_itr)->producers;
+                            if (std::find(keys.begin(), keys.end(), e.first) == keys.end()) {
+                                by_block_id_index.modify(curr_itr, [&](const validation_state_ptr &vsp) {
+                                    vsp->producers.emplace_back(e.first);
+                                });
                             }
+                        }
 
-                            if (count >= threshold) {
-                                by_block_id_index.modify(curr_itr, [&](const validation_state_ptr& p) { p->enough = true; });
+                        curr_itr = by_block_id_index.find(current->id);
+                        if (curr_itr != by_block_id_index.end()) {
+
+                            auto cpsp = *curr_itr;
+
+                            auto as = current->active_schedule.producers;
+                            auto threshold = as.size() * 2 / 3 + 1;
+                            auto keys = cpsp->producers;
+                            if (keys.size() >= threshold && !cpsp->enough) {
+                                uint32_t count = 0;
+
+                                for (const auto &bp: as) {
+                                    for (const auto &k: keys) {
+                                        if (bp.block_signing_key == k) count += 1;
+                                    }
+                                }
+
+                                if (count >= threshold) {
+                                    by_block_id_index.modify(curr_itr,
+                                                             [&](const validation_state_ptr &p) { p->enough = true; });
+                                }
                             }
                         }
                     }
