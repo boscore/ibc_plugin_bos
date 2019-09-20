@@ -907,11 +907,11 @@ namespace eosio {
 
         bool pbft_database::is_valid_longest_fork(const vector<producer_and_block_info>& block_infos, const block_info_type& cert_info) {
 
-            //add all valid block_infos in to a temp multi_index, this implementation which might contains heavier computation
+            //add all valid block_infos in to a temp multi_index, this implementation might contains heavier computation
             auto local_index = local_state_multi_index_type();
+            auto& by_block_id_index = local_index.get<by_block_id>();
             for (auto &e: block_infos) {
 
-                auto& by_block_id_index = local_index.get<by_block_id>();
                 auto current = ctrl.fetch_block_state_by_id(e.second.block_id);
 
                 while ( current ) {
@@ -920,21 +920,21 @@ namespace eosio {
 
                     if (curr_itr == by_block_id_index.end()) {
                         try {
-                            vector<public_key_type> bis;
-                            bis.reserve(block_infos.size());
-                            bis.emplace_back(e.first);
+                            vector<public_key_type> keys;
+                            keys.reserve(block_infos.size());
+                            keys.emplace_back(e.first);
                             validation_state curr_ps;
                             curr_ps.block_id = current->id;
                             curr_ps.block_num = current->block_num;
-                            curr_ps.producers = bis;
+                            curr_ps.producers = keys;
                             auto curr_psp = std::make_shared<validation_state>(move(curr_ps));
                             local_index.insert(curr_psp);
                         } catch (...) {}
                     } else {
                         auto keys = (*curr_itr)->producers;
                         if (std::find(keys.begin(), keys.end(),e.first) == keys.end()) {
-                            by_block_id_index.modify(curr_itr, [&](const validation_state_ptr &lsp) {
-                                lsp->producers.emplace_back(e.first);
+                            by_block_id_index.modify(curr_itr, [&](const validation_state_ptr &vsp) {
+                                vsp->producers.emplace_back(e.first);
                             });
                         }
                     }
@@ -968,7 +968,7 @@ namespace eosio {
             auto itr = by_status_and_num_index.begin();
             if (itr == by_status_and_num_index.end()) return false;
 
-            auto psp = *itr;
+            validation_state_ptr psp = *itr;
 
             return psp->enough && psp->block_id == cert_info.block_id;
         }
