@@ -650,12 +650,14 @@ namespace eosio {
 
                 for (const auto& pre: prepares) {
                     if (prepare_count.find(pre.first.first) == prepare_count.end()) prepare_count[pre.first.first] = 0;
-                    prepare_msg[pre.first.first].emplace_back(pre.second);
                 }
 
                 for (const auto& bp: as) {
                     for (const auto& pp: prepares) {
-                        if (bp.block_signing_key == pp.first.second) prepare_count[pp.first.first] += 1;
+                        if (bp.block_signing_key == pp.first.second) {
+                            prepare_count[pp.first.first] += 1;
+                            prepare_msg[pp.first.first].emplace_back(pp.second);
+                        }
                     }
                 }
 
@@ -737,12 +739,14 @@ namespace eosio {
 
                 for (const auto& com: commits) {
                     if (commit_count.find(com.first.first) == commit_count.end()) commit_count[com.first.first] = 0;
-                    commit_msg[com.first.first].emplace_back(com.second);
                 }
 
                 for (const auto& bp: as) {
                     for (const auto& cc: commits) {
-                        if (bp.block_signing_key == cc.first.second) commit_count[cc.first.first] += 1;
+                        if (bp.block_signing_key == cc.first.second) {
+                            commit_count[cc.first.first] += 1;
+                            commit_msg[cc.first.first].emplace_back(cc.second);
+                        }
                     }
                 }
 
@@ -773,11 +777,15 @@ namespace eosio {
 
             auto pvs = *itr;
 
+            auto lscb_bps = lscb_active_producers().producers;
+
             if (pvs->is_view_changed) {
                 pvcc.target_view=pvs->view;
                 pvcc.view_changes.reserve(pvs->view_changes.size());
-                for(auto& view_change : pvs->view_changes) {
-                    pvcc.view_changes.emplace_back( view_change.second );
+                for (auto& bp : lscb_bps) {
+                    for(auto& view_change : pvs->view_changes) {
+                        if (bp.block_signing_key == view_change.first) pvcc.view_changes.emplace_back(view_change.second);
+                    }
                 }
             }
             return pvcc;
@@ -798,8 +806,7 @@ namespace eosio {
             for (auto& p : prepares) {
                 auto pmm = pbft_message_metadata<pbft_prepare>(p, chain_id);
                 prepares_metadata.emplace_back(pmm);
-                if (!is_valid_prepare(p, pmm.sender_key)) return false;
-                if (add_to_pbft_db) add_pbft_prepare(p, pmm.sender_key);
+                if ( add_to_pbft_db && is_valid_prepare(p, pmm.sender_key) ) add_pbft_prepare(p, pmm.sender_key);
             }
 
             auto cert_id = certificate.block_info.block_id;
@@ -811,41 +818,35 @@ namespace eosio {
             auto bp_threshold = producer_schedule.producers.size() * 2 / 3 + 1;
 
             flat_map<pbft_view_type, uint32_t> prepare_count;
+            flat_map<pbft_view_type, vector<producer_and_block_info>> prepare_msg;
 
             for (const auto& pm: prepares_metadata) {
-                if (prepare_count.find(pm.msg.view) == prepare_count.end()) prepare_count[pm.msg.view] = 0;
+                if (prepare_count.find(pm.msg.view) == prepare_count.end()) {
+                    prepare_count[pm.msg.view] = 0;
+                    prepare_msg[pm.msg.view].reserve(bp_threshold);
+                }
             }
 
             for (const auto& bp: producer_schedule.producers) {
                 for (const auto& pm: prepares_metadata) {
-                    if (bp.block_signing_key == pm.sender_key) prepare_count[pm.msg.view] += 1;
+                    if (bp.block_signing_key == pm.sender_key) {
+                        prepare_count[pm.msg.view] += 1;
+                        prepare_msg[pm.msg.view].emplace_back(std::make_pair(pm.sender_key, pm.msg.block_info));
+                    }
                 }
             }
 
             auto should_prepared = false;
-
+            auto valid_prepares = vector<producer_and_block_info>{};
+            valid_prepares.reserve(bp_threshold);
             for (const auto& e: prepare_count) {
                 if (e.second >= bp_threshold) {
                     should_prepared = true;
+                    valid_prepares = prepare_msg[e.first];
                 }
             }
 
-            if (!should_prepared) return false;
-
-            //validate prepare
-            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
-            auto non_fork_bp_count = 0;
-            fork_info_type prepare_infos;
-            prepare_infos.reserve(certificate.prepares.size());
-            for (const auto& p : certificate.prepares) {
-                //only search in fork db
-                if (p.block_info.block_num() <= lscb_num) {
-                    ++non_fork_bp_count;
-                } else {
-                    prepare_infos.emplace_back(p.block_info);
-                }
-            }
-            return is_valid_longest_fork(certificate.block_info, prepare_infos, bp_threshold, non_fork_bp_count);
+            return should_prepared && is_valid_longest_fork(valid_prepares, certificate.block_info);
         }
 
         bool pbft_database::is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db) {
@@ -861,8 +862,7 @@ namespace eosio {
             for (auto& c : commits) {
                 auto pmm = pbft_message_metadata<pbft_commit>(c, chain_id);
                 commits_metadata.emplace_back(pmm);
-                if (!is_valid_commit(c, pmm.sender_key)) return false;
-                if (add_to_pbft_db) add_pbft_commit(c, pmm.sender_key);
+                if (add_to_pbft_db && is_valid_commit(c, pmm.sender_key)) add_pbft_commit(c, pmm.sender_key);
             }
 
             auto cert_id = certificate.block_info.block_id;
@@ -874,41 +874,106 @@ namespace eosio {
             auto bp_threshold = producer_schedule.producers.size() * 2 / 3 + 1;
 
             flat_map<pbft_view_type, uint32_t> commit_count;
+            flat_map<pbft_view_type, vector<producer_and_block_info>> commit_msg;
 
             for (const auto& cm: commits_metadata) {
-                if (commit_count.find(cm.msg.view) == commit_count.end()) commit_count[cm.msg.view] = 0;
+                if (commit_count.find(cm.msg.view) == commit_count.end()) {
+                    commit_count[cm.msg.view] = 0;
+                    commit_msg[cm.msg.view].reserve(bp_threshold);
+                }
             }
 
             for (const auto& bp: producer_schedule.producers) {
                 for (const auto& cm: commits_metadata) {
-                    if (bp.block_signing_key == cm.sender_key) commit_count[cm.msg.view] += 1;
+                    if (bp.block_signing_key == cm.sender_key) {
+                        commit_count[cm.msg.view] += 1;
+                        commit_msg[cm.msg.view].emplace_back(std::make_pair(cm.sender_key, cm.msg.block_info));
+                    }
                 }
             }
 
             auto should_committed = false;
-
+            auto valid_commits = vector<producer_and_block_info>{};
+            valid_commits.reserve(bp_threshold);
             for (const auto& e: commit_count) {
                 if (e.second >= bp_threshold) {
                     should_committed = true;
+                    valid_commits = commit_msg[e.first];
                 }
             }
 
-            if (!should_committed) return false;
+            return should_committed && is_valid_longest_fork(valid_commits, certificate.block_info);
+        }
 
-            //validate commit
-            auto lscb_num = ctrl.last_stable_checkpoint_block_num();
-            auto non_fork_bp_count = 0;
-            fork_info_type commit_infos;
-            commit_infos.reserve(certificate.commits.size());
-            for (const auto& c : certificate.commits) {
-                //only search in fork db
-                if (c.block_info.block_num() <= lscb_num) {
-                    ++non_fork_bp_count;
-                } else {
-                    commit_infos.emplace_back(c.block_info);
+        bool pbft_database::is_valid_longest_fork(const vector<producer_and_block_info>& block_infos, const block_info_type& cert_info) {
+
+            //add all valid block_infos in to a temp multi_index, this implementation might contains heavier computation
+            auto local_index = local_state_multi_index_type();
+            auto& by_block_id_index = local_index.get<by_block_id>();
+            auto watermark = get_current_pbft_watermark();
+            for (auto &e: block_infos) {
+
+                auto current = ctrl.fetch_block_state_by_id(e.second.block_id);
+
+                while ( current ) {
+                    if (watermark == 0 || current->block_num <= watermark) {
+                        auto curr_itr = by_block_id_index.find(current->id);
+
+                        if (curr_itr == by_block_id_index.end()) {
+                            try {
+                                vector<public_key_type> keys;
+                                keys.reserve(block_infos.size());
+                                keys.emplace_back(e.first);
+                                validation_state curr_ps;
+                                curr_ps.block_id = current->id;
+                                curr_ps.block_num = current->block_num;
+                                curr_ps.producers = keys;
+                                auto curr_psp = std::make_shared<validation_state>(move(curr_ps));
+                                local_index.insert(curr_psp);
+                            } catch (...) {}
+                        } else {
+                            auto keys = (*curr_itr)->producers;
+                            if (std::find(keys.begin(), keys.end(), e.first) == keys.end()) {
+                                by_block_id_index.modify(curr_itr, [&](const validation_state_ptr &vsp) {
+                                    vsp->producers.emplace_back(e.first);
+                                });
+                            }
+                        }
+
+                        curr_itr = by_block_id_index.find(current->id);
+                        if (curr_itr != by_block_id_index.end()) {
+
+                            auto cpsp = *curr_itr;
+
+                            auto as = current->active_schedule.producers;
+                            auto threshold = as.size() * 2 / 3 + 1;
+                            auto keys = cpsp->producers;
+                            if (keys.size() >= threshold && !cpsp->enough) {
+                                uint32_t count = 0;
+
+                                for (const auto &bp: as) {
+                                    for (const auto &k: keys) {
+                                        if (bp.block_signing_key == k) count += 1;
+                                    }
+                                }
+
+                                if (count >= threshold) {
+                                    by_block_id_index.modify(curr_itr,
+                                                             [&](const validation_state_ptr &p) { p->enough = true; });
+                                }
+                            }
+                        }
+                    }
+                    current = ctrl.fetch_block_state_by_id(current->prev());
                 }
             }
-            return is_valid_longest_fork(certificate.block_info, commit_infos, bp_threshold, non_fork_bp_count);
+            const auto& by_status_and_num_index = local_index.get<by_status_and_num>();
+            auto itr = by_status_and_num_index.begin();
+            if (itr == by_status_and_num_index.end()) return false;
+
+            validation_state_ptr psp = *itr;
+
+            return psp->enough && psp->block_id == cert_info.block_id;
         }
 
         bool pbft_database::is_valid_view_change(const pbft_view_change& vc, const public_key_type& pk) {
@@ -1020,88 +1085,6 @@ namespace eosio {
             auto lscb_num = ctrl.last_stable_checkpoint_block_num();
             auto vc_lscb = vc.stable_checkpoint.block_info.block_num();
             return vc_lscb > 0 && lscb_num > vc_lscb;
-        }
-
-        vector<fork_info_type> pbft_database::fetch_fork_from(fork_info_type& block_infos) {
-
-            vector<fork_info_type> result;
-            if (block_infos.empty()) {
-                return result;
-            }
-            if (block_infos.size() == 1) {
-                result.emplace_back(initializer_list<block_info_type>{block_infos.front()});
-                return result;
-            }
-
-            sort(block_infos.begin(), block_infos.end(),
-                 [](const block_info_type& a, const block_info_type& b) -> bool { return a.block_num() > b.block_num(); });
-
-            while (!block_infos.empty()) {
-                auto fork = fetch_first_fork_from(block_infos);
-                if (!fork.empty()) {
-                    result.emplace_back(fork);
-                }
-            }
-            return result;
-        }
-
-        fork_info_type pbft_database::fetch_first_fork_from(fork_info_type& bi) {
-            fork_info_type result;
-            if (bi.empty()) {
-                return result;
-            }
-            if (bi.size() == 1) {
-                result.emplace_back(bi.front());
-                bi.clear();
-                return result;
-            }
-            //bi should be sorted desc
-            auto high = bi.front().block_num();
-            auto low = bi.back().block_num();
-
-            auto id = bi.front().block_id;
-            auto num = bi.front().block_num();
-            while (num <= high && num >= low && !bi.empty()) {
-                auto bs = ctrl.fetch_block_state_by_id(id);
-
-                for (auto it = bi.begin(); it != bi.end();) {
-                    if (it->block_id == id) {
-                        if (bs) {
-                            //add to result only if b exist
-                            result.emplace_back((*it));
-                        }
-                        it = bi.erase(it);
-                    } else {
-                        it++;
-                    }
-                }
-                if (bs) {
-                    id = bs->prev();
-                    num--;
-                } else {
-                    break;
-                }
-            }
-
-            return result;
-        }
-
-        bool pbft_database::is_valid_longest_fork(
-                const block_info_type& bi,
-                fork_info_type& block_infos,
-                unsigned long threshold,
-                unsigned long non_fork_bp_count) {
-
-            auto forks = fetch_fork_from(block_infos);
-            fork_info_type longest_fork;
-            for (const auto& f : forks) {
-                if (f.size() > longest_fork.size()) {
-                    longest_fork = f;
-                }
-            }
-
-            return longest_fork.empty()
-            || (longest_fork.size() + non_fork_bp_count >= threshold && bi.block_id == longest_fork.back().block_id);
         }
 
         pbft_stable_checkpoint pbft_database::fetch_stable_checkpoint_from_blk_extn(const signed_block_ptr& b) {
