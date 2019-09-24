@@ -948,6 +948,7 @@ namespace eosio {
 
                 while ( current ) {
                     if (next_watermark == 0 || current->block_num <= next_watermark) {
+
                         auto curr_itr = by_block_id_index.find(current->id);
 
                         if (curr_itr == by_block_id_index.end()) {
