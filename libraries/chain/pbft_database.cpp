@@ -597,42 +597,21 @@ namespace eosio {
             auto highest_pcc = vector<pbft_committed_certificate>{};
             auto highest_sc = pbft_stable_checkpoint();
 
-            vector<block_num_type> ccb;
-            auto watermarks = get_updated_watermarks();
-            for (auto& watermark : watermarks) {
-                //collecting committed cert on every water mark.
-                if (watermark > ctrl.last_stable_checkpoint_block_num()) {
-                    ccb.emplace_back(watermark);
-                }
-            }
-
-            block_num_type highest_lib = 0;
-            pbft_committed_certificate highest_lib_pcc;
             for (const auto& vc: vcc.view_changes) {
                 if (vc.prepared_cert.block_info.block_num() > highest_ppc.block_info.block_num()) {
                     highest_ppc = vc.prepared_cert;
                 }
 
                 for (const auto& cc: vc.committed_certs) {
-                    if (cc.block_info.block_num() > highest_lib) {
-                        highest_lib_pcc = cc;
-                        highest_lib = cc.block_info.block_num();
-                    }
                     auto p_itr = find_if(highest_pcc.begin(), highest_pcc.end(),
-                            [&](const pbft_committed_certificate& ext) {
-                                return ext.block_info.block_id == cc.block_info.block_id;
-                            });
-                    if (p_itr == highest_pcc.end() //unique block num
-                        && std::find(watermarks.begin(), watermarks.end(), cc.block_info.block_num()) != watermarks.end()) { // and it is a watermark
-                        highest_pcc.emplace_back(cc);
-                    }
+                            [&](const pbft_committed_certificate& ext) { return ext.block_info.block_id == cc.block_info.block_id; });
+                    if (p_itr == highest_pcc.end()) highest_pcc.emplace_back(cc);
                 }
 
                 if (vc.stable_checkpoint.block_info.block_num() > highest_sc.block_info.block_num()) {
                     highest_sc = vc.stable_checkpoint;
                 }
             }
-            highest_pcc.emplace_back(highest_lib_pcc);
 
             nv.new_view = new_view;
             nv.prepared_cert = highest_ppc;
@@ -867,10 +846,10 @@ namespace eosio {
                 }
             }
 
-            return should_prepared && is_valid_longest_fork(valid_prepares, certificate.block_info);
+            return should_prepared && is_valid_longest_fork(valid_prepares, certificate.block_info, true);
         }
 
-        bool pbft_database::is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db) {
+        bool pbft_database::is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db, bool at_the_top) {
             // an empty certificate is valid since it acts as a null digest in pbft.
             if (certificate.empty()) return true;
             // a certificate under lscb (no longer in fork_db) is also treated as null.
@@ -923,23 +902,14 @@ namespace eosio {
                 }
             }
 
-            return should_committed && is_valid_longest_fork(valid_commits, certificate.block_info);
+            return should_committed && is_valid_longest_fork(valid_commits, certificate.block_info, at_the_top);
         }
 
-        bool pbft_database::is_valid_longest_fork(const vector<producer_and_block_info>& block_infos, const block_info_type& cert_info) {
+        bool pbft_database::is_valid_longest_fork(const vector<producer_and_block_info>& block_infos, const block_info_type& cert_info, bool at_the_top ) {
 
             //add all valid block_infos in to a temp multi_index, this implementation might contains heavier computation
             auto local_index = local_state_multi_index_type();
             auto& by_block_id_index = local_index.get<by_block_id>();
-
-            vector<block_num_type> ccb;
-            auto past_watermarks = get_updated_watermarks();
-            for (auto& w : past_watermarks) {
-                //adding committed cert on every water mark.
-                if (w < ctrl.last_irreversible_block_num()) {
-                    ccb.emplace_back(w);
-                }
-            }
 
             auto next_watermark = get_current_pbft_watermark();
 
@@ -1001,7 +971,7 @@ namespace eosio {
                 }
             }
 
-            if (std::find(ccb.begin(), ccb.end(), cert_info.block_num()) != ccb.end()) {
+            if (!at_the_top) {
                 auto itr = by_block_id_index.find(cert_info.block_id);
                 if (itr == by_block_id_index.end()) return false;
                 return (*itr)->enough;
@@ -1081,17 +1051,6 @@ namespace eosio {
             auto highest_pcc = vector<pbft_committed_certificate>{};
             auto highest_scp = pbft_stable_checkpoint();
 
-            vector<block_num_type> ccb;
-            auto watermarks = get_updated_watermarks();
-            for (auto& watermark : watermarks) {
-                //collecting committed cert on every water mark.
-                if (watermark > ctrl.last_stable_checkpoint_block_num()) {
-                    ccb.emplace_back(watermark);
-                }
-            }
-
-            block_num_type highest_lib = 0;
-            pbft_committed_certificate highest_lib_pcc;
             for (const auto& vc: nv.view_changed_cert.view_changes) {
                 if (vc.prepared_cert.block_info.block_num() > highest_ppc.block_info.block_num()
                     && is_valid_prepared_certificate(vc.prepared_cert)) {
@@ -1100,18 +1059,11 @@ namespace eosio {
 
                 for (const auto& cc: vc.committed_certs) {
                     if (is_valid_committed_certificate(cc)) {
-                        if (cc.block_info.block_num() > highest_lib) {
-                            highest_lib_pcc = cc;
-                            highest_lib = cc.block_info.block_num();
-                        }
                         auto p_itr = find_if(highest_pcc.begin(), highest_pcc.end(),
                                              [&](const pbft_committed_certificate& ext) {
                                                  return ext.block_info.block_id == cc.block_info.block_id;
                                              });
-                        if (p_itr == highest_pcc.end() //unique block num
-                            && std::find(watermarks.begin(), watermarks.end(), cc.block_info.block_num()) != watermarks.end()) { // and it is a watermark
-                            highest_pcc.emplace_back(cc);
-                        }
+                        if (p_itr == highest_pcc.end()) highest_pcc.emplace_back(cc);
                     }
                 }
 
@@ -1120,7 +1072,6 @@ namespace eosio {
                     highest_scp = vc.stable_checkpoint;
                 }
             }
-            highest_pcc.emplace_back(highest_lib_pcc);
 
             EOS_ASSERT(highest_ppc.block_info == nv.prepared_cert.block_info, pbft_exception,
                        "prepared certificate does not match, should be ${hppc} but ${pc} given",
@@ -1133,6 +1084,12 @@ namespace eosio {
                 EOS_ASSERT(highest_pcc[i].block_info == committed_certs[i].block_info, pbft_exception,
                            "committed certificate does not match, should be ${hpcc} but ${cc} given",
                            ("hpcc", highest_pcc[i])("cc", committed_certs[i]));
+            }
+
+            if (!committed_certs.empty()) {
+                EOS_ASSERT(is_valid_committed_certificate(committed_certs.back(), false, true), pbft_exception,
+                           "highest committed certificate is invalid, ${cc}", 
+                           ("cc", committed_certs.back()));
             }
 
             EOS_ASSERT(highest_scp.block_info == nv.stable_checkpoint.block_info, pbft_exception,
