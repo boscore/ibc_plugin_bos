@@ -3682,65 +3682,74 @@ namespace eosio {
    }
 
    void net_plugin::plugin_startup() {
-      my->producer_plug = app().find_plugin<producer_plugin>();
+      try {
+          my->producer_plug = app().find_plugin<producer_plugin>();
 
-      my->keepalive_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
-      my->ticker();
-      my->pbft_message_cache_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
-      my->pbft_message_cache_ticker();
 
-      if( my->acceptor ) {
-         my->acceptor->open(my->listen_endpoint.protocol());
-         my->acceptor->set_option(tcp::acceptor::reuse_address(true));
-         try {
-           my->acceptor->bind(my->listen_endpoint);
-         } catch (const std::exception& e) {
-           elog("net_plugin::plugin_startup failed to bind to port ${port}",
-             ("port", my->listen_endpoint.port()));
-           throw e;
-         }
-         my->acceptor->listen();
-         ilog("starting listener, max clients is ${mc}",("mc",my->max_client_count));
-         my->start_listen_loop();
+          if (my->acceptor) {
+              my->acceptor->open(my->listen_endpoint.protocol());
+              my->acceptor->set_option(tcp::acceptor::reuse_address(true));
+              try {
+                  my->acceptor->bind(my->listen_endpoint);
+              } catch (const std::exception &e) {
+                  elog("net_plugin::plugin_startup failed to bind to port ${port}",
+                       ("port", my->listen_endpoint.port()));
+                  throw e;
+              }
+              my->acceptor->listen();
+              ilog("starting listener, max clients is ${mc}", ("mc", my->max_client_count));
+              my->start_listen_loop();
+          }
+
+          chain::controller &cc = my->chain_plug->chain();
+          {
+              cc.accepted_block.connect(boost::bind(&net_plugin_impl::accepted_block, my.get(), _1));
+          }
+
+          my->incoming_transaction_ack_subscription = app().get_channel<channels::transaction_ack>().subscribe(
+                  boost::bind(&net_plugin_impl::transaction_ack, my.get(), _1));
+          my->pbft_outgoing_prepare_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::prepare_channel>().subscribe(
+                  boost::bind(&net_plugin_impl::pbft_outgoing_prepare, my.get(), _1));
+          my->pbft_outgoing_commit_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::commit_channel>().subscribe(
+                  boost::bind(&net_plugin_impl::pbft_outgoing_commit, my.get(), _1));
+          my->pbft_outgoing_view_change_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::view_change_channel>().subscribe(
+                  boost::bind(&net_plugin_impl::pbft_outgoing_view_change, my.get(), _1));
+          my->pbft_outgoing_new_view_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::new_view_channel>().subscribe(
+                  boost::bind(&net_plugin_impl::pbft_outgoing_new_view, my.get(), _1));
+          my->pbft_outgoing_checkpoint_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::checkpoint_channel>().subscribe(
+                  boost::bind(&net_plugin_impl::pbft_outgoing_checkpoint, my.get(), _1));
+
+          my->keepalive_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
+          my->ticker();
+          my->pbft_message_cache_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
+          my->pbft_message_cache_ticker();
+
+          if (cc.get_read_mode() == chain::db_read_mode::READ_ONLY) {
+              my->max_nodes_per_host = 0;
+              ilog("node in read-only mode setting max_nodes_per_host to 0 to prevent connections");
+          }
+
+          my->start_monitors();
+
+          for (auto seed_node : my->supplied_peers) {
+              p2p_peer_record p2prcd;
+              p2prcd.peer_address = seed_node;
+              p2prcd.discoverable = false;
+              p2prcd.is_config = true;
+              p2prcd.connected = false;
+              p2prcd.expiry = time_point_sec((time_point::now()).sec_since_epoch() + 10);
+              my->p2p_peer_records.insert(pair<string, p2p_peer_record>(seed_node, p2prcd));
+
+              connect(seed_node);
+          }
+
+          if (fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
+              logger = fc::get_logger_map()[logger_name];
+      } catch (...) {
+       // always want plugin_shutdown even on exception
+       plugin_shutdown();
+       throw;
       }
-      chain::controller&cc = my->chain_plug->chain();
-      {
-         cc.accepted_block.connect(  boost::bind(&net_plugin_impl::accepted_block, my.get(), _1));
-      }
-
-      my->incoming_transaction_ack_subscription = app().get_channel<channels::transaction_ack>().subscribe(boost::bind(&net_plugin_impl::transaction_ack, my.get(), _1));
-      my->pbft_outgoing_prepare_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::prepare_channel>().subscribe(
-               boost::bind(&net_plugin_impl::pbft_outgoing_prepare, my.get(), _1));
-      my->pbft_outgoing_commit_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::commit_channel>().subscribe(
-               boost::bind(&net_plugin_impl::pbft_outgoing_commit, my.get(), _1));
-      my->pbft_outgoing_view_change_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::view_change_channel>().subscribe(
-               boost::bind(&net_plugin_impl::pbft_outgoing_view_change, my.get(), _1));
-      my->pbft_outgoing_new_view_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::new_view_channel>().subscribe(
-               boost::bind(&net_plugin_impl::pbft_outgoing_new_view, my.get(), _1));
-      my->pbft_outgoing_checkpoint_subscription = app().get_channel<eosio::chain::plugin_interface::pbft::outgoing::checkpoint_channel>().subscribe(
-               boost::bind(&net_plugin_impl::pbft_outgoing_checkpoint, my.get(), _1));
-
-      if( cc.get_read_mode() == chain::db_read_mode::READ_ONLY ) {
-         my->max_nodes_per_host = 0;
-         ilog( "node in read-only mode setting max_nodes_per_host to 0 to prevent connections" );
-      }
-
-      my->start_monitors();
-
-      for( auto seed_node : my->supplied_peers ) {
-            p2p_peer_record p2prcd;
-            p2prcd.peer_address=seed_node;
-            p2prcd.discoverable=false;
-            p2prcd.is_config=true;
-            p2prcd.connected=false;
-            p2prcd.expiry=time_point_sec((time_point::now()).sec_since_epoch()+10);
-            my->p2p_peer_records.insert(pair<string,p2p_peer_record>(seed_node,p2prcd));
-
-         connect( seed_node );
-      }
-
-      if(fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
-         logger = fc::get_logger_map()[logger_name];
    }
 
    void net_plugin::plugin_shutdown() {
