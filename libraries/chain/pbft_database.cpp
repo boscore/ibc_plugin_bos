@@ -616,6 +616,7 @@ namespace eosio {
                 for (const auto& cc: vc.committed_certs) {
                     if (cc.block_info.block_num() > highest_lib) {
                         highest_lib_pcc = cc;
+                        highest_lib = cc.block_info.block_num();
                     }
                     auto p_itr = find_if(highest_pcc.begin(), highest_pcc.end(),
                             [&](const pbft_committed_certificate& ext) {
@@ -1101,6 +1102,7 @@ namespace eosio {
                     if (is_valid_committed_certificate(cc)) {
                         if (cc.block_info.block_num() > highest_lib) {
                             highest_lib_pcc = cc;
+                            highest_lib = cc.block_info.block_num();
                         }
                         auto p_itr = find_if(highest_pcc.begin(), highest_pcc.end(),
                                              [&](const pbft_committed_certificate& ext) {
