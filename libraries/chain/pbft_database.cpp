@@ -796,8 +796,8 @@ namespace eosio {
         bool pbft_database::is_valid_prepared_certificate(const pbft_prepared_certificate& certificate, bool add_to_pbft_db) {
             // an empty certificate is valid since it acts as a null digest in pbft.
             if (certificate.empty()) return true;
-            // a certificate under lscb (no longer in fork_db) is also treated as null.
-            if (certificate.block_info.block_num() <= ctrl.last_stable_checkpoint_block_num()) return true;
+            // a certificate under lib is also treated as null.
+            if (certificate.block_info.block_num() <= ctrl.last_irreversible_block_num()) return true;
 
             auto prepares = certificate.prepares;
             auto prepares_metadata = vector<pbft_message_metadata<pbft_prepare>>{};
@@ -846,10 +846,10 @@ namespace eosio {
                 }
             }
 
-            return should_prepared && is_valid_longest_fork(valid_prepares, certificate.block_info);
+            return should_prepared && is_valid_longest_fork(valid_prepares, certificate.block_info, true);
         }
 
-        bool pbft_database::is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db) {
+        bool pbft_database::is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db, bool at_the_top) {
             // an empty certificate is valid since it acts as a null digest in pbft.
             if (certificate.empty()) return true;
             // a certificate under lscb (no longer in fork_db) is also treated as null.
@@ -902,75 +902,88 @@ namespace eosio {
                 }
             }
 
-            return should_committed && is_valid_longest_fork(valid_commits, certificate.block_info);
+            return should_committed && is_valid_longest_fork(valid_commits, certificate.block_info, at_the_top);
         }
 
-        bool pbft_database::is_valid_longest_fork(const vector<producer_and_block_info>& block_infos, const block_info_type& cert_info) {
+        bool pbft_database::is_valid_longest_fork(const vector<producer_and_block_info>& block_infos, const block_info_type& cert_info, bool at_the_top ) {
 
-            //add all valid block_infos in to a temp multi_index, this implementation which might contains heavier computation
+            //add all valid block_infos in to a temp multi_index, this implementation might contains heavier computation
             auto local_index = local_state_multi_index_type();
+            auto& by_block_id_index = local_index.get<by_block_id>();
+
+            auto next_watermark = get_current_pbft_watermark();
+
             for (auto &e: block_infos) {
 
-                auto& by_block_id_index = local_index.get<by_block_id>();
                 auto current = ctrl.fetch_block_state_by_id(e.second.block_id);
 
                 while ( current ) {
+                    if (next_watermark == 0 || current->block_num <= next_watermark) {
 
-                    auto curr_itr = by_block_id_index.find(current->id);
+                        auto curr_itr = by_block_id_index.find(current->id);
 
-                    if (curr_itr == by_block_id_index.end()) {
-                        try {
-                            vector<public_key_type> bis;
-                            bis.reserve(block_infos.size());
-                            bis.emplace_back(e.first);
-                            validation_state curr_ps;
-                            curr_ps.block_id = current->id;
-                            curr_ps.block_num = current->block_num;
-                            curr_ps.producers = bis;
-                            auto curr_psp = std::make_shared<validation_state>(move(curr_ps));
-                            local_index.insert(curr_psp);
-                        } catch (...) {}
-                    } else {
-                        auto keys = (*curr_itr)->producers;
-                        if (std::find(keys.begin(), keys.end(),e.first) == keys.end()) {
-                            by_block_id_index.modify(curr_itr, [&](const validation_state_ptr &lsp) {
-                                lsp->producers.emplace_back(e.first);
-                            });
-                        }
-                    }
-
-                    curr_itr = by_block_id_index.find(current->id);
-                    if (curr_itr != by_block_id_index.end()) {
-
-                        auto cpsp = *curr_itr;
-
-                        auto as = current->active_schedule.producers;
-                        auto threshold = as.size() * 2 / 3 + 1;
-                        auto keys = cpsp->producers;
-                        if (keys.size() >= threshold && !cpsp->enough ) {
-                            uint32_t count = 0;
-
-                            for (const auto &bp: as) {
-                                for (const auto &k: keys) {
-                                    if (bp.block_signing_key == k) count += 1;
-                                }
+                        if (curr_itr == by_block_id_index.end()) {
+                            try {
+                                vector<public_key_type> keys;
+                                keys.reserve(block_infos.size());
+                                keys.emplace_back(e.first);
+                                validation_state curr_ps;
+                                curr_ps.block_id = current->id;
+                                curr_ps.block_num = current->block_num;
+                                curr_ps.producers = keys;
+                                auto curr_psp = std::make_shared<validation_state>(move(curr_ps));
+                                local_index.insert(curr_psp);
+                            } catch (...) {}
+                        } else {
+                            auto keys = (*curr_itr)->producers;
+                            if (std::find(keys.begin(), keys.end(), e.first) == keys.end()) {
+                                by_block_id_index.modify(curr_itr, [&](const validation_state_ptr &vsp) {
+                                    vsp->producers.emplace_back(e.first);
+                                });
                             }
+                        }
 
-                            if (count >= threshold) {
-                                by_block_id_index.modify(curr_itr, [&](const validation_state_ptr& p) { p->enough = true; });
+                        curr_itr = by_block_id_index.find(current->id);
+                        if (curr_itr != by_block_id_index.end()) {
+
+                            auto cpsp = *curr_itr;
+
+                            auto as = current->active_schedule.producers;
+                            auto threshold = as.size() * 2 / 3 + 1;
+                            auto keys = cpsp->producers;
+                            if (keys.size() >= threshold && !cpsp->enough) {
+                                uint32_t count = 0;
+
+                                for (const auto &bp: as) {
+                                    for (const auto &k: keys) {
+                                        if (bp.block_signing_key == k) count += 1;
+                                    }
+                                }
+
+                                if (count >= threshold) {
+                                    by_block_id_index.modify(curr_itr,
+                                            [&](const validation_state_ptr &p) { p->enough = true; });
+                                }
                             }
                         }
                     }
                     current = ctrl.fetch_block_state_by_id(current->prev());
                 }
             }
-            const auto& by_status_and_num_index = local_index.get<by_status_and_num>();
-            auto itr = by_status_and_num_index.begin();
-            if (itr == by_status_and_num_index.end()) return false;
 
-            auto psp = *itr;
+            if (!at_the_top) {
+                auto itr = by_block_id_index.find(cert_info.block_id);
+                if (itr == by_block_id_index.end()) return false;
+                return (*itr)->enough;
 
-            return psp->enough && psp->block_id == cert_info.block_id;
+            } else {
+                const auto &by_status_and_num_index = local_index.get<by_status_and_num>();
+                auto itr = by_status_and_num_index.begin();
+                if (itr == by_status_and_num_index.end()) return false;
+
+                validation_state_ptr psp = *itr;
+                return psp->enough && psp->block_id == cert_info.block_id;
+            }
         }
 
         bool pbft_database::is_valid_view_change(const pbft_view_change& vc, const public_key_type& pk) {
@@ -1071,6 +1084,12 @@ namespace eosio {
                 EOS_ASSERT(highest_pcc[i].block_info == committed_certs[i].block_info, pbft_exception,
                            "committed certificate does not match, should be ${hpcc} but ${cc} given",
                            ("hpcc", highest_pcc[i])("cc", committed_certs[i]));
+            }
+
+            if (!committed_certs.empty()) {
+                EOS_ASSERT(is_valid_committed_certificate(committed_certs.back(), false, true), pbft_exception,
+                           "highest committed certificate is invalid, ${cc}", 
+                           ("cc", committed_certs.back()));
             }
 
             EOS_ASSERT(highest_scp.block_info == nv.stable_checkpoint.block_info, pbft_exception,
