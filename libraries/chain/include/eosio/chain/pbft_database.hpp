@@ -534,8 +534,8 @@ namespace eosio {
             block_info_type cal_pending_stable_checkpoint() const;
             bool is_less_than_high_watermark(block_num_type bnum);
             bool is_valid_prepared_certificate(const pbft_prepared_certificate& certificate, bool add_to_pbft_db = false);
-            bool is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db = false);
-            bool is_valid_longest_fork(const vector<producer_and_block_info>& producers, const block_info_type& cert_info);
+            bool is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db = false, bool at_the_top = false);
+            bool is_valid_longest_fork(const vector<producer_and_block_info>& producers, const block_info_type& cert_info, bool at_the_top = false);
 
             producer_schedule_type lscb_active_producers() const;
             vector<block_num_type>& get_updated_watermarks();
