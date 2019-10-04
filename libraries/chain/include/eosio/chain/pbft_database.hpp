@@ -332,9 +332,19 @@ namespace eosio {
             bool                                        is_stable = false;
         };
 
+        using producer_and_block_info = std::pair<public_key_type, block_info_type>;
+
+        struct validation_state {
+            block_id_type           block_id;
+            block_num_type          block_num = 0;
+            vector<public_key_type> producers;
+            bool                    enough = false;
+        };
+
         using pbft_state_ptr = std::shared_ptr<pbft_state>;
         using pbft_view_change_state_ptr = std::shared_ptr<pbft_view_change_state>;
         using pbft_checkpoint_state_ptr = std::shared_ptr<pbft_checkpoint_state>;
+        using validation_state_ptr = std::shared_ptr<validation_state>;
 
         struct by_block_id;
         struct by_num;
@@ -413,6 +423,28 @@ namespace eosio {
                         >
                 >
         > pbft_checkpoint_state_multi_index_type;
+
+        struct by_block_id;
+        struct by_status_and_num;
+        typedef multi_index_container<
+                validation_state_ptr,
+                indexed_by<
+                        hashed_unique <
+                                tag<by_block_id>,
+                                member<validation_state, block_id_type, &validation_state::block_id>,
+                                std::hash<block_id_type>
+                        >,
+                        ordered_non_unique<
+                                tag<by_status_and_num>,
+                                composite_key<
+                                        validation_state,
+                                        member<validation_state, bool, &validation_state::enough>,
+                                        member<validation_state, uint32_t, &validation_state::block_num>
+                                >,
+                                composite_key_compare< greater<>, greater<> >
+                        >
+                >
+        > local_state_multi_index_type;
 
         class pbft_database {
         public:
@@ -502,16 +534,13 @@ namespace eosio {
             block_info_type cal_pending_stable_checkpoint() const;
             bool is_less_than_high_watermark(block_num_type bnum);
             bool is_valid_prepared_certificate(const pbft_prepared_certificate& certificate, bool add_to_pbft_db = false);
-            bool is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db = false);
-            bool is_valid_longest_fork(const block_info_type& bi, fork_info_type& block_infos, unsigned long threshold, unsigned long non_fork_bp_count);
+            bool is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db = false, bool at_the_top = false);
+            bool is_valid_longest_fork(const vector<producer_and_block_info>& producers, const block_info_type& cert_info, bool at_the_top = false);
 
             producer_schedule_type lscb_active_producers() const;
             vector<block_num_type>& get_updated_watermarks();
             flat_map<public_key_type, uint32_t>& get_updated_fork_schedules();
             block_num_type get_current_pbft_watermark();
-
-            vector<fork_info_type> fetch_fork_from(fork_info_type& block_infos);
-            fork_info_type fetch_first_fork_from(fork_info_type& bi);
 
             void set(const pbft_state_ptr& s);
             void set(const pbft_checkpoint_state_ptr& s);
@@ -543,3 +572,4 @@ FC_REFLECT(eosio::chain::pbft_stable_checkpoint, (block_info)(checkpoints))
 FC_REFLECT(eosio::chain::pbft_state, (block_id)(block_num)(prepares)(is_prepared)(commits)(is_committed))
 FC_REFLECT(eosio::chain::pbft_view_change_state, (view)(view_changes)(is_view_changed))
 FC_REFLECT(eosio::chain::pbft_checkpoint_state, (block_id)(block_num)(checkpoints)(is_stable))
+FC_REFLECT(eosio::chain::validation_state, (block_id)(block_num)(producers)(enough))
