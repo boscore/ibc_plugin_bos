@@ -122,6 +122,7 @@ namespace eosio {
       unique_ptr<tcp::acceptor>        acceptor;
       tcp::endpoint                    listen_endpoint;
       string                           p2p_address;
+      string                           p2p_server_address;
       uint32_t                         max_client_count = 0;
       uint32_t                         max_nodes_per_host = 1;
       uint32_t                         num_clients = 0;
@@ -3599,7 +3600,6 @@ namespace eosio {
 
          my->p2p_discoverable=options.at( "p2p-discoverable" ).as<bool>();
 
-         my->resolver = std::make_shared<tcp::resolver>( std::ref( app().get_io_service()));
          if( options.count( "p2p-listen-endpoint" ) && options.at("p2p-listen-endpoint").as<string>().length()) {
             my->p2p_address = options.at( "p2p-listen-endpoint" ).as<string>();
             auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
@@ -3607,8 +3607,6 @@ namespace eosio {
             idump((host)( port ));
             tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
             // Note: need to add support for IPv6 too?
-
-            my->listen_endpoint = *my->resolver->resolve( query );
 
             my->acceptor.reset( new tcp::acceptor( app().get_io_service()));
 
