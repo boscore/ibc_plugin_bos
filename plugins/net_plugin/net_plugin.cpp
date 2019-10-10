@@ -2398,10 +2398,10 @@ namespace eosio {
          }
 
          boost::asio::async_read(*conn->socket,
-            conn->pending_message_buffer.get_buffer_sequence_for_boost_async_read(), completion_handler,
-            [this,weak_conn]( boost::system::error_code ec, std::size_t bytes_transferred ) {
+            conn->pending_message_buffer.get_buffer_sequence_for_boost_async_read(), completion_handler, 
+            [this,weak_conn,socket=conn->socket]( boost::system::error_code ec, std::size_t bytes_transferred ) {
                auto conn = weak_conn.lock();
-               if (!conn || !conn->socket || !conn->socket->is_open()) {
+               if (!conn || !conn->socket || !conn->socket->is_open() || !socket->is_open()) {
                   return;
                }
 
