@@ -914,7 +914,7 @@ namespace eosio {
    void connection::close() {
       if(socket) {
          socket->close();
-         socket.reset( new tcp::socket( app().get_io_service()) );
+         socket.reset( new tcp::socket( std::ref( app().get_io_service())) );
       }
       else {
          wlog("no socket to close!");
@@ -3594,33 +3594,13 @@ namespace eosio {
 
          if( options.count( "p2p-listen-endpoint" ) && options.at("p2p-listen-endpoint").as<string>().length()) {
             my->p2p_address = options.at( "p2p-listen-endpoint" ).as<string>();
-            auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
-            auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
-            idump((host)( port ));
-            tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
-            // Note: need to add support for IPv6 too?
-
-            my->acceptor.reset( new tcp::acceptor( app().get_io_service()));
-
-            if( options.count( "p2p-server-address" )) {
-               my->p2p_address = options.at( "p2p-server-address" ).as<string>();
-            } else {
-               if( my->listen_endpoint.address().to_v4() == address_v4::any()) {
-                  boost::system::error_code ec;
-                  auto host = host_name( ec );
-                  if( ec.value() != boost::system::errc::success ) {
-
-                     FC_THROW_EXCEPTION( fc::invalid_arg_exception,
-                                       "Unable to retrieve host_name. ${msg}", ("msg", ec.message()));
-
-                  }
-                  auto port = my->p2p_address.substr( my->p2p_address.find( ':' ), my->p2p_address.size());
-                  my->p2p_address = host + port;
-               }
-            }
+         }
+         if( options.count( "p2p-server-address" ) ) {
+            my->p2p_server_address = options.at( "p2p-server-address" ).as<string>();
          }
 
-         if( options.count( "p2p-peer-address" )) {
+
+          if( options.count( "p2p-peer-address" )) {
             my->supplied_peers = options.at( "p2p-peer-address" ).as<vector<string> >();
          }
          if( options.count( "agent-name" )) {
@@ -3675,34 +3655,34 @@ namespace eosio {
       try {
           my->producer_plug = app().find_plugin<producer_plugin>();
 
-      auto resolver = std::make_shared<tcp::resolver>( app().get_io_service() );
-      if( my->p2p_address.size() > 0 ) {
-         auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
-         auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
-         tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
-         // Note: need to add support for IPv6 too?
+          auto resolver = std::make_shared<tcp::resolver>( app().get_io_service() );
+          if( my->p2p_address.size() > 0 ) {
+             auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
+             auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
+             tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
+             // Note: need to add support for IPv6 too?
 
-         my->listen_endpoint = *resolver->resolve( query );
+             my->listen_endpoint = *resolver->resolve( query );
 
-         my->acceptor.reset( new tcp::acceptor( app().get_io_service() ) );
+             my->acceptor.reset( new tcp::acceptor( std::ref(app().get_io_service()) ) );
 
-         if( !my->p2p_server_address.empty() ) {
-            my->p2p_address = my->p2p_server_address;
-         } else {
-            if( my->listen_endpoint.address().to_v4() == address_v4::any()) {
-               boost::system::error_code ec;
-               auto host = host_name( ec );
-               if( ec.value() != boost::system::errc::success ) {
+             if( !my->p2p_server_address.empty() ) {
+                my->p2p_address = my->p2p_server_address;
+             } else {
+                if( my->listen_endpoint.address().to_v4() == address_v4::any()) {
+                   boost::system::error_code ec;
+                   auto host = host_name( ec );
+                   if( ec.value() != boost::system::errc::success ) {
 
-                  FC_THROW_EXCEPTION( fc::invalid_arg_exception,
+                      FC_THROW_EXCEPTION( fc::invalid_arg_exception,
                                       "Unable to retrieve host_name. ${msg}", ("msg", ec.message()));
 
-               }
-               auto port = my->p2p_address.substr( my->p2p_address.find( ':' ), my->p2p_address.size());
-               my->p2p_address = host + port;
-            }
-         }
-      }
+                   }
+                   auto port = my->p2p_address.substr( my->p2p_address.find( ':' ), my->p2p_address.size());
+                   my->p2p_address = host + port;
+                }
+             }
+          }
 
           my->keepalive_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
           my->ticker();
@@ -3764,9 +3744,9 @@ namespace eosio {
           if (fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
               logger = fc::get_logger_map()[logger_name];
       } catch (...) {
-       // always want plugin_shutdown even on exception
-       plugin_shutdown();
-       throw;
+         // always want plugin_shutdown even on exception
+         plugin_shutdown();
+         throw;
       }
    }
 
