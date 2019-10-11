@@ -805,7 +805,7 @@ namespace eosio {
       void recv_handshake(const connection_ptr& c, const handshake_message& msg);
       void recv_notice(const connection_ptr& c, const notice_message& msg);
       bool is_syncing();
-      void sync_stable_checkpoints(const connection_ptr& c, uint32_t target);
+      bool sync_stable_checkpoints(const connection_ptr& c, uint32_t target);
    };
 
    class dispatch_manager {
@@ -1606,25 +1606,25 @@ namespace eosio {
       request_next_chunk(c);
    }
 
-   void sync_manager::sync_stable_checkpoints(const connection_ptr& c, uint32_t target) {
+   bool sync_manager::sync_stable_checkpoints(const connection_ptr& c, uint32_t target) {
        controller& cc = chain_plug->chain();
        uint32_t lscb_num = cc.last_stable_checkpoint_block_num();
-       auto head_num = cc.head_block_num();
-       if (last_req_scp_num < lscb_num
-          || last_req_scp_num == 0
-          || last_req_scp_num > target) last_req_scp_num = lscb_num;
-
        auto pbft_checkpoint_granularity = chain_plug->pbft_ctrl().pbft_db.get_checkpoint_interval();
-       auto end = target;
-       auto max_target_scp_num = last_req_scp_num + pbft_checkpoint_granularity * 10;
-       if (target > max_target_scp_num) end = std::min(max_target_scp_num, head_num);
+       if (last_req_scp_num < lscb_num || last_req_scp_num == 0) last_req_scp_num = lscb_num;
 
-       if (end - last_req_scp_num < pbft_checkpoint_granularity) return;
+       auto max_target_scp_num = last_req_scp_num + pbft_checkpoint_granularity * 10;
+       auto end = std::min(max_target_scp_num, target);
+
+       if (end - last_req_scp_num < pbft_checkpoint_granularity) {
+           last_req_scp_num = lscb_num;
+           return false;
+       }
        checkpoint_request_message crm = {last_req_scp_num+1,end};
        c->enqueue( net_message(crm));
        fc_dlog(logger, "request sync stable checkpoints from ${s} to ${e}",
                ("s", last_req_scp_num+1)("e", end));
        last_req_scp_num = end;
+       return true;
    }
 
    void sync_manager::reassign_fetch(const connection_ptr& c, go_away_reason reason) {
@@ -3838,7 +3838,8 @@ namespace eosio {
 
        for (auto const &c: my->connections) {
            if (c->current()) {
-               my->sync_master->sync_stable_checkpoints(c, head);
+               auto requested = my->sync_master->sync_stable_checkpoints(c, head);
+               if (!requested) break;
            }
        }
 
