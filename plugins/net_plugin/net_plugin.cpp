@@ -1105,7 +1105,7 @@ namespace eosio {
       buffer_queue.fill_out_buffer( bufs );
       fill_out_buffer_with_pbft_queue( bufs );
 
-      boost::asio::async_write(*socket, bufs, [c](boost::system::error_code ec, std::size_t w) {
+      boost::asio::async_write(*socket, bufs, [c, socket=socket](boost::system::error_code ec, std::size_t w) {
             try {
                auto conn = c.lock();
                if(!conn)
@@ -3684,11 +3684,6 @@ namespace eosio {
              }
           }
 
-          my->keepalive_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
-          my->ticker();
-          my->pbft_message_cache_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
-          my->pbft_message_cache_ticker();
-
           if (my->acceptor) {
               my->acceptor->open(my->listen_endpoint.protocol());
               my->acceptor->set_option(tcp::acceptor::reuse_address(true));
@@ -3708,6 +3703,11 @@ namespace eosio {
           {
               cc.accepted_block.connect(boost::bind(&net_plugin_impl::accepted_block, my.get(), _1));
           }
+
+          my->keepalive_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
+          my->ticker();
+          my->pbft_message_cache_timer.reset(new boost::asio::steady_timer(app().get_io_service()));
+          my->pbft_message_cache_ticker();
 
           my->incoming_transaction_ack_subscription = app().get_channel<channels::transaction_ack>().subscribe(
                   boost::bind(&net_plugin_impl::transaction_ack, my.get(), _1));
