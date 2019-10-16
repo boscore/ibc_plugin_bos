@@ -199,6 +199,16 @@ namespace eosio {
       void start_listen_loop();
       void start_read_message(const connection_ptr& c);
 
+      /** \brief Process the next message from the pending message buffer
+       *
+       * Process the next message from the pending_message_buffer.
+       * message_length is the already determined length of the data
+       * part of the message that will handle the message.
+       * Returns true is successful. Returns false if an error was
+       * encountered unpacking or processing the message.
+       */
+      bool process_next_message(const connection_ptr& conn, uint32_t message_length);
+
       void close(const connection_ptr& c);
       size_t count_open_sockets() const;
 
@@ -665,6 +675,9 @@ namespace eosio {
 
       const string peer_name();
 
+      void txn_send_pending(const vector<transaction_id_type>& ids);
+      void txn_send(const vector<transaction_id_type>& txn_lis);
+
       void blk_send_branch();
       void blk_send(const block_id_type& blkid);
       void stop_send();
@@ -698,16 +711,6 @@ namespace eosio {
 
       void send_p2p_request(bool discoverable);
       void send_p2p_response(bool discoverable,string p2p_peer_list);
-      /** \brief Process the next message from the pending message buffer
-       *
-       * Process the next message from the pending_message_buffer.
-       * message_length is the already determined length of the data
-       * part of the message and impl in the net plugin implementation
-       * that will handle the message.
-       * Returns true is successful. Returns false if an error was
-       * encountered unpacking or processing the message.
-       */
-      bool process_next_message(net_plugin_impl& impl, uint32_t message_length);
 
       bool add_peer_block(const peer_block_state& pbs);
 
@@ -787,7 +790,7 @@ namespace eosio {
 
       chain_plugin* chain_plug = nullptr;
 
-      constexpr auto stage_str(stages s );
+      constexpr static auto stage_str(stages s);
 
    public:
       explicit sync_manager(uint32_t span);
@@ -832,7 +835,7 @@ namespace eosio {
       : blk_state(),
         trx_state(),
         peer_requested(),
-        socket( std::make_shared<tcp::socket>( std::ref( app().get_io_service() ))),
+        socket( std::make_shared<tcp::socket>( std::ref(app().get_io_service()) )),
         node_id(),
         last_handshake_recv(),
         last_handshake_sent(),
@@ -914,7 +917,7 @@ namespace eosio {
    void connection::close() {
       if(socket) {
          socket->close();
-         socket.reset( new tcp::socket( std::ref( app().get_io_service())) );
+         socket.reset( new tcp::socket( std::ref(app().get_io_service())) );
       }
       else {
          wlog("no socket to close!");
@@ -937,6 +940,26 @@ namespace eosio {
       fc_dlog(logger, "canceling wait on ${p}", ("p",peer_name()));
       cancel_wait();
       if( read_delay_timer ) read_delay_timer->cancel();
+   }
+
+   void connection::txn_send_pending(const vector<transaction_id_type>& ids) {
+      const std::set<transaction_id_type, sha256_less> known_ids(ids.cbegin(), ids.cend());
+      my_impl->expire_local_txns();
+      for(auto tx = my_impl->local_txns.begin(); tx != my_impl->local_txns.end(); ++tx ){
+         const bool found = known_ids.find( tx->id ) != known_ids.cend();
+         if( !found ) {
+            queue_write( tx->serialized_txn, true, []( boost::system::error_code ec, std::size_t ) {} );
+         }
+      }
+   }
+
+   void connection::txn_send(const vector<transaction_id_type>& ids) {
+      for(const auto& t : ids) {
+         auto tx = my_impl->local_txns.get<by_id>().find(t);
+         if( tx != my_impl->local_txns.end() ) {
+            queue_write( tx->serialized_txn, true, []( boost::system::error_code ec, std::size_t ) {} );
+         }
+      }
    }
 
    void connection::blk_send_branch() {
@@ -1379,27 +1402,6 @@ namespace eosio {
       sync_request_message srm = {start,end};
       enqueue( net_message(srm));
       sync_wait();
-   }
-
-   bool connection::process_next_message(net_plugin_impl& impl, uint32_t message_length) {
-      try {
-         auto ds = pending_message_buffer.create_datastream();
-         net_message msg;
-         fc::raw::unpack(ds, msg);
-         msg_handler m(impl, shared_from_this() );
-         if( msg.contains<signed_block>() ) {
-            m( std::move( msg.get<signed_block>() ) );
-         } else if( msg.contains<packed_transaction>() ) {
-            m( std::move( msg.get<packed_transaction>() ) );
-         } else {
-            msg.visit( m );
-         }
-      } catch(  const fc::exception& e ) {
-         edump((e.to_detail_string() ));
-         impl.close( shared_from_this() );
-         return false;
-      }
-      return true;
    }
 
    bool connection::add_peer_block(const peer_block_state& entry) {
@@ -2178,7 +2180,7 @@ namespace eosio {
       connection_wptr weak_conn = c;
       // Note: need to add support for IPv6 too
 
-      auto resolver = std::make_shared<tcp::resolver>( app().get_io_service() );
+      auto resolver = std::make_shared<tcp::resolver>( std::ref(app().get_io_service()) );
       resolver->async_resolve( query,
                 [weak_conn, resolver, this]( const boost::system::error_code& err, tcp::resolver::results_type endpoints ) {
                       auto c = weak_conn.lock();
@@ -2437,7 +2439,7 @@ namespace eosio {
 
                            if (bytes_in_buffer >= total_message_bytes) {
                               conn->pending_message_buffer.advance_read_ptr(message_header_size);
-                              if (!conn->process_next_message(*this, message_length)) {
+                              if (!process_next_message(conn, message_length)) {
                                  return;
                               }
                            } else {
@@ -2483,6 +2485,28 @@ namespace eosio {
          fc_elog( logger, "Undefined exception handling reading ${p}",("p",pname) );
          close( conn );
       }
+   }
+
+   bool net_plugin_impl::process_next_message(const connection_ptr& conn, uint32_t message_length) {
+      try {
+         auto ds = conn->pending_message_buffer.create_datastream();
+         net_message msg;
+         fc::raw::unpack( ds, msg );
+         msg_handler m( *this, conn );
+         if( msg.contains<signed_block>() ) {
+            m( std::move( msg.get<signed_block>() ) );
+         } else if( msg.contains<packed_transaction>() ) {
+            m( std::move( msg.get<packed_transaction>() ) );
+         } else {
+            msg.visit( m );
+         }
+      } catch( const fc::exception& e ) {
+         fc_elog( logger, "Exception in handling message from ${p}: ${s}",
+                  ("p", conn->peer_name())("s", e.to_detail_string()) );
+         close( conn );
+         return false;
+      }
+      return true;
    }
 
    size_t net_plugin_impl::count_open_sockets() const
@@ -2827,17 +2851,14 @@ namespace eosio {
 
       switch (msg.req_trx.mode) {
       case catch_up :
+         c->txn_send_pending(msg.req_trx.ids);
+         break;
+      case normal :
+         c->txn_send(msg.req_trx.ids);
          break;
       case none :
          if(msg.req_blocks.mode == none)
             c->stop_send();
-         // no break
-      case normal :
-         if( !msg.req_trx.ids.empty() ) {
-            elog( "Invalid request_message, req_trx.ids.size ${s}", ("s", msg.req_trx.ids.size()) );
-            close(c);
-            return;
-         }
          break;
       default:;
       }
@@ -3600,7 +3621,7 @@ namespace eosio {
          }
 
 
-          if( options.count( "p2p-peer-address" )) {
+         if( options.count( "p2p-peer-address" )) {
             my->supplied_peers = options.at( "p2p-peer-address" ).as<vector<string> >();
          }
          if( options.count( "agent-name" )) {
@@ -3655,7 +3676,7 @@ namespace eosio {
       try {
           my->producer_plug = app().find_plugin<producer_plugin>();
 
-          auto resolver = std::make_shared<tcp::resolver>( app().get_io_service() );
+          auto resolver = std::make_shared<tcp::resolver>( std::ref(app().get_io_service()) );
           if( my->p2p_address.size() > 0 ) {
              auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
              auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
@@ -3664,7 +3685,7 @@ namespace eosio {
 
              my->listen_endpoint = *resolver->resolve( query );
 
-             my->acceptor.reset( new tcp::acceptor( std::ref(app().get_io_service()) ) );
+             my->acceptor.reset( new tcp::acceptor( std::ref(app().get_io_service())) );
 
              if( !my->p2p_server_address.empty() ) {
                 my->p2p_address = my->p2p_server_address;
