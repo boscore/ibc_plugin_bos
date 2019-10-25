@@ -180,11 +180,11 @@
 
 	printf "\\n\\tChecking boost library installation.\\n"
 	BVERSION=$( grep "#define BOOST_VERSION" "/usr/local/include/boost/version.hpp" 2>/dev/null | tail -1 | tr -s ' ' | cut -d\  -f3 )
-	if [ "${BVERSION}" != "106700" ]; then
+	if [ "${BVERSION}" != "107100" ]; then
 		if [ ! -z "${BVERSION}" ]; then
 			printf "\\tFound Boost Version %s.\\n" "${BVERSION}"
-			printf "\\tEOS.IO requires Boost version 1.67.\\n"
-			printf "\\tWould you like to uninstall version %s and install Boost version 1.67.\\n" "${BVERSION}"
+			printf "\\tEOS.IO requires Boost version 1.71.\\n"
+			printf "\\tWould you like to uninstall version %s and install Boost version 1.71.\\n" "${BVERSION}"
 			if is_noninteractive; then exec <<< "1"; fi
 			select yn in "Yes" "No"; do
 				case $yn in
@@ -222,7 +222,7 @@
 		printf "\\tInstalling boost libraries.\\n"
 		if ! "${BREW}" install "${SOURCE_DIR}/scripts/boost.rb"
 		then
-			printf "\\tUnable to install boost 1.67 libraries at this time. 0\\n"
+			printf "\\tUnable to install boost 1.71 libraries at this time. 0\\n"
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
@@ -234,9 +234,9 @@
 			exit 1;
 			fi
 		fi
-		printf "\\tBoost 1.67.0 successfully installed @ /usr/local.\\n"
+		printf "\\tBoost 1.71.0 successfully installed @ /usr/local.\\n"
 	else
-		printf "\\tBoost 1.67.0 found at /usr/local.\\n"
+		printf "\\tBoost 1.71.0 found at /usr/local.\\n"
 	fi
 
 	printf "\\n\\tChecking MongoDB C++ driver installation.\\n"

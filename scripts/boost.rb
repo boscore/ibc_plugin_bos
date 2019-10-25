@@ -1,37 +1,19 @@
 class Boost < Formula
   desc "Collection of portable C++ source libraries"
   homepage "https://www.boost.org/"
-  revision 1
+  url "https://dl.bintray.com/boostorg/release/1.71.0/source/boost_1_71_0.tar.bz2"
+  sha256 "d73a8da01e8bf8c7eda40b4c84915071a8c8a0df4a6734537ddde4a8580524ee"
   head "https://github.com/boostorg/boost.git"
-
-  stable do
-    url "https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2"
-    sha256 "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba"
-
-    # Remove for > 1.67.0
-    # Fix "error: no member named 'next' in namespace 'boost'"
-    # Upstream commit from 1 Dec 2017 "Add #include <boost/next_prior.hpp>; no
-    # longer in utility.hpp"
-    patch :p2 do
-      url "https://github.com/boostorg/lockfree/commit/12726cd.patch?full_index=1"
-      sha256 "f165823d961a588b622b20520668b08819eb5fdc08be7894c06edce78026ce0a"
-    end
-  end
 
   bottle do
     cellar :any
-    sha256 "265ab8beaa6fa26a7c305ef2e6aec8bd26ca1db105aca0aaca028f32c5245a90" => :high_sierra
-    sha256 "567f3e9a294413c1701b698d666a521cfdeec846e256c6e66576d5b70eb26f08" => :sierra
-    sha256 "3f3f687a620f656fe2ac54f01306e00e6bbc0e9797db284a8d272648d427e640" => :el_capitan
+    rebuild 1
+    sha256 "41a5d38f5a7c626a064f5c5a9f8d620b76e9b5f2cf7eda85a52998a86b33bc85" => :catalina
+    sha256 "9e026db92f0a38c7c222227c39d54c350490046e7e86920668f300ba4a773a32" => :mojave
+    sha256 "8bd88f7245f35545ea5b3091408660148e6e819effe29191161da4968f15800d" => :high_sierra
   end
 
-  option "with-icu4c", "Build regexp engine with icu support"
-  option "without-single", "Disable building single-threading variant"
-  option "without-static", "Disable building static library variant"
-
-  deprecated_option "with-icu" => "with-icu4c"
-
-  depends_on "icu4c" => :optional
+  depends_on "icu4c"
 
   def install
     # Force boost to compile with the desired compiler
@@ -40,14 +22,12 @@ class Boost < Formula
     end
 
     # libdir should be set by --prefix but isn't
-    bootstrap_args = ["--prefix=#{prefix}", "--libdir=#{lib}"]
-
-    if build.with? "icu4c"
-      icu4c_prefix = Formula["icu4c"].opt_prefix
-      bootstrap_args << "--with-icu=#{icu4c_prefix}"
-    else
-      bootstrap_args << "--without-icu"
-    end
+    icu4c_prefix = Formula["icu4c"].opt_prefix
+    bootstrap_args = %W[
+      --prefix=#{prefix}
+      --libdir=#{lib}
+      --with-icu=#{icu4c_prefix}
+    ]
 
     # Handle libraries that will not be built.
     without_libraries = ["python", "mpi"]
@@ -59,30 +39,23 @@ class Boost < Formula
     bootstrap_args << "--without-libraries=#{without_libraries.join(",")}"
 
     # layout should be synchronized with boost-python and boost-mpi
-    args = ["--prefix=#{prefix}",
-            "--libdir=#{lib}",
-            "-d2",
-            "-j#{ENV.make_jobs}",
-            "--layout=tagged",
-            "--user-config=user-config.jam",
-            "-sNO_LZMA=1",
-            "install"]
+    args = %W[
+      --prefix=#{prefix}
+      --libdir=#{lib}
+      -d2
+      -j#{ENV.make_jobs}
+      --layout=tagged-1.66
+      --user-config=user-config.jam
+      -sNO_LZMA=1
+      -sNO_ZSTD=1
+      install
+      threading=multi,single
+      link=shared,static
+    ]
 
-    if build.with? "single"
-      args << "threading=multi,single"
-    else
-      args << "threading=multi"
-    end
-
-    if build.with? "static"
-      args << "link=shared,static"
-    else
-      args << "link=shared"
-    end
-
-    # Trunk starts using "clang++ -x c" to select C compiler which breaks C++11
-    # handling using ENV.cxx11. Using "cxxflags" and "linkflags" still works.
-    args << "cxxflags=-std=c++11"
+    # Boost is using "clang++ -x c" to select C compiler which breaks C++14
+    # handling using ENV.cxx14. Using "cxxflags" and "linkflags" still works.
+    args << "cxxflags=-std=c++14"
     if ENV.compiler == :clang
       args << "cxxflags=-stdlib=libc++" << "linkflags=-stdlib=libc++"
     end
@@ -113,7 +86,6 @@ class Boost < Formula
       #include <assert.h>
       using namespace boost::algorithm;
       using namespace std;
-
       int main()
       {
         string str("a,b");
@@ -125,7 +97,7 @@ class Boost < Formula
         return 0;
       }
     EOS
-    system ENV.cxx, "test.cpp", "-std=c++1y", "-L#{lib}", "-lboost_system", "-o", "test"
+    system ENV.cxx, "test.cpp", "-std=c++14", "-stdlib=libc++", "-o", "test"
     system "./test"
   end
 end
