@@ -322,15 +322,14 @@ struct controller_impl {
       auto start = fc::time_point::now();
       while( auto next = blog.read_block_by_num( head->block_num + 1 ) ) {
          replay_push_block( next, controller::block_status::irreversible );
-         if( next->block_num() % 100 == 0 ) {
-            std::cerr << std::setw(10) << next->block_num() << " of " << blog_head->block_num() <<"\r";
+         if( next->block_num() % 500 == 0 ) {
+            ilog( "${n} of ${head}", ("n", next->block_num())("head", blog_head->block_num()) );
             if( shutdown() ) break;
          }
       }
-      std::cerr<< "\n";
       ilog( "${n} blocks replayed", ("n", head->block_num - start_block_num) );
 
-      // if the irreverible log is played without undo sessions enabled, we need to sync the
+      // if the irreversible log is played without undo sessions enabled, we need to sync the
       // revision ordinal to the appropriate expected value here.
       if( self.skip_db_sessions( controller::block_status::irreversible ) )
          db.set_revision(head->block_num);
@@ -389,7 +388,7 @@ struct controller_impl {
             report_integrity_hash = true;
          }
       }
-      
+
       if( shutdown() ) return;
 
       const auto& ubi = reversible_blocks.get_index<reversible_block_index,by_num>();
@@ -921,17 +920,14 @@ struct controller_impl {
    void commit_block( bool add_to_fork_db ) {
       auto reset_pending_on_exit = fc::make_scoped_exit([this]{
          pending.reset();
-
       });
 
       try {
-
          if (add_to_fork_db) {
             pending->_pending_block_state->validated = true;
 
             auto new_bsp = fork_db.add(pending->_pending_block_state, true, pbft_enabled);
             emit(self.accepted_block_header, pending->_pending_block_state);
-
             head = fork_db.head();
             EOS_ASSERT(new_bsp == head, fork_database_exception, "committed block did not become the new head in fork database");
          }
@@ -1380,7 +1376,6 @@ struct controller_impl {
       pending->_pending_block_state->in_current_chain = true;
 
       pending->_pending_block_state->set_confirmed(confirm_block_count, pbft_enabled);
-
 
       auto was_pending_promoted = pending->_pending_block_state->maybe_promote_pending(pbft_enabled);
 

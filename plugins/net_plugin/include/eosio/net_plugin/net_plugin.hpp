@@ -30,7 +30,6 @@ namespace eosio {
         void plugin_startup();
         void plugin_shutdown();
 
-
         void   broadcast_block(const chain::signed_block &sb);
 
         string                       connect( const string& endpoint );
@@ -43,7 +42,7 @@ namespace eosio {
 
         size_t num_peers() const;
       private:
-        std::unique_ptr<class net_plugin_impl> my;
+        std::shared_ptr<class net_plugin_impl> my;
    };
 
 }
