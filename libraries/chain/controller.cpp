@@ -1661,7 +1661,7 @@ struct controller_impl {
                  b = fork_db.get_block(b->prev());
              }
              while (!libs_to_be_emitted.empty()) {
-                 emit( self.irreversible_block, libs_to_be_emitted.back() );
+                 emit( self.new_irreversible_block, libs_to_be_emitted.back() );
                  libs_to_be_emitted.pop_back();
              }
          }
