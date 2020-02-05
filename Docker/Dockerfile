@@ -1,4 +1,4 @@
-FROM frank2018/update-boost:0.1.0 as builder
+FROM frank2018/eosbuilder:v1.0.3 as builder
 ARG branch=update-boost-downgrade-chainbase
 ARG symbol=EOS
 
