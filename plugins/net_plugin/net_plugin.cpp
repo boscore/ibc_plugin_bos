@@ -835,7 +835,7 @@ namespace eosio {
       : blk_state(),
         trx_state(),
         peer_requested(),
-        socket( std::make_shared<tcp::socket>( std::ref(app().get_io_service()) )),
+        socket( std::make_shared<tcp::socket>( app().get_io_service()) ),
         node_id(),
         last_handshake_recv(),
         last_handshake_sent(),
@@ -917,7 +917,7 @@ namespace eosio {
    void connection::close() {
       if(socket) {
          socket->close();
-         socket.reset( new tcp::socket( std::ref(app().get_io_service())) );
+         socket.reset( new tcp::socket( app().get_io_service()) );
       }
       else {
          wlog("no socket to close!");
@@ -2180,7 +2180,7 @@ namespace eosio {
       connection_wptr weak_conn = c;
       // Note: need to add support for IPv6 too
 
-      auto resolver = std::make_shared<tcp::resolver>( std::ref(app().get_io_service()) );
+      auto resolver = std::make_shared<tcp::resolver>( app().get_io_service() );
       resolver->async_resolve( query,
                 [weak_conn, resolver, this]( const boost::system::error_code& err, tcp::resolver::results_type endpoints ) {
                       auto c = weak_conn.lock();
@@ -2276,7 +2276,7 @@ namespace eosio {
 
 
    void net_plugin_impl::start_listen_loop() {
-      auto socket = std::make_shared<tcp::socket>( std::ref( app().get_io_service() ) );
+      auto socket = std::make_shared<tcp::socket>(  app().get_io_service() );
       acceptor->async_accept( *socket, [socket,this]( boost::system::error_code ec ) {
             if( !ec ) {
                uint32_t visitors = 0;
@@ -3676,7 +3676,7 @@ namespace eosio {
       try {
           my->producer_plug = app().find_plugin<producer_plugin>();
 
-          auto resolver = std::make_shared<tcp::resolver>( std::ref(app().get_io_service()) );
+          auto resolver = std::make_shared<tcp::resolver>( app().get_io_service() );
           if( my->p2p_address.size() > 0 ) {
              auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
              auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
@@ -3685,7 +3685,7 @@ namespace eosio {
 
              my->listen_endpoint = *resolver->resolve( query );
 
-             my->acceptor.reset( new tcp::acceptor( std::ref(app().get_io_service())) );
+             my->acceptor.reset( new tcp::acceptor( app().get_io_service()) );
 
              if( !my->p2p_server_address.empty() ) {
                 my->p2p_address = my->p2p_server_address;

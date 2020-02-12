@@ -144,6 +144,7 @@ public:
    ,accepted_block_header_channel(app().get_channel<channels::accepted_block_header>())
    ,accepted_block_channel(app().get_channel<channels::accepted_block>())
    ,irreversible_block_channel(app().get_channel<channels::irreversible_block>())
+   ,new_irreversible_block_channel(app().get_channel<channels::new_irreversible_block>())
    ,accepted_transaction_channel(app().get_channel<channels::accepted_transaction>())
    ,applied_transaction_channel(app().get_channel<channels::applied_transaction>())
    ,accepted_confirmation_channel(app().get_channel<channels::accepted_confirmation>())
@@ -189,10 +190,11 @@ public:
    channels::accepted_block_header::channel_type&  accepted_block_header_channel;
    channels::accepted_block::channel_type&         accepted_block_channel;
    channels::irreversible_block::channel_type&     irreversible_block_channel;
+   channels::new_irreversible_block::channel_type&     new_irreversible_block_channel;
    channels::accepted_transaction::channel_type&   accepted_transaction_channel;
    channels::applied_transaction::channel_type&    applied_transaction_channel;
    channels::accepted_confirmation::channel_type&  accepted_confirmation_channel;
-   incoming::channels::block::channel_type&         incoming_block_channel;
+   incoming::channels::block::channel_type&        incoming_block_channel;
 
    // retained references to methods for easy calling
    incoming::methods::block_sync::method_type&        incoming_block_sync_method;
@@ -209,6 +211,7 @@ public:
    fc::optional<scoped_connection>                                   accepted_block_header_connection;
    fc::optional<scoped_connection>                                   accepted_block_connection;
    fc::optional<scoped_connection>                                   irreversible_block_connection;
+   fc::optional<scoped_connection>                                   new_irreversible_block_connection;
    fc::optional<scoped_connection>                                   accepted_transaction_connection;
    fc::optional<scoped_connection>                                   applied_transaction_connection;
    fc::optional<scoped_connection>                                   accepted_confirmation_connection;
@@ -787,6 +790,10 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
          my->irreversible_block_channel.publish( blk );
       } );
 
+      my->new_irreversible_block_connection = my->chain->new_irreversible_block.connect( [this]( const block_state_ptr& blk ) {
+         my->new_irreversible_block_channel.publish( blk );
+      } );
+
       my->accepted_transaction_connection = my->chain->accepted_transaction.connect(
             [this]( const transaction_metadata_ptr& meta ) {
                my->accepted_transaction_channel.publish( meta );
@@ -911,6 +918,7 @@ void chain_plugin::plugin_shutdown() {
    my->accepted_block_header_connection.reset();
    my->accepted_block_connection.reset();
    my->irreversible_block_connection.reset();
+   my->new_irreversible_block_connection.reset();
    my->accepted_transaction_connection.reset();
    my->applied_transaction_connection.reset();
    my->accepted_confirmation_connection.reset();
