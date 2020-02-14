@@ -1,11 +1,11 @@
-FROM boscore/builder as builder
+FROM boscore/builder:v2.0.4 as builder
 ARG branch=master
 ARG symbol=SYS
 
 ENV OPENSSL_ROOT_DIR /usr/include/openssl
 
 RUN git clone -b $branch https://github.com/boscore/bos.git --recursive \
-    && cd bos && echo "$branch:$(git rev-parse HEAD)" > /etc/eosio-version \
+    && cd bos && echo "$branch:$(git rev-parse HEAD)" > /etc/boscore-version \
     && cmake -H. -B"/tmp/build" -GNinja -DCMAKE_BUILD_TYPE=Release -DWASM_ROOT=/opt/wasm -DCMAKE_CXX_COMPILER=clang++ \
        -DCMAKE_C_COMPILER=clang -DCMAKE_INSTALL_PREFIX=/tmp/build -DBUILD_MONGO_DB_PLUGIN=true -DCORE_SYMBOL_NAME=$symbol \
        -DOPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR}" -DCMAKE_CXX_STANDARD_LIBRARIES="-lpthread"  \

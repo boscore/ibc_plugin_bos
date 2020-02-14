@@ -314,7 +314,7 @@
 		printf "\\t - CMAKE found @ %s.\\n" "${CMAKE}"
 	fi
 
-	BOOSTTGZ="boost_1_67_0.tar.bz2"
+	BOOSTTGZ="boost_1_71_0.tar.bz2"
 	BOOSTFOLDER=$(echo "${BOOSTTGZ}" | sed 's/.tar.bz2//g')
 	if [ -d "${HOME}/opt/${BOOSTFOLDER}" ]; then
 		if ! mv "${HOME}/opt/${BOOSTFOLDER}" "${BOOST_ROOT}"; then
@@ -334,7 +334,7 @@
 	printf "\\tChecking boost library installation...\\n"
 	BOOSTVERSION=$( grep "#define BOOST_VERSION" "${BOOST_ROOT}/include/boost/version.hpp" 2>/dev/null \
 	| tail -1 | tr -s ' ' | cut -d\  -f3)
-	if [ "${BOOSTVERSION}" != "106700" ]; then
+	if [ "${BOOSTVERSION}" != "107100" ]; then
 		printf "\\tRemoving existing boost libraries in %s/opt/boost*...\\n" "${HOME}"
 		if ! rm -rf "${HOME}"/opt/boost*; then
 			printf "\\t!! Unable to remove deprecated boost libraries at %s/opt/boost* !!\\n" "${HOME}"
@@ -347,7 +347,7 @@
 			printf "\\tExiting now.\\n"
 			exit 1;
 		fi
-		BOOSTURL="https://dl.bintray.com/boostorg/release/1.67.0/source/${BOOSTTGZ}"
+		BOOSTURL="https://dl.bintray.com/boostorg/release/1.71.0/source/${BOOSTTGZ}"
 		STATUS=$(curl -LO -w '%{http_code}' --connect-timeout 30 "${BOOSTURL}")
 		if [ "${STATUS}" -ne 200 ]; then
 			printf "\\t!! Unable to download Boost libraries from ${BOOSTURL} !!\\n"
@@ -380,7 +380,7 @@
 			exit 1;
 		fi
 		if ! rm -rf "${TEMP_DIR}/${BOOSTFOLDER}/"; then
-			printf "\\t!! Unable to remove directory %s/boost_1_67_0 !!\\n" "${TEMP_DIR}"
+			printf "\\t!! Unable to remove directory %s/boost_1_71_0 !!\\n" "${TEMP_DIR}"
 			printf "\\tExiting now.\\n"
 			exit 1;
 		fi

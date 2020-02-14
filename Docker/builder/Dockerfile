@@ -26,13 +26,13 @@ RUN wget https://cmake.org/files/v3.9/cmake-3.9.6-Linux-x86_64.sh \
 ENV CC clang
 ENV CXX clang++
 
-RUN wget https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 -O - | tar -xj \
-    && cd boost_1_67_0 \
+RUN wget https://dl.bintray.com/boostorg/release/1.71.0/source/boost_1_71_0.tar.bz2 -O - | tar -xj \
+    && cd boost_1_71_0 \
     && ./bootstrap.sh --prefix=/usr/local \
     && echo 'using clang : 4.0 : clang++-4.0 ;' >> project-config.jam \
     && ./b2 -d0 -j$(nproc) --with-thread --with-date_time --with-system --with-filesystem --with-program_options \
-       --with-signals --with-serialization --with-chrono --with-test --with-context --with-locale --with-coroutine --with-iostreams toolset=clang link=static install \
-    && cd .. && rm -rf boost_1_67_0
+       --with-serialization --with-chrono --with-test --with-context --with-locale --with-coroutine --with-iostreams toolset=clang link=static install \
+    && cd .. && rm -rf boost_1_71_0
 
 RUN wget https://github.com/mongodb/mongo-c-driver/releases/download/1.10.2/mongo-c-driver-1.10.2.tar.gz -O - | tar -xz \
     && cd mongo-c-driver-1.10.2 \

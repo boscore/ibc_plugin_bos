@@ -236,7 +236,10 @@ struct controller_impl {
    template<typename Signal, typename Arg>
    void emit( const Signal& s, Arg&& a ) {
       try {
-        s(std::forward<Arg>(a));
+         s( std::forward<Arg>( a ));
+      } catch (std::bad_alloc& e) {
+         wlog( "std::bad_alloc" );
+         throw e;
       } catch (boost::interprocess::bad_alloc& e) {
          wlog( "bad alloc" );
          throw e;
@@ -466,9 +469,6 @@ struct controller_impl {
 
    ~controller_impl() {
       pending.reset();
-
-      db.flush();
-      reversible_blocks.flush();
    }
 
    void add_indices() {
@@ -670,7 +670,6 @@ struct controller_impl {
 
       return enc.result();
    }
-
 
    /**
     *  Sets fork database head to the genesis state.
@@ -1651,7 +1650,22 @@ struct controller_impl {
       if (!pbft_enabled) return;
 
       if ( pending_pbft_lib ) {
+         //this is a temp solution for getting current lib, should not use anywhere else;
+         auto current_lib = fork_db.get_block_in_current_chain_by_num(head->bft_irreversible_blocknum)->id;
          fork_db.set_bft_irreversible(*pending_pbft_lib);
+         if (!replaying) {
+             auto libs_to_be_emitted = vector<block_state_ptr>{};
+             auto b = fork_db.get_block(*pending_pbft_lib);
+             while (b->id != current_lib) {
+                 libs_to_be_emitted.emplace_back(b);
+                 b = fork_db.get_block(b->prev());
+             }
+             while (!libs_to_be_emitted.empty()) {
+                 emit( self.new_irreversible_block, libs_to_be_emitted.back() );
+                 libs_to_be_emitted.pop_back();
+             }
+         }
+
          pending_pbft_lib.reset();
 
          if (!pending && read_mode != db_read_mode::IRREVERSIBLE) {

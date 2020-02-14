@@ -218,10 +218,10 @@
 		printf "\\tCMAKE found @ %s.\\n" "${CMAKE}"
 	fi
 
-	if [ -d "${HOME}/opt/boost_1_67_0" ]; then
-		if ! mv "${HOME}/opt/boost_1_67_0" "$BOOST_ROOT"
+	if [ -d "${HOME}/opt/boost_1_71_0" ]; then
+		if ! mv "${HOME}/opt/boost_1_71_0" "$BOOST_ROOT"
 		then
-			printf "\\n\\tUnable to move directory %s/opt/boost_1_67_0 to %s.\\n" "${HOME}" "${BOOST_ROOT}"
+			printf "\\n\\tUnable to move directory %s/opt/boost_1_71_0 to %s.\\n" "${HOME}" "${BOOST_ROOT}"
 			printf "\\n\\tExiting now.\\n"
 			exit 1
 		fi
@@ -238,7 +238,7 @@
 	printf "\\n\\tChecking boost library installation.\\n"
 	BVERSION=$( grep "BOOST_LIB_VERSION" "${BOOST_ROOT}/include/boost/version.hpp" 2>/dev/null \
 	| tail -1 | tr -s ' ' | cut -d\  -f3 | sed 's/[^0-9\._]//gI' )
-	if [ "${BVERSION}" != "1_67" ]; then
+	if [ "${BVERSION}" != "1_71" ]; then
 		printf "\\tRemoving existing boost libraries in %s/opt/boost*.\\n" "${HOME}"
 		if ! rm -rf "${HOME}"/opt/boost*
 		then
@@ -254,27 +254,27 @@
 			exit 1
 		fi
 		STATUS=$(curl -LO -w '%{http_code}' --connect-timeout 30 \
-		"https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2" )
+		"https://dl.bintray.com/boostorg/release/1.71.0/source/boost_1_71_0.tar.bz2" )
 		if [ "${STATUS}" -ne 200 ]; then
 			printf "\\tUnable to download Boost libraries at this time.\\n"
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! tar xf "${TEMP_DIR}/boost_1_67_0.tar.bz2"
+		if ! tar xf "${TEMP_DIR}/boost_1_71_0.tar.bz2"
 		then
-			printf "\\tUnable to decompress Boost libraries @ %s/boost_1_67_0.tar.bz2 at this time.\\n" "${TEMP_DIR}"
+			printf "\\tUnable to decompress Boost libraries @ %s/boost_1_71_0.tar.bz2 at this time.\\n" "${TEMP_DIR}"
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! rm -f  "${TEMP_DIR}/boost_1_67_0.tar.bz2"
+		if ! rm -f  "${TEMP_DIR}/boost_1_71_0.tar.bz2"
 		then
-			printf "\\tUnable to remove Boost libraries @ %s/boost_1_67_0.tar.bz2 at this time.\\n" "${TEMP_DIR}"
+			printf "\\tUnable to remove Boost libraries @ %s/boost_1_71_0.tar.bz2 at this time.\\n" "${TEMP_DIR}"
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! cd "${TEMP_DIR}/boost_1_67_0/"
+		if ! cd "${TEMP_DIR}/boost_1_71_0/"
 		then
-			printf "\\tUnable to change directory into %s/boost_1_67_0/ at this time.\\n" "${TEMP_DIR}"
+			printf "\\tUnable to change directory into %s/boost_1_71_0/ at this time.\\n" "${TEMP_DIR}"
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
@@ -284,15 +284,15 @@
 			printf "\\n\\tExiting now.\\n"
 			exit 1
 		fi
-		if ! "${TEMP_DIR}"/boost_1_67_0/b2 -j"${CPU_CORE}" install
+		if ! "${TEMP_DIR}"/boost_1_71_0/b2 -j"${CPU_CORE}" install
 		then
 			printf "\\n\\tInstallation of boost libraries failed. 1\\n"
 			printf "\\n\\tExiting now.\\n"
 			exit 1
 		fi
-		if ! rm -rf "${TEMP_DIR}/boost_1_67_0/"
+		if ! rm -rf "${TEMP_DIR}/boost_1_71_0/"
 		then
-			printf "\\n\\tUnable to remove boost libraries directory @ %s/boost_1_67_0/.\\n" "${TEMP_DIR}"
+			printf "\\n\\tUnable to remove boost libraries directory @ %s/boost_1_71_0/.\\n" "${TEMP_DIR}"
 			printf "\\n\\tExiting now.\\n"
 			exit 1
 		fi

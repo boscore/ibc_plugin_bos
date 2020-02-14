@@ -187,8 +187,8 @@
          ;;
          "elementary OS")
             FILE="${SOURCE_DIR}/scripts/eosio_build_ubuntu.sh"
-            CXX_COMPILER=clang++-4.0
-            C_COMPILER=clang-4.0
+            CXX_COMPILER=clang++
+            C_COMPILER=clang
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
             export PATH=${HOME}/opt/mongodb/bin:$PATH
          ;;
@@ -201,22 +201,22 @@
          ;;
          "Linux Mint")
             FILE="${SOURCE_DIR}/scripts/eosio_build_ubuntu.sh"
-            CXX_COMPILER=clang++-4.0
-            C_COMPILER=clang-4.0
+            CXX_COMPILER=clang++
+            C_COMPILER=clang
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
             export PATH=${HOME}/opt/mongodb/bin:$PATH
          ;;
          "Ubuntu")
             FILE="${SOURCE_DIR}/scripts/eosio_build_ubuntu.sh"
-            CXX_COMPILER=clang++-4.0
-            C_COMPILER=clang-4.0
+            CXX_COMPILER=clang++
+            C_COMPILER=clang
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
             export PATH=${HOME}/opt/mongodb/bin:$PATH
          ;;
          "Debian GNU/Linux")
             FILE=${SOURCE_DIR}/scripts/eosio_build_ubuntu.sh
-            CXX_COMPILER=clang++-4.0
-            C_COMPILER=clang-4.0
+            CXX_COMPILER=clang++
+            C_COMPILER=clang
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
             export PATH=${HOME}/opt/mongodb/bin:$PATH
          ;;
