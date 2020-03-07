@@ -81,6 +81,7 @@ public:
 
    integrity_hash_information get_integrity_hash() const;
    snapshot_information create_snapshot() const;
+   snapshot_information create_acts_snapshot() const;
 
    signal<void(const chain::producer_confirmation&)> confirmed_block;
 private:

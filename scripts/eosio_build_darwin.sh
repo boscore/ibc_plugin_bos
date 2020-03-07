@@ -68,7 +68,7 @@
 	printf "\\tChecking Home Brew installation\\n"
 	if ! BREW=$( command -v brew )
 	then
-		printf "\\tHomebrew must be installed to compile EOS.IO\\n\\n"
+		printf "\\tHomebrew must be installed to compile EOSIO\\n\\n"
 		printf "\\tDo you wish to install Home Brew?\\n"
 		if is_noninteractive; then exec <<< "1"; fi
 		select yn in "Yes" "No"; do
@@ -177,13 +177,23 @@
 		printf "\\n\\tNo required Home Brew dependencies to install.\\n"
 	fi
 
-
+	printf "\\n\\tChecking clang in CommandLineTools for MacOS.\\n"
+	which clang | grep CommandLineTools 1> /dev/null
+	ISCMDCLANG=$?
+	if [ ${ISCMDCLANG} -ne 0 ]; then
+		print "\\tPlease use the Apple clang version 11.0.0 at least.\\n"
+		print "\\tIf installed, please change the PATH to use it\\n"
+		print "\\tOr download v11.3.1 from: https://developer.apple.com/download/more/. \\n"
+		printf "\\tExiting now.\\n\\n"
+		exit 1;
+	fi
+	
 	printf "\\n\\tChecking boost library installation.\\n"
 	BVERSION=$( grep "#define BOOST_VERSION" "/usr/local/include/boost/version.hpp" 2>/dev/null | tail -1 | tr -s ' ' | cut -d\  -f3 )
 	if [ "${BVERSION}" != "107100" ]; then
 		if [ ! -z "${BVERSION}" ]; then
 			printf "\\tFound Boost Version %s.\\n" "${BVERSION}"
-			printf "\\tEOS.IO requires Boost version 1.71.\\n"
+			printf "\\tEOSIO requires Boost version 1.71.\\n"
 			printf "\\tWould you like to uninstall version %s and install Boost version 1.71.\\n" "${BVERSION}"
 			if is_noninteractive; then exec <<< "1"; fi
 			select yn in "Yes" "No"; do

@@ -2030,6 +2030,62 @@ read_only::get_account_results read_only::get_account( const get_account_params&
    return result;
 }
 
+read_only::get_act_token_result read_only::get_act_token( const name& account_name )const {
+   get_act_token_result token_result{0.0, 0.0, 0.0, 0.0, 0.0};
+   
+   get_account_params params{account_name};
+   get_account_results res = get_account(params);
+
+   if( res.core_liquid_balance.valid() ) {
+      token_result.liquid_balance = res.core_liquid_balance->to_real();
+   }
+   
+   double cpu_own = 0.0, net_own = 0.0, cpu_total = 0.0, net_total = 0.0;
+   if ( res.total_resources.is_object() ) {
+      net_total = asset::from_string(res.total_resources.get_object()["net_weight"].as_string()).to_real();
+      cpu_total = asset::from_string(res.total_resources.get_object()["cpu_weight"].as_string()).to_real();
+   }
+   if( res.self_delegated_bandwidth.is_object() ) {
+      cpu_own = asset::from_string( res.self_delegated_bandwidth.get_object()["cpu_weight"].as_string() ).to_real();
+      net_own = asset::from_string( res.self_delegated_bandwidth.get_object()["net_weight"].as_string() ).to_real();
+   }
+   token_result.self_staked = cpu_own + net_own;
+   token_result.other_staked = net_total + cpu_total - token_result.self_staked; 
+   if( res.refund_request.is_object() ) {
+      auto obj = res.refund_request.get_object();
+      token_result.unstaking = asset::from_string( obj["net_amount"].as_string() ).to_real() + asset::from_string( obj["cpu_amount"].as_string() ).to_real();
+   }
+   // REX 
+   const auto& d = db.db();
+   const auto& code_account = db.db().get<account_object,by_name>( config::system_account_name );
+   abi_def abi;
+   if( abi_serializer::to_abi(code_account.abi, abi) ) {
+      abi_serializer abis( abi, abi_serializer_max_time );
+   
+      const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple( config::system_account_name, config::system_account_name, N(rexfund) ));
+      if (t_id != nullptr) {
+         const auto &idx = d.get_index<key_value_index, by_scope_primary>();
+         auto it = idx.find(boost::make_tuple( t_id->id, account_name ));
+         if ( it != idx.end() ) {
+            vector<char> data;
+            copy_inline_row(*it, data);
+            token_result.rex_deposit = abis.binary_to_variant( "rex_fund", data, abi_serializer_max_time, shorten_abi_errors ).get_object()["balance"].as<asset>().to_real();
+         }
+      }
+      t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple( config::system_account_name, config::system_account_name, N(rexbal) ));
+      if (t_id != nullptr) {
+         const auto &idx = d.get_index<key_value_index, by_scope_primary>();
+         auto it = idx.find(boost::make_tuple( t_id->id, account_name ));
+         if ( it != idx.end() ) {
+            vector<char> data;
+            copy_inline_row(*it, data);
+            token_result.rex_deposit += abis.binary_to_variant( "rex_balance", data, abi_serializer_max_time, shorten_abi_errors ).get_object()["vote_stake"].as<asset>().to_real();
+         }
+      }
+   }
+   return token_result;
+}
+
 static variant action_abi_to_variant( const abi_def& abi, type_name action_type ) {
    variant v;
    auto it = std::find_if(abi.structs.begin(), abi.structs.end(), [&](auto& x){return x.name == action_type;});
