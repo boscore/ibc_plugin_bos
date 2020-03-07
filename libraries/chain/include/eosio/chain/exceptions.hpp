@@ -230,6 +230,8 @@ namespace eosio { namespace chain {
                                     3060003, "Contract Table Query Exception" )
       FC_DECLARE_DERIVED_EXCEPTION( contract_query_exception,       database_exception,
                                     3060004, "Contract Query Exception" )
+      FC_DECLARE_DERIVED_EXCEPTION( bad_database_version_exception, database_exception,
+                                    3060005, "Database is an unknown or unsupported version" )
 
    FC_DECLARE_DERIVED_EXCEPTION( guard_exception, database_exception,
                                  3060100, "Guard Exception" )
@@ -272,6 +274,7 @@ namespace eosio { namespace chain {
                                     3080007, "Transaction exceeded the current greylisted account network usage limit" )
       FC_DECLARE_DERIVED_EXCEPTION( greylist_cpu_usage_exceeded, resource_exhausted_exception,
                                     3080008, "Transaction exceeded the current greylisted account CPU usage limit" )
+
       FC_DECLARE_DERIVED_EXCEPTION( leeway_deadline_exception, deadline_exception,
                                     3081001, "Transaction reached the deadline set due to leeway on account CPU limits" )
 
@@ -482,6 +485,8 @@ namespace eosio { namespace chain {
                                     3190003, "block log can not be found" )
       FC_DECLARE_DERIVED_EXCEPTION( block_log_backup_dir_exist, block_log_exception,
                                     3190004, "block log backup dir already exists" )
+      FC_DECLARE_DERIVED_EXCEPTION( block_index_not_found, block_log_exception,
+                                    3190005, "block index can not be found"  )
 
    FC_DECLARE_DERIVED_EXCEPTION( http_exception, chain_exception,
                                  3200000, "http exception" )

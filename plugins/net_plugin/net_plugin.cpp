@@ -72,14 +72,6 @@ namespace eosio {
    struct by_expiry;
    struct by_block_num;
 
-   struct sha256_less {
-      bool operator()( const sha256& lhs, const sha256& rhs ) const {
-       return
-             std::tie(lhs._hash[0], lhs._hash[1], lhs._hash[2], lhs._hash[3]) <
-             std::tie(rhs._hash[0], rhs._hash[1], rhs._hash[2], rhs._hash[3]);
-      }
-   };
-
    typedef multi_index_container<
       node_transaction_state,
       indexed_by<

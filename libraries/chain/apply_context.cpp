@@ -8,6 +8,7 @@
 #include <eosio/chain/authorization_manager.hpp>
 #include <eosio/chain/resource_limits.hpp>
 #include <eosio/chain/account_object.hpp>
+#include <eosio/chain/code_object.hpp>
 #include <eosio/chain/global_property_object.hpp>
 #include <boost/container/flat_set.hpp>
 
@@ -48,10 +49,11 @@ void apply_context::exec_one( action_trace& trace )
    global_action_sequence = p.global_action_sequence + 1;
 
    const auto& cfg = control.get_global_properties().configuration;
+   const account_metadata_object* receiver_account = nullptr;
    try {
       try {
-         const auto& a = control.get_account( receiver );
-         privileged = a.privileged;
+         receiver_account = &db.get<account_metadata_object,by_name>( receiver );
+		 privileged = receiver_account->is_privileged();
          auto native = control.find_apply_handler( receiver, act.account, act.name );
          if( native ) {
             if( trx_context.enforce_whiteblacklist && control.is_producing_block() ) {
@@ -61,15 +63,15 @@ void apply_context::exec_one( action_trace& trace )
             (*native)( *this );
          }
 
-         if( a.code.size() > 0
-             && !(act.account == config::system_account_name && act.name == N( setcode ) &&
+         if( receiver_account->code_hash != digest_type()  &&
+             !(act.account == config::system_account_name && act.name == N( setcode ) &&
                   receiver == config::system_account_name) ) {
             if( trx_context.enforce_whiteblacklist && control.is_producing_block() ) {
                control.check_contract_list( receiver );
                control.check_action_list( act.account, act.name );
             }
             try {
-               control.get_wasm_interface().apply( a.code_version, a.code, *this );
+               control.get_wasm_interface().apply( receiver_account->code_hash, receiver_account->vm_type, receiver_account->vm_version, *this );
             } catch( const wasm_exit& ) {}
          }
       } FC_RETHROW_EXCEPTIONS( warn, "pending console output: ${console}", ("console", _pending_console_output.str()) )
@@ -82,13 +84,19 @@ void apply_context::exec_one( action_trace& trace )
 
    r.global_sequence  = next_global_sequence();
    r.recv_sequence    = next_recv_sequence( receiver );
-   global_action_sequence = 0;
 
-   const auto& account_sequence = db.get<account_sequence_object, by_name>(act.account);
-   r.code_sequence    = account_sequence.code_sequence; // could be modified by action execution above
-   r.abi_sequence     = account_sequence.abi_sequence;  // could be modified by action execution above
+   const account_metadata_object* first_receiver_account = nullptr;
+   if( act.account == receiver ) {
+      first_receiver_account = receiver_account;
+   } else {
+      first_receiver_account = &db.get<account_metadata_object, by_name>(act.account);
+   }
 
-   for( const auto& auth : act.authorization ) {
+   r.code_sequence    = first_receiver_account->code_sequence; // could be modified by action execution above
+   r.abi_sequence     = first_receiver_account->abi_sequence;  // could be modified by action execution above
+
+
+  for( const auto& auth : act.authorization ) {
       r.auth_sequence[auth.actor] = next_auth_sequence( auth.actor );
    }
 
@@ -142,7 +150,7 @@ void apply_context::exec( action_trace& trace )
 } /// exec()
 
 bool apply_context::is_account( const account_name& account )const {
-   return nullptr != db.find<account_object,by_name>( account );
+   return nullptr != db.find<account_object2,by_name>( account );
 }
 
 void apply_context::require_authorization( const account_name& account ) {
@@ -205,7 +213,7 @@ void apply_context::require_recipient( account_name recipient ) {
  *   can better understand the security risk.
  */
 void apply_context::execute_inline( action&& a ) {
-   auto* code = control.db().find<account_object, by_name>(a.account);
+   auto* code = control.db().find<account_object2, by_name>(a.account);
    EOS_ASSERT( code != nullptr, action_validate_exception,
                "inline action's code account ${account} does not exist", ("account", a.account) );
 
@@ -222,7 +230,7 @@ void apply_context::execute_inline( action&& a ) {
    }
 
    for( const auto& auth : a.authorization ) {
-      auto* actor = control.db().find<account_object, by_name>(auth.actor);
+      auto* actor = control.db().find<account_object2, by_name>(auth.actor);
       EOS_ASSERT( actor != nullptr, action_validate_exception,
                   "inline action's authorizing actor ${account} does not exist", ("account", auth.actor) );
       EOS_ASSERT( control.get_authorization_manager().find_permission(auth) != nullptr, action_validate_exception,
@@ -279,7 +287,7 @@ void apply_context::execute_inline( action&& a ) {
 }
 
 void apply_context::execute_context_free_inline( action&& a ) {
-   auto* code = control.db().find<account_object, by_name>(a.account);
+   auto* code = control.db().find<account_object2, by_name>(a.account);
    EOS_ASSERT( code != nullptr, action_validate_exception,
                "inline action's code account ${account} does not exist", ("account", a.account) );
 
@@ -715,14 +723,14 @@ uint64_t apply_context::next_global_sequence() {
 }
 
 uint64_t apply_context::next_recv_sequence( account_name receiver ) {
-   const auto& rs = db.get<account_sequence_object,by_name>( receiver );
+   const auto& rs = db.get<account_metadata_object,by_name>( receiver );
    db.modify( rs, [&]( auto& mrs ) {
       ++mrs.recv_sequence;
    });
    return rs.recv_sequence;
 }
 uint64_t apply_context::next_auth_sequence( account_name actor ) {
-   const auto& rs = db.get<account_sequence_object,by_name>( actor );
+   const auto& rs = db.get<account_metadata_object,by_name>( actor );
    db.modify( rs, [&](auto& mrs ){
       ++mrs.auth_sequence;
    });

@@ -1,10 +1,11 @@
-#include <boost/test/unit_test.hpp>
+#include <eosio/chain/generated_transaction_object.hpp>
+#include <eosio/chain/global_property_object.hpp>
 #include <eosio/testing/tester_network.hpp>
 #include <eosio/chain/producer_object.hpp>
-#include <eosio/chain/global_property_object.hpp>
-#include <eosio/chain/generated_transaction_object.hpp>
-#include <eosio.token/eosio.token.wast.hpp>
-#include <eosio.token/eosio.token.abi.hpp>
+
+#include <boost/test/unit_test.hpp>
+
+#include <contracts.hpp>
 
 #ifdef NON_VALIDATING_TEST
 #define TESTER tester
@@ -97,8 +98,8 @@ BOOST_AUTO_TEST_CASE( link_delay_direct_test ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -235,8 +236,8 @@ BOOST_AUTO_TEST_CASE(delete_auth_test) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -372,8 +373,8 @@ BOOST_AUTO_TEST_CASE( link_delay_direct_parent_permission_test ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -510,8 +511,8 @@ BOOST_AUTO_TEST_CASE( link_delay_direct_walk_parent_permissions_test ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -654,8 +655,8 @@ BOOST_AUTO_TEST_CASE( link_delay_permission_change_test ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -845,8 +846,8 @@ BOOST_AUTO_TEST_CASE( link_delay_permission_change_with_delay_heirarchy_test ) {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -1042,8 +1043,8 @@ BOOST_AUTO_TEST_CASE( link_delay_link_change_test ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -1244,8 +1245,8 @@ BOOST_AUTO_TEST_CASE( link_delay_unlink_test ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -1433,8 +1434,8 @@ BOOST_AUTO_TEST_CASE( link_delay_link_change_heirarchy_test ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -1624,8 +1625,8 @@ BOOST_AUTO_TEST_CASE( mindelay_test ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -1681,10 +1682,10 @@ BOOST_AUTO_TEST_CASE( mindelay_test ) { try {
    BOOST_REQUIRE_EQUAL(asset::from_string("1.0000 CUR"), liquid_balance);
 
    // send transfer with delay_sec set to 10
-   const auto& acnt = chain.control->db().get<account_object,by_name>(N(eosio.token));
+   const auto& acnt = chain.control->db().get<account_object2,by_name>(N(eosio.token));
    const auto abi = acnt.get_abi();
    chain::abi_serializer abis(abi, chain.abi_serializer_max_time);
-   const auto a = chain.control->db().get<account_object,by_name>(N(eosio.token)).get_abi();
+   const auto a = chain.control->db().get<account_object2,by_name>(N(eosio.token)).get_abi();
 
    string action_type_name = abis.get_action_type(name("transfer"));
 
@@ -1756,8 +1757,8 @@ BOOST_AUTO_TEST_CASE( canceldelay_test ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks(10);
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -1993,8 +1994,8 @@ BOOST_AUTO_TEST_CASE( canceldelay_test2 ) { try {
    chain.create_account(N(eosio.token));
    chain.produce_blocks();
 
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
@@ -2279,8 +2280,8 @@ BOOST_AUTO_TEST_CASE( max_transaction_delay_execute ) { try {
    const auto& tester_account = N(tester);
 
    chain.create_account(N(eosio.token));
-   chain.set_code(N(eosio.token), eosio_token_wast);
-   chain.set_abi(N(eosio.token), eosio_token_abi);
+   chain.set_code(N(eosio.token), contracts::eosio_token_wasm());
+   chain.set_abi(N(eosio.token), contracts::eosio_token_abi().data());
 
    chain.produce_blocks();
    chain.create_account(N(tester));
