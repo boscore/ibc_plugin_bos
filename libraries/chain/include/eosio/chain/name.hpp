@@ -56,8 +56,9 @@ namespace eosio { namespace chain {
       explicit operator string()const;
 
       string to_string() const { return string(*this); }
+	  constexpr uint64_t to_uint64_t()const { return value; }
 
-      name& operator=( uint64_t v ) {
+	  name& operator=( uint64_t v ) {
          value = v;
          return *this;
       }

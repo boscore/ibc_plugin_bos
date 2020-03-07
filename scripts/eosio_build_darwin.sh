@@ -420,7 +420,7 @@
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! git clone --depth 1 --single-branch --branch release_40 https://github.com/llvm-mirror/llvm.git
+		if ! git clone --depth 1 --single-branch --branch release_70 https://github.com/llvm-mirror/llvm.git
 		then
 			printf "\\tUnable to clone llvm repo @ https://github.com/llvm-mirror/llvm.git.\\n"
 			printf "\\tExiting now.\\n\\n"

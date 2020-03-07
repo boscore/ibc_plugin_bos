@@ -6,27 +6,17 @@
 #include <eosio/chain_plugin/chain_plugin.hpp>
 #include <eosio/net_plugin/net_plugin.hpp>
 #include <eosio/chain/wast_to_wasm.hpp>
+#include <eosio/chain/thread_utils.hpp>
 
 #include <fc/variant.hpp>
 #include <fc/io/json.hpp>
 #include <fc/exception/exception.hpp>
 #include <fc/reflect/variant.hpp>
-#include <fc/io/json.hpp>
 
 #include <boost/asio/high_resolution_timer.hpp>
 #include <boost/algorithm/clamp.hpp>
 
 #include <Inline/BasicTypes.h>
-#include <IR/Module.h>
-#include <IR/Validate.h>
-#include <WAST/WAST.h>
-#include <WASM/WASM.h>
-#include <Runtime/Runtime.h>
-
-#include <eosio.token/eosio.token.wast.hpp>
-#include <eosio.token/eosio.token.abi.hpp>
-#include <eosio.system/eosio.system.abi.hpp>
-#include <eosio.system/eosio.system.wast.hpp>
 
 namespace eosio { namespace detail {
 struct txn_test_gen_empty {};
@@ -145,13 +135,13 @@ struct txn_test_gen_plugin_impl {
           name newaccountC("cccccccccccc");
           name creator(init_name);
 
-          abi_def currency_abi_def = fc::json::from_string(eosio_token_abi).as<abi_def>();
-
           controller& cc = app().get_plugin<chain_plugin>().chain();
           auto chainid = app().get_plugin<chain_plugin>().get_chain_id();
           auto abi_serializer_max_time = app().get_plugin<chain_plugin>().get_abi_serializer_max_time();
 
-          abi_serializer eosio_token_serializer{fc::json::from_string(eosio_token_abi).as<abi_def>(), abi_serializer_max_time};
+          const auto& eosio_token_acnt = cc.get_account(N(eosio.token));
+          auto eosio_token_abi = eosio_token_acnt.get_abi();
+          abi_serializer eosio_token_serializer(eosio_token_abi, abi_serializer_max_time);
 
           fc::crypto::private_key txn_test_receiver_A_priv_key = fc::crypto::private_key::regenerate(fc::sha256(std::string(64, 'a')));
           fc::crypto::private_key txn_test_receiver_B_priv_key = fc::crypto::private_key::regenerate(fc::sha256(std::string(64, 'b')));
@@ -223,7 +213,8 @@ struct txn_test_gen_plugin_impl {
           {
               signed_transaction trx;
 
-              vector<uint8_t> wasm = wast_to_wasm(std::string(eosio_token_wast));
+//            vector<uint8_t> wasm = contracts::eosio_token_wasm();
+              string wasm = app().get_plugin<chain_plugin>().get_read_only_api().get_code({N(eosio.token), true}).wasm;
 
               setcode handler;
               handler.account = newaccountC;
@@ -234,7 +225,7 @@ struct txn_test_gen_plugin_impl {
               {
                   setabi handler;
                   handler.account = newaccountC;
-                  handler.abi = fc::raw::pack(json::from_string(eosio_token_abi).as<abi_def>());
+				  handler.abi = fc::raw::pack(eosio_token_abi);
                   trx.actions.emplace_back( vector<chain::permission_level>{{newaccountC,"active"}}, handler);
               }
 
@@ -292,7 +283,10 @@ struct txn_test_gen_plugin_impl {
               ("stake_net_quantity", net.to_string())
               ("stake_cpu_quantity", cpu.to_string())
               ("transfer", true);
-      abi_serializer eosio_system_serializer{fc::json::from_string(eosio_system_abi).as<abi_def>(), abi_serializer_max_time};
+	  controller& cc = app().get_plugin<chain_plugin>().chain();
+	  const auto& eosio_acnt = cc.get_account(N(eosio));
+	  auto eosio_abi = eosio_acnt.get_abi();
+	  abi_serializer eosio_system_serializer(eosio_abi, abi_serializer_max_time);
 
       auto payload_delegate = eosio_system_serializer.variant_to_binary( "delegatebw", variant_delegate, abi_serializer_max_time);
       eosio::chain::action act_delegate{vector<chain::permission_level>{{from,"active"}},
@@ -306,9 +300,12 @@ struct txn_test_gen_plugin_impl {
               ("payer", from.to_string())
               ("receiver", to.to_string())
               ("quant", quant.to_string());
-      abi_serializer eosio_system_serializer{fc::json::from_string(eosio_system_abi).as<abi_def>(), abi_serializer_max_time};
+	  controller& cc = app().get_plugin<chain_plugin>().chain();
+	  const auto& eosio_acnt = cc.get_account(N(eosio));
+	  auto eosio_abi = eosio_acnt.get_abi();
+	  abi_serializer eosio_system_serializer(eosio_abi, abi_serializer_max_time);
 
-      auto payload_buyram = eosio_system_serializer.variant_to_binary( "buyram", variant_buyram, abi_serializer_max_time);
+	  auto payload_buyram = eosio_system_serializer.variant_to_binary( "buyram", variant_buyram, abi_serializer_max_time);
       eosio::chain::action act_buyram{vector<chain::permission_level>{{from,"active"}},
               config::system_account_name, N(buyram), payload_buyram};
 
@@ -332,7 +329,9 @@ struct txn_test_gen_plugin_impl {
 
       controller& cc = app().get_plugin<chain_plugin>().chain();
       auto abi_serializer_max_time = app().get_plugin<chain_plugin>().get_abi_serializer_max_time();
-      abi_serializer eosio_token_serializer{fc::json::from_string(eosio_token_abi).as<abi_def>(), abi_serializer_max_time};
+	  const auto& eosio_token_acnt = cc.get_account(N(eosio.token));
+	  auto eosio_token_abi = eosio_token_acnt.get_abi();
+	  abi_serializer eosio_token_serializer(eosio_token_abi, abi_serializer_max_time);
       //create the actions here
       act_a_to_b.account = N(cccccccccccc);
       act_a_to_b.name = N(transfer);
