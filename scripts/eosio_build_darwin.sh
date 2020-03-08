@@ -23,7 +23,9 @@
 	printf "\\tPhysical Memory: %s Gbytes\\n" "${MEM_GIG}"
 	printf "\\tDisk install: %s\\n" "${DISK_INSTALL}"
 	printf "\\tDisk space total: %sG\\n" "${DISK_TOTAL}"
-	printf "\\tDisk space available: %sG\\n\\n" "${DISK_AVAIL}"
+	printf "\\tDisk space available: %sG\\n" "${DISK_AVAIL}"
+	printf "\\tTEMP_DIR: %s\\n\\n" "${TEMP_DIR}"
+
 
 	if [ "${MEM_GIG}" -lt 7 ]; then
 		echo "Your system must have 7 or more Gigabytes of physical memory installed."
@@ -430,7 +432,7 @@
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! git clone --depth 1 --single-branch --branch release_70 https://github.com/llvm-mirror/llvm.git
+		if ! git clone --depth 1 --single-branch --branch release_90 https://github.com/llvm-mirror/llvm.git
 		then
 			printf "\\tUnable to clone llvm repo @ https://github.com/llvm-mirror/llvm.git.\\n"
 			printf "\\tExiting now.\\n\\n"
@@ -442,7 +444,7 @@
 			printf "\\tExiting now.\\n\\n"
 			exit 1;
 		fi
-		if ! git clone --depth 1 --single-branch --branch release_40 https://github.com/llvm-mirror/clang.git
+		if ! git clone --depth 1 --single-branch --branch release_90 https://github.com/llvm-mirror/clang.git
 		then
 			printf "\\tUnable to clone clang repo @ https://github.com/llvm-mirror/clang.git.\\n"
 			printf "\\tExiting now.\\n\\n"
