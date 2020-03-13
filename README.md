@@ -1,6 +1,6 @@
-# BOSCore - Using technology to create a trusted business ecosystem
+# BOSCore - Blockchain financial center building a trusted business ecosystem.
 
-## BOSCore Version: v3.0.5
+## BOSCore Version: v3.0.6
 ### Basic EOSIO Version: v1.6.6 (support REX, part 2.0.x)
 
 # Background
