@@ -53,6 +53,64 @@ static bytes zlib_compress_bytes(bytes in) {
    return out;
 }
 
+static bytes zlib_decompress(const bytes& in) {
+   bytes                  out;
+   bio::filtering_ostream decomp;
+   decomp.push(bio::zlib_decompressor());
+   decomp.push(bio::back_inserter(out));
+   bio::write(decomp, in.data(), in.size());
+   bio::close(decomp);
+   return out;
+}
+
+template <typename T>
+bool include_delta(const T& old, const T& curr) {
+   return true;
+}
+
+bool include_delta(const eosio::chain::table_id_object& old, const eosio::chain::table_id_object& curr) {
+   return old.payer != curr.payer;
+}
+
+bool include_delta(const eosio::chain::resource_limits::resource_limits_object& old,
+                   const eosio::chain::resource_limits::resource_limits_object& curr) {
+   return                                   //
+       old.net_weight != curr.net_weight || //
+       old.cpu_weight != curr.cpu_weight || //
+       old.ram_bytes != curr.ram_bytes;
+}
+
+bool include_delta(const eosio::chain::resource_limits::resource_limits_state_object& old,
+                   const eosio::chain::resource_limits::resource_limits_state_object& curr) {
+   return                                                                                       //
+       old.average_block_net_usage.last_ordinal != curr.average_block_net_usage.last_ordinal || //
+       old.average_block_net_usage.value_ex != curr.average_block_net_usage.value_ex ||         //
+       old.average_block_net_usage.consumed != curr.average_block_net_usage.consumed ||         //
+       old.average_block_cpu_usage.last_ordinal != curr.average_block_cpu_usage.last_ordinal || //
+       old.average_block_cpu_usage.value_ex != curr.average_block_cpu_usage.value_ex ||         //
+       old.average_block_cpu_usage.consumed != curr.average_block_cpu_usage.consumed ||         //
+       old.total_net_weight != curr.total_net_weight ||                                         //
+       old.total_cpu_weight != curr.total_cpu_weight ||                                         //
+       old.total_ram_bytes != curr.total_ram_bytes ||                                           //
+       old.virtual_net_limit != curr.virtual_net_limit ||                                       //
+       old.virtual_cpu_limit != curr.virtual_cpu_limit;
+}
+
+bool include_delta(const eosio::chain::account_metadata_object& old,
+                   const eosio::chain::account_metadata_object& curr) {
+   return                                               //
+       old.name != curr.name ||                         //
+       old.is_privileged() != curr.is_privileged() ||   //
+       old.last_code_update != curr.last_code_update || //
+       old.vm_type != curr.vm_type ||                   //
+       old.vm_version != curr.vm_version ||             //
+       old.code_hash != curr.code_hash;
+}
+
+bool include_delta(const eosio::chain::code_object& old, const eosio::chain::code_object& curr) { //
+   return false;
+}
+
 struct state_history_plugin_impl : std::enable_shared_from_this<state_history_plugin_impl> {
    chain_plugin*                                        chain_plug = nullptr;
    fc::optional<state_history_log>                      trace_log;
@@ -465,6 +523,8 @@ struct state_history_plugin_impl : std::enable_shared_from_this<state_history_pl
       };
 
       process_table("account", db.get_index<account_index>(), pack_row);
+      process_table("account_metadata", db.get_index<account_metadata_index>(), pack_row);
+      process_table("code", db.get_index<code_index>(), pack_row);
 
       process_table("contract_table", db.get_index<table_id_multi_index>(), pack_row);
       process_table("contract_row", db.get_index<key_value_index>(), pack_contract_row);

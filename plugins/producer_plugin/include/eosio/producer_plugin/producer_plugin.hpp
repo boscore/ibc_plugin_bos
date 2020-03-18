@@ -27,6 +27,11 @@ public:
       fc::optional<int32_t> subjective_cpu_leeway_us;
       fc::optional<double>  incoming_defer_ratio;
    };
+   
+   enum export_snapshot_type {
+      snapshot = 0,        // snapshot for data to use for restoring a node
+      acts_snapshot = 1    // snapshot for all accounts with system token balance
+   };
 
    struct whitelist_blacklist {
       fc::optional< flat_set<account_name> > actor_whitelist;
@@ -80,11 +85,13 @@ public:
    void set_whitelist_blacklist(const whitelist_blacklist& params);
 
    integrity_hash_information get_integrity_hash() const;
-   snapshot_information create_snapshot() const;
+   snapshot_information create_snapshot(export_snapshot_type type) const;
 
    signal<void(const chain::producer_confirmation&)> confirmed_block;
 private:
    std::shared_ptr<class producer_plugin_impl> my;
+   snapshot_information create_blocks_snapshot(chain::controller& chain) const;
+   snapshot_information create_acts_snapshot(chain::controller& chain) const;
 };
 
 } //eosio
@@ -94,4 +101,5 @@ FC_REFLECT(eosio::producer_plugin::greylist_params, (accounts));
 FC_REFLECT(eosio::producer_plugin::whitelist_blacklist, (actor_whitelist)(actor_blacklist)(contract_whitelist)(contract_blacklist)(action_blacklist)(key_blacklist) )
 FC_REFLECT(eosio::producer_plugin::integrity_hash_information, (head_block_id)(integrity_hash))
 FC_REFLECT(eosio::producer_plugin::snapshot_information, (head_block_id)(snapshot_name))
+FC_REFLECT_ENUM( eosio::producer_plugin::export_snapshot_type, (snapshot)(acts_snapshot) )
 

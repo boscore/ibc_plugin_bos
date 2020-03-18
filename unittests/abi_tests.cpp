@@ -22,8 +22,6 @@
 
 #include <boost/test/framework.hpp>
 
-#include <config.hpp>
-
 #include <deep_nested.abi.hpp>
 #include <large_nested.abi.hpp>
 
@@ -68,7 +66,7 @@ void verify_round_trip_conversion( const abi_serializer& abis, const type_name& 
 
 auto get_resolver(const abi_def& abi = abi_def())
 {
-   return [&abi](const account_name &name) -> optional<abi_serializer> {
+   return [&abi](const account_name &name) -> fc::optional<abi_serializer> {
       return abi_serializer(eosio_contract_abi(abi), max_serialization_time);
    };
 }
@@ -2275,7 +2273,7 @@ BOOST_AUTO_TEST_CASE(variants)
       // json -> variant -> abi_def -> bin
       auto bin = fc::raw::pack(fc::json::from_string(variant_abi).as<abi_def>());
       // bin -> abi_def -> variant -> abi_def
-      abi_serializer abis(variant(fc::raw::unpack<abi_def>(bin)).as<abi_def>(), max_serialization_time );
+      abi_serializer abis(fc::variant(fc::raw::unpack<abi_def>(bin)).as<abi_def>(), max_serialization_time );
 
       // duplicate variant definition detected
       BOOST_CHECK_THROW( abi_serializer( fc::json::from_string(duplicate_variant_abi).as<abi_def>(), max_serialization_time ), duplicate_abi_variant_def_exception );

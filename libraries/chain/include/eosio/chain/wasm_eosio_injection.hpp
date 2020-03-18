@@ -37,7 +37,7 @@ namespace eosio { namespace chain { namespace wasm_injections {
 
       static void build_type_slots( Module& mod ) {
          // add the module types to the type_slots map
-         for ( int i=0; i < mod.types.size(); i++ ) {
+         for ( size_t i=0; i < mod.types.size(); i++ ) {
             std::vector<uint16_t> type_slot_list = { static_cast<uint16_t>(mod.types[i]->ret) };
             for ( auto param : mod.types[i]->parameters )
                type_slot_list.push_back( static_cast<uint16_t>(param) );
@@ -55,11 +55,6 @@ namespace eosio { namespace chain { namespace wasm_injections {
 
       // get the next available index that is greater than the last exported function
       static void get_next_indices( Module& module, int& next_function_index, int& next_actual_index ) {
-         int exports = 0;
-         for ( auto exp : module.exports )
-            if ( exp.kind == IR::ObjectKind::function )
-               exports++;
-
          next_function_index = module.functions.imports.size() + module.functions.defs.size() + registered_injected.size();
          next_actual_index = next_injected_index++;
       }
@@ -78,7 +73,7 @@ namespace eosio { namespace chain { namespace wasm_injections {
             injected_index_mapping.emplace( index, actual_index ); 
 
             // shift all exported functions by 1
-            for ( int i=0; i < module.exports.size(); i++ ) {
+            for ( size_t i=0; i < module.exports.size(); i++ ) {
                if ( module.exports[i].kind == IR::ObjectKind::function ) {
                   module.exports[i].index++;
                }
@@ -682,9 +677,6 @@ namespace eosio { namespace chain { namespace wasm_injections {
    };
 
    struct pre_op_injectors : wasm_ops::op_types<pass_injector> {
-      using call_t            = wasm_ops::call                    <call_depth_check_and_insert_checktime>;
-      using call_indirect_t   = wasm_ops::call_indirect           <call_depth_check_and_insert_checktime>;
-      
       // float binops 
       using f32_add_t         = wasm_ops::f32_add                 <f32_binop_injector<wasm_ops::f32_add_code>>;
       using f32_sub_t         = wasm_ops::f32_sub                 <f32_binop_injector<wasm_ops::f32_sub_code>>;
@@ -757,10 +749,17 @@ namespace eosio { namespace chain { namespace wasm_injections {
       using f64_convert_u_i64 = wasm_ops::f64_convert_u_i64       <i64_convert_f64_injector<wasm_ops::f64_convert_u_i64_code>>;
    }; // pre_op_injectors
 
+   struct pre_op_full_injectors : pre_op_injectors {
+      using call_t            = wasm_ops::call                    <call_depth_check_and_insert_checktime>;
+      using call_indirect_t   = wasm_ops::call_indirect           <call_depth_check_and_insert_checktime>;
+   };
 
    struct post_op_injectors : wasm_ops::op_types<pass_injector> {
+      using call_t   = wasm_ops::call        <fix_call_index>;
+   };
+
+   struct post_op_full_injectors : post_op_injectors {
       using loop_t        = wasm_ops::loop        <checktime_injection>;
-      using call_t        = wasm_ops::call        <fix_call_index>;
       using grow_memory_t = wasm_ops::grow_memory <checktime_injection>;
    };
 
@@ -779,7 +778,9 @@ namespace eosio { namespace chain { namespace wasm_injections {
       }
    };
  
-   // inherit from this class and define your own injectors 
+   // "full injection" gives checktime & depth counting along with softfloat injection.
+   // Otherwise you'll just get softfloat injection
+   template<bool full_injection>
    class wasm_binary_injection {
       using standard_module_injectors = module_injectors< max_memory_injection_visitor >;
 
@@ -795,10 +796,11 @@ namespace eosio { namespace chain { namespace wasm_injections {
          void inject() {
             _module_injectors.inject( *_module );
             // inject checktime first
-            injector_utils::add_import<ResultType::none>( *_module, u8"checktime", checktime_injection::chktm_idx );
+            if constexpr (full_injection)
+               injector_utils::add_import<ResultType::none>( *_module, u8"checktime", checktime_injection::chktm_idx );
 
             for ( auto& fd : _module->functions.defs ) {
-               wasm_ops::EOSIO_OperatorDecoderStream<pre_op_injectors> pre_decoder(fd.code);
+               wasm_ops::EOSIO_OperatorDecoderStream<std::conditional_t<full_injection, pre_op_full_injectors, pre_op_injectors>> pre_decoder(fd.code);
                wasm_ops::instruction_stream pre_code(fd.code.size()*2);
 
                while ( pre_decoder ) {
@@ -816,12 +818,14 @@ namespace eosio { namespace chain { namespace wasm_injections {
                fd.code = pre_code.get();
             }
             for ( auto& fd : _module->functions.defs ) {
-               wasm_ops::EOSIO_OperatorDecoderStream<post_op_injectors> post_decoder(fd.code);
+               wasm_ops::EOSIO_OperatorDecoderStream<std::conditional_t<full_injection, post_op_full_injectors, post_op_injectors>> post_decoder(fd.code);
                wasm_ops::instruction_stream post_code(fd.code.size()*2);
 
-               wasm_ops::op_types<>::call_t chktm; 
-               chktm.field = injector_utils::injected_index_mapping.find(checktime_injection::chktm_idx)->second;
-               chktm.pack(&post_code);
+               if constexpr (full_injection) {
+                  wasm_ops::op_types<>::call_t chktm;
+                  chktm.field = injector_utils::injected_index_mapping.find(checktime_injection::chktm_idx)->second;
+                  chktm.pack(&post_code);
+               }
 
                while ( post_decoder ) {
                   auto op = post_decoder.decodeOp();
@@ -840,8 +844,7 @@ namespace eosio { namespace chain { namespace wasm_injections {
          }
       private:
          IR::Module* _module;
-         static std::string op_string;
-         static standard_module_injectors _module_injectors;
+         standard_module_injectors _module_injectors;
    };
 
 }}} // namespace wasm_constraints, chain, eosio

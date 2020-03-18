@@ -8,9 +8,12 @@
 #include <eosio/chain/account_object.hpp>
 #include <eosio/chain/block_summary_object.hpp>
 #include <eosio/chain/eosio_contract.hpp>
+#include <eosio/chain/protocol_state_object.hpp>
 #include <eosio/chain/global_property_object.hpp>
 #include <eosio/chain/contract_table_objects.hpp>
 #include <eosio/chain/generated_transaction_object.hpp>
+#include <eosio/chain/genesis_intrinsics.hpp>
+#include <eosio/chain/whitelisted_intrinsics.hpp>
 #include <eosio/chain/transaction_object.hpp>
 #include <eosio/chain/reversible_block_object.hpp>
 
@@ -40,7 +43,11 @@ using controller_index_set = index_set<
    block_summary_multi_index,
    transaction_multi_index,
    generated_transaction_multi_index,
-   table_id_multi_index
+   table_id_multi_index,
+   code_index,
+   account_index2,
+   account_metadata_index,
+   protocol_state_multi_index
 >;
 
 using contract_database_index_set = index_set<
@@ -149,6 +156,7 @@ struct controller_impl {
 
    typedef pair<scope_name,action_name>                   handler_key;
    map< account_name, map<handler_key, apply_handler> >   apply_handlers;
+   platform_timer                 timer;
 
    /**
     *  Transactions that were undone by pop_block or abort_block, transactions
@@ -191,7 +199,7 @@ struct controller_impl {
         cfg.reversible_cache_size ),
     blog( cfg.blocks_dir ),
     fork_db( cfg.state_dir ),
-    wasmif( cfg.wasm_runtime ),
+    wasmif( cfg.wasm_runtime, db ),
     resource_limits( db ),
     authorization( s, db ),
     conf( cfg ),
@@ -425,8 +433,89 @@ struct controller_impl {
       }
 
       //*bos begin*
-      merge_msig_blacklist_into_conf();
-      //*bos end*
+	  merge_msig_blacklist_into_conf();
+	  //*bos end*
+
+      // if new version need to do account_index code to code_index migration
+      const auto& db_code_index = db.get_index<code_index, by_id>();
+	  ilog("code object size : ${s}", ("s", db_code_index.size()));
+
+      // read db account index
+      const auto& db_accounts_index = db.get_index<account_index, by_id>();
+      // check if account index or code index empty
+	  if (!db_code_index.empty()) return;
+	  migrate_account_code();
+   }
+
+   void migrate_account_code() {
+	 ilog("start migrating account index code to code index ...");
+	 const auto& db_accounts_index = db.get_index<account_index, by_id>();
+	 size_t accounts_size = db_accounts_index.size();
+	 auto account_ptr = db_accounts_index.begin();
+	 while( account_ptr != db_accounts_index.end()) {
+	   db.create<account_object2>([&](auto &a2) {
+		 a2.name = account_ptr->name;
+		 a2.creation_date = account_ptr->creation_date;
+		 a2.abi.assign(account_ptr->abi.data(), account_ptr->abi.size());
+	   });
+
+	   // read db account sequence index
+	   const auto* db_account_seq_obj = db.find<account_sequence_object, by_name>(account_ptr->name);
+	   // write db account metadata index
+	   db.create<account_metadata_object>([&](auto &amo) {
+		 amo.name = account_ptr->name;
+		 amo.recv_sequence = db_account_seq_obj->recv_sequence;
+		 amo.auth_sequence = db_account_seq_obj->auth_sequence;
+		 amo.code_sequence = db_account_seq_obj->code_sequence;
+		 amo.abi_sequence = db_account_seq_obj->abi_sequence;
+		 amo.code_hash = account_ptr->code_version;
+		 amo.last_code_update = account_ptr->last_code_update;
+		 amo.flags = account_ptr->privileged;
+		 amo.vm_type = account_ptr->vm_type;
+		 amo.vm_version = account_ptr->vm_version;
+	   });
+
+	   // write db code index
+	   const code_object* new_code_entry = db.find<code_object, by_code_hash>(
+		   boost::make_tuple(account_ptr->code_version, account_ptr->vm_type, account_ptr->vm_version) );
+	   int64_t code_size = (int64_t)account_ptr->code.size();
+
+	   if (new_code_entry) {
+		 db.modify(*new_code_entry, [&](code_object& o) {
+		   ++o.code_ref_count;
+		 });
+	   } else {
+		 db.create<code_object>([&](code_object& o) {
+		   o.code_hash = account_ptr->code_version;
+		   o.code.assign(account_ptr->code.data(), code_size);
+		   o.code_ref_count = 1;
+		   o.first_block_used = 1;
+		   o.vm_type = account_ptr->vm_type;
+		   o.vm_version = account_ptr->vm_version;
+		 });
+	   }
+	   account_ptr++;
+	 }
+
+	 // after migrate size
+	 const auto& db_accounts_index2 = db.get_index<account_index2, by_id>();
+	 const auto& db_account_metadata_index = db.get_index<account_metadata_index, by_id>();
+	 const auto& db_code_index_migrate = db.get_index<code_index, by_id>();
+	 // check if migrate success
+	 ilog("account object size : ${s}", ("s", accounts_size));
+	 ilog("migrate account object size : ${s}", ("s", db_accounts_index2.size()));
+	 ilog("migrate account metadata object size : ${s}", ("s", db_account_metadata_index.size()));
+	 ilog("migrate code object size : ${s}", ("s", db_code_index_migrate.size()));
+
+	 // remove all account objects and all account sequence
+
+
+	 // write db protocol index
+	 db.create<protocol_state_object>([&](auto& pso ){
+	   for( const auto& i : genesis_intrinsics ) {
+		 add_intrinsic_to_whitelist( pso.whitelisted_intrinsics, i );
+	   }
+	 });
    }
 
    void update_pbft_status() {
@@ -654,6 +743,13 @@ struct controller_impl {
          }
       });
 
+      // bos account_index migration
+	  // if do not have section code_object, old version snapshot need to migrate account_index to account_index2 and code_index
+	  // account_sequence_index to account_metadata_index
+	  if (!snapshot->has_section<code_object>() && !snapshot->has_section<account_object2>()) {
+	     migrate_account_code();
+	  }
+
       read_contract_tables_from_snapshot(snapshot);
 
       authorization.read_from_snapshot(snapshot);
@@ -696,18 +792,18 @@ struct controller_impl {
    }
 
    void create_native_account( account_name name, const authority& owner, const authority& active, bool is_privileged = false ) {
-      db.create<account_object>([&](auto& a) {
+      db.create<account_object2>([&](auto& a) {
          a.name = name;
          a.creation_date = conf.genesis.initial_timestamp;
-         a.privileged = is_privileged;
 
          if( name == config::system_account_name ) {
             a.set_abi(eosio_contract_abi(abi_def()));
          }
       });
-      db.create<account_sequence_object>([&](auto & a) {
+      db.create<account_metadata_object>([&](auto & a) {
         a.name = name;
-      });
+		a.set_privileged( is_privileged );
+	  });
 
       const auto& owner_permission  = authorization.create_permission(name, config::owner_name, 0,
                                                                       owner, conf.genesis.initial_timestamp );
@@ -739,6 +835,13 @@ struct controller_impl {
       db.create<global_property_object>([&](auto& gpo ){
         gpo.configuration = conf.genesis.initial_configuration;
       });
+
+      db.create<protocol_state_object>([&](auto& pso ){
+         for( const auto& i : genesis_intrinsics ) {
+            add_intrinsic_to_whitelist( pso.whitelisted_intrinsics, i );
+         }
+      });
+
       db.create<dynamic_global_property_object>([](auto&){});
 
       // *bos begin*
@@ -988,8 +1091,9 @@ struct controller_impl {
                                  onerror( gtrx.sender_id, gtrx.packed_trx.data(), gtrx.packed_trx.size() ) );
       etrx.expiration = self.pending_block_time() + fc::microseconds(999'999); // Round up to avoid appearing expired
       etrx.set_reference_block( self.head_block_id() );
+	 transaction_checktime_timer trx_timer(timer);
 
-      transaction_context trx_context( self, etrx, etrx.id(), start );
+      transaction_context trx_context( self, etrx, etrx.id(), std::move(trx_timer), start);
       trx_context.deadline = deadline;
       trx_context.explicit_billed_cpu_time = explicit_billed_cpu_time;
       trx_context.billed_cpu_time_us = billed_cpu_time_us;
@@ -1106,8 +1210,9 @@ struct controller_impl {
       in_trx_requiring_checks = true;
 
       uint32_t cpu_time_to_bill_us = billed_cpu_time_us;
+	   transaction_checktime_timer trx_timer(timer);
 
-      transaction_context trx_context( self, dtrx, gtrx.trx_id );
+      transaction_context trx_context( self, dtrx, gtrx.trx_id, std::move(trx_timer));
       trx_context.leeway =  fc::microseconds(0); // avoid stealing cpu resource
       trx_context.deadline = deadline;
       trx_context.explicit_billed_cpu_time = explicit_billed_cpu_time;
@@ -1256,7 +1361,8 @@ struct controller_impl {
          }
 
          const signed_transaction& trn = trx->packed_trx->get_signed_transaction();
-         transaction_context trx_context(self, trn, trx->id, start);
+		transaction_checktime_timer trx_timer(timer);
+		transaction_context trx_context(self, trn, trx->id, std::move(trx_timer), start);
          if ((bool)subjective_cpu_leeway && pending->_block_status == controller::block_status::incomplete) {
             trx_context.leeway = *subjective_cpu_leeway;
          }
@@ -2589,9 +2695,9 @@ wasm_interface& controller::get_wasm_interface() {
    return my->wasmif;
 }
 
-const account_object& controller::get_account( account_name name )const
+const account_object2& controller::get_account( account_name name )const
 { try {
-   return my->db.get<account_object, by_name>(name);
+   return my->db.get<account_object2, by_name>(name);
 } FC_CAPTURE_AND_RETHROW( (name) ) }
 
 unapplied_transactions_type& controller::get_unapplied_transactions() {

@@ -256,8 +256,7 @@ void chain_plugin::set_program_options(options_description& cli, options_descrip
           "the location of the blocks directory (absolute path or relative to application data dir)")
          ("checkpoint", bpo::value<vector<string>>()->composing(), "Pairs of [BLOCK_NUM,BLOCK_ID] that should be enforced as checkpoints.")
          ("wasm-runtime", bpo::value<eosio::chain::wasm_interface::vm_type>()->value_name("wavm/wabt"), "Override default WASM runtime")
-         ("abi-serializer-max-time-ms", bpo::value<uint32_t>()->default_value(config::default_abi_serializer_max_time_ms),
-          "Override default maximum ABI serialization time allowed in ms")
+         ("abi-serializer-max-time-ms", bpo::value<uint32_t>()->default_value(config::default_abi_serializer_max_time_ms), "Override default maximum ABI serialization time allowed in ms")
          ("chain-state-db-size-mb", bpo::value<uint64_t>()->default_value(config::default_state_size / (1024  * 1024)), "Maximum size (in MiB) of the chain state database")
          ("chain-state-db-guard-size-mb", bpo::value<uint64_t>()->default_value(config::default_state_guard_size / (1024  * 1024)), "Safely shut down node when free space remaining in the chain state database drops below this size (in MiB).")
          ("reversible-blocks-db-size-mb", bpo::value<uint64_t>()->default_value(config::default_reversible_cache_size / (1024  * 1024)), "Maximum size (in MiB) of the reversible blocks database")
@@ -1320,7 +1319,7 @@ double convert_to_type(const string& str, const string& desc) {
 
 abi_def get_abi( const controller& db, const name& account ) {
    const auto &d = db.db();
-   const account_object *code_accnt = d.find<account_object, by_name>(account);
+   const account_object2 *code_accnt = d.find<account_object2, by_name>(account);
    EOS_ASSERT(code_accnt != nullptr, chain::account_query_exception, "Fail to retrieve account for ${account}", ("account", account) );
    abi_def abi;
    abi_serializer::to_abi(code_accnt->abi, abi);
@@ -1582,7 +1581,7 @@ template<typename Api>
 struct resolver_factory {
    static auto make(const Api* api, const fc::microseconds& max_serialization_time) {
       return [api, max_serialization_time](const account_name &name) -> optional<abi_serializer> {
-         const auto* accnt = api->db.db().template find<account_object, by_name>(name);
+         const auto* accnt = api->db.db().template find<account_object2, by_name>(name);
          if (accnt != nullptr) {
             abi_def abi;
             if (abi_serializer::to_abi(accnt->abi, abi)) {
@@ -1814,7 +1813,7 @@ read_only::get_abi_results read_only::get_abi( const get_abi_params& params )con
    get_abi_results result;
    result.account_name = params.account_name;
    const auto& d = db.db();
-   const auto& accnt  = d.get<account_object,by_name>( params.account_name );
+   const auto& accnt  = d.get<account_object2,by_name>( params.account_name );
 
    abi_def abi;
    if( abi_serializer::to_abi(accnt.abi, abi) ) {
@@ -1828,17 +1827,19 @@ read_only::get_code_results read_only::get_code( const get_code_params& params )
    get_code_results result;
    result.account_name = params.account_name;
    const auto& d = db.db();
-   const auto& accnt  = d.get<account_object,by_name>( params.account_name );
+   const auto& accnt_obj          = d.get<account_object2,by_name>( params.account_name );
+   const auto& accnt_metadata_obj = d.get<account_metadata_object,by_name>( params.account_name );
 
    EOS_ASSERT( params.code_as_wasm, unsupported_feature, "Returning WAST from get_code is no longer supported" );
 
-   if( accnt.code.size() ) {
-      result.wasm = string(accnt.code.begin(), accnt.code.end());
-      result.code_hash = fc::sha256::hash( accnt.code.data(), accnt.code.size() );
+   if( accnt_metadata_obj.code_hash != digest_type() ) {
+      const auto& code_obj = d.get<code_object, by_code_hash>(accnt_metadata_obj.code_hash);
+      result.wasm = string(code_obj.code.begin(), code_obj.code.end());
+      result.code_hash = code_obj.code_hash;
    }
 
    abi_def abi;
-   if( abi_serializer::to_abi(accnt.abi, abi) ) {
+   if( abi_serializer::to_abi(accnt_obj.abi, abi) ) {
       result.abi = std::move(abi);
    }
 
@@ -1849,11 +1850,10 @@ read_only::get_code_hash_results read_only::get_code_hash( const get_code_hash_p
    get_code_hash_results result;
    result.account_name = params.account_name;
    const auto& d = db.db();
-   const auto& accnt  = d.get<account_object,by_name>( params.account_name );
+   const auto& accnt  = d.get<account_metadata_object,by_name>( params.account_name );
 
-   if( accnt.code.size() ) {
-      result.code_hash = fc::sha256::hash( accnt.code.data(), accnt.code.size() );
-   }
+   if( accnt.code_hash != digest_type() )
+      result.code_hash = accnt.code_hash;
 
    return result;
 }
@@ -1863,9 +1863,13 @@ read_only::get_raw_code_and_abi_results read_only::get_raw_code_and_abi( const g
    result.account_name = params.account_name;
 
    const auto& d = db.db();
-   const auto& accnt = d.get<account_object,by_name>(params.account_name);
-   result.wasm = blob{{accnt.code.begin(), accnt.code.end()}};
-   result.abi = blob{{accnt.abi.begin(), accnt.abi.end()}};
+   const auto& accnt_obj          = d.get<account_object2,by_name>(params.account_name);
+   const auto& accnt_metadata_obj = d.get<account_metadata_object,by_name>(params.account_name);
+   if( accnt_metadata_obj.code_hash != digest_type() ) {
+      const auto& code_obj = d.get<code_object, by_code_hash>(accnt_metadata_obj.code_hash);
+      result.wasm = blob{{code_obj.code.begin(), code_obj.code.end()}};
+   }
+   result.abi = blob{{accnt_obj.abi.begin(), accnt_obj.abi.end()}};
 
    return result;
 }
@@ -1875,11 +1879,13 @@ read_only::get_raw_abi_results read_only::get_raw_abi( const get_raw_abi_params&
    result.account_name = params.account_name;
 
    const auto& d = db.db();
-   const auto& accnt = d.get<account_object,by_name>(params.account_name);
-   result.abi_hash = fc::sha256::hash( accnt.abi.data(), accnt.abi.size() );
-   result.code_hash = fc::sha256::hash( accnt.code.data(), accnt.code.size() );
+   const auto& accnt_obj          = d.get<account_object2,by_name>(params.account_name);
+   const auto& accnt_metadata_obj = d.get<account_metadata_object,by_name>(params.account_name);
+   result.abi_hash = fc::sha256::hash( accnt_obj.abi.data(), accnt_obj.abi.size() );
+   if( accnt_metadata_obj.code_hash != digest_type() )
+      result.code_hash = accnt_metadata_obj.code_hash;
    if( !params.abi_hash || *params.abi_hash != result.abi_hash )
-      result.abi = blob{{accnt.abi.begin(), accnt.abi.end()}};
+      result.abi = blob{{accnt_obj.abi.begin(), accnt_obj.abi.end()}};
 
    return result;
 }
@@ -1896,11 +1902,12 @@ read_only::get_account_results read_only::get_account( const get_account_params&
 
    rm.get_account_limits( result.account_name, result.ram_quota, result.net_weight, result.cpu_weight );
 
-   const auto& a = db.get_account(result.account_name);
+   const auto& accnt_obj = db.get_account( result.account_name );
+   const auto& accnt_metadata_obj = db.db().get<account_metadata_object,by_name>( result.account_name );
 
-   result.privileged       = a.privileged;
-   result.last_code_update = a.last_code_update;
-   result.created          = a.creation_date;
+   result.privileged       = accnt_metadata_obj.is_privileged();
+   result.last_code_update = accnt_metadata_obj.last_code_update;
+   result.created          = accnt_obj.creation_date;
 
    bool grelisted = db.is_resource_greylisted(result.account_name);
    result.net_limit = rm.get_account_net_limit_ex( result.account_name, !grelisted);
@@ -1926,7 +1933,7 @@ read_only::get_account_results read_only::get_account( const get_account_params&
       ++perm;
    }
 
-   const auto& code_account = db.db().get<account_object,by_name>( config::system_account_name );
+   const auto& code_account = db.db().get<account_object2,by_name>( config::system_account_name );
 
    abi_def abi;
    if( abi_serializer::to_abi(code_account.abi, abi) ) {
@@ -2000,8 +2007,8 @@ read_only::get_account_results read_only::get_account( const get_account_params&
    }
 
    //get homepage
-   if(nullptr != db.db().find<account_object,by_name>(N(personal.bos))){
-      const auto& personal_account = db.db().get<account_object,by_name>( N(personal.bos) );
+   if(nullptr != db.db().find<account_object2,by_name>(N(personal.bos))){
+      const auto& personal_account = db.db().get<account_object2,by_name>( N(personal.bos) );
       abi_def abi_personal;
       if( abi_serializer::to_abi(personal_account.abi, abi_personal) ) {
          abi_serializer abis_personal( abi_personal, abi_serializer_max_time );
@@ -2023,6 +2030,62 @@ read_only::get_account_results read_only::get_account( const get_account_params&
    return result;
 }
 
+read_only::get_act_token_result read_only::get_act_token( const name& account_name )const {
+   get_act_token_result token_result{0.0, 0.0, 0.0, 0.0, 0.0};
+   
+   get_account_params params{account_name};
+   get_account_results res = get_account(params);
+
+   if( res.core_liquid_balance.valid() ) {
+      token_result.liquid_balance = res.core_liquid_balance->to_real();
+   }
+   
+   double cpu_own = 0.0, net_own = 0.0, cpu_total = 0.0, net_total = 0.0;
+   if ( res.total_resources.is_object() ) {
+      net_total = asset::from_string(res.total_resources.get_object()["net_weight"].as_string()).to_real();
+      cpu_total = asset::from_string(res.total_resources.get_object()["cpu_weight"].as_string()).to_real();
+   }
+   if( res.self_delegated_bandwidth.is_object() ) {
+      cpu_own = asset::from_string( res.self_delegated_bandwidth.get_object()["cpu_weight"].as_string() ).to_real();
+      net_own = asset::from_string( res.self_delegated_bandwidth.get_object()["net_weight"].as_string() ).to_real();
+   }
+   token_result.self_staked = cpu_own + net_own;
+   token_result.other_staked = net_total + cpu_total - token_result.self_staked; 
+   if( res.refund_request.is_object() ) {
+      auto obj = res.refund_request.get_object();
+      token_result.unstaking = asset::from_string( obj["net_amount"].as_string() ).to_real() + asset::from_string( obj["cpu_amount"].as_string() ).to_real();
+   }
+   // REX 
+   const auto& d = db.db();
+   const auto& code_account = db.db().get<account_object,by_name>( config::system_account_name );
+   abi_def abi;
+   if( abi_serializer::to_abi(code_account.abi, abi) ) {
+      abi_serializer abis( abi, abi_serializer_max_time );
+   
+      const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple( config::system_account_name, config::system_account_name, N(rexfund) ));
+      if (t_id != nullptr) {
+         const auto &idx = d.get_index<key_value_index, by_scope_primary>();
+         auto it = idx.find(boost::make_tuple( t_id->id, account_name ));
+         if ( it != idx.end() ) {
+            vector<char> data;
+            copy_inline_row(*it, data);
+            token_result.rex_deposit = abis.binary_to_variant( "rex_fund", data, abi_serializer_max_time, shorten_abi_errors ).get_object()["balance"].as<asset>().to_real();
+         }
+      }
+      t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple( config::system_account_name, config::system_account_name, N(rexbal) ));
+      if (t_id != nullptr) {
+         const auto &idx = d.get_index<key_value_index, by_scope_primary>();
+         auto it = idx.find(boost::make_tuple( t_id->id, account_name ));
+         if ( it != idx.end() ) {
+            vector<char> data;
+            copy_inline_row(*it, data);
+            token_result.rex_deposit += abis.binary_to_variant( "rex_balance", data, abi_serializer_max_time, shorten_abi_errors ).get_object()["vote_stake"].as<asset>().to_real();
+         }
+      }
+   }
+   return token_result;
+}
+
 static variant action_abi_to_variant( const abi_def& abi, type_name action_type ) {
    variant v;
    auto it = std::find_if(abi.structs.begin(), abi.structs.end(), [&](auto& x){return x.name == action_type;});
@@ -2033,7 +2096,7 @@ static variant action_abi_to_variant( const abi_def& abi, type_name action_type 
 
 read_only::abi_json_to_bin_result read_only::abi_json_to_bin( const read_only::abi_json_to_bin_params& params )const try {
    abi_json_to_bin_result result;
-   const auto code_account = db.db().find<account_object,by_name>( params.code );
+   const auto code_account = db.db().find<account_object2,by_name>( params.code );
    EOS_ASSERT(code_account != nullptr, contract_query_exception, "Contract can't be found ${contract}", ("contract", params.code));
 
    abi_def abi;
@@ -2055,7 +2118,7 @@ read_only::abi_json_to_bin_result read_only::abi_json_to_bin( const read_only::a
 
 read_only::abi_bin_to_json_result read_only::abi_bin_to_json( const read_only::abi_bin_to_json_params& params )const {
    abi_bin_to_json_result result;
-   const auto& code_account = db.db().get<account_object,by_name>( params.code );
+   const auto& code_account = db.db().get<account_object2,by_name>( params.code );
    abi_def abi;
    if( abi_serializer::to_abi(code_account.abi, abi) ) {
       abi_serializer abis( abi, abi_serializer_max_time );

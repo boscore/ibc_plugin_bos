@@ -117,6 +117,14 @@ public:
 
    using account_resource_limit = chain::resource_limits::account_resource_limit;
 
+   struct get_act_token_result {
+      double                     liquid_balance;
+      double                     self_staked;
+      double                     other_staked;
+      double                     unstaking;
+      double                     rex_deposit;  // rexfund.balance + rexbal.vote_stake
+   };
+
    struct get_account_results {
       name                       account_name;
       uint32_t                   head_block_num = 0;
@@ -150,6 +158,8 @@ public:
       optional<symbol> expected_core_symbol;
    };
    get_account_results get_account( const get_account_params& params )const;
+
+   get_act_token_result get_act_token( const name& account_name )const;
 
 
    struct get_code_results {
@@ -745,6 +755,9 @@ FC_REFLECT( eosio::chain_apis::read_only::get_account_results,
             (account_name)(head_block_num)(head_block_time)(privileged)(last_code_update)(created)
             (core_liquid_balance)(ram_quota)(net_weight)(cpu_weight)(net_limit)(cpu_limit)(ram_usage)(permissions)
             (total_resources)(self_delegated_bandwidth)(refund_request)(voter_info)(homepage) )
+FC_REFLECT( eosio::chain_apis::read_only::get_act_token_result,
+            (liquid_balance)(self_staked)(other_staked)(unstaking)(rex_deposit) )
+
 FC_REFLECT( eosio::chain_apis::read_only::get_code_results, (account_name)(code_hash)(wast)(wasm)(abi) )
 FC_REFLECT( eosio::chain_apis::read_only::get_code_hash_results, (account_name)(code_hash) )
 FC_REFLECT( eosio::chain_apis::read_only::get_abi_results, (account_name)(abi) )

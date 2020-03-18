@@ -5,8 +5,7 @@
 #include <eosio/chain/pbft_database.hpp>
 #include <eosio/chain/global_property_object.hpp>
 
-#include <eosio.token/eosio.token.wast.hpp>
-#include <eosio.token/eosio.token.abi.hpp>
+#include <contracts.hpp>
 
 #include <Runtime/Runtime.h>
 

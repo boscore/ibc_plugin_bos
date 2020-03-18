@@ -62,7 +62,7 @@ class apply_context {
             const T& get( int iterator ) {
                EOS_ASSERT( iterator != -1, invalid_table_iterator, "invalid iterator" );
                EOS_ASSERT( iterator >= 0, table_operation_not_permitted, "dereference of end iterator" );
-               EOS_ASSERT( iterator < _iterator_to_object.size(), invalid_table_iterator, "iterator out of range" );
+               EOS_ASSERT( (size_t)iterator < _iterator_to_object.size(), invalid_table_iterator, "iterator out of range" );
                auto result = _iterator_to_object[iterator];
                EOS_ASSERT( result, table_operation_not_permitted, "dereference of deleted object" );
                return *result;
@@ -574,6 +574,11 @@ class apply_context {
 
       void add_ram_usage( account_name account, int64_t ram_delta );
       void finalize_trace( action_trace& trace, const fc::time_point& start );
+
+      bool is_context_free()const { return context_free; }
+      bool is_privileged()const { return privileged; }
+      action_name get_receiver()const { return receiver; }
+      const action& get_action()const { return act; }
 
    /// Fields:
    public:

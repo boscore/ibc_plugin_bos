@@ -74,7 +74,7 @@ BOOST_AUTO_TEST_CASE(set_name_list_test)
 
       flat_set<account_name> nameset(list.begin(), list.end());
          // Create an account
-         db.create<account_object>([](account_object &a) {
+         db.create<account_object2>([](account_object2 &a) {
             a.name = "alice";
          });
 

@@ -1,4 +1,4 @@
-cmake_minimum_required( VERSION 3.5 )
+cmake_minimum_required( VERSION 3.8 )
 
 project( EOSIO )
 
@@ -15,7 +15,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libraries/fc/CMakeMod
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules")
 
 if (UNIX AND APPLE)
-   list(APPEND CMAKE_PREFIX_PATH "/usr/local/opt/llvm@4" "/usr/local/opt/gettext")
+   list(APPEND CMAKE_PREFIX_PATH "/usr/local/opt/llvm@7" "/usr/local/opt/gettext")
 endif()
 
 include( GNUInstallDirs )
@@ -25,13 +25,13 @@ include( InstallDirectoryPermissions )
 include( MASSigning )
 
 set( BLOCKCHAIN_NAME "BOS" )
-set( CMAKE_CXX_STANDARD 14 )
+set( CMAKE_CXX_STANDARD 17 )
 set( CMAKE_CXX_EXTENSIONS ON )
 set( CXX_STANDARD_REQUIRED ON)
 
 set(VERSION_MAJOR 3)
 set(VERSION_MINOR 0)
-set(VERSION_PATCH 5)
+set(VERSION_PATCH 6)
 
 if(VERSION_SUFFIX)
     set(VERSION_FULL "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}-${VERSION_SUFFIX}")
@@ -55,11 +55,8 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
        add_compile_options(-fdiagnostics-color=always)
     endif()
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.0)
-        message(FATAL_ERROR "Clang version must be at least 4.0!")
-    endif()
-    if ("${CMAKE_GENERATOR}" STREQUAL "Ninja")
-       add_compile_options(-fcolor-diagnostics)
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0)
+        message(FATAL_ERROR "Clang version must be at least 6.0!")
     endif()
 endif()
 
@@ -88,6 +85,11 @@ if ("${OPENSSL_ROOT_DIR}" STREQUAL "")
       message(FATAL_ERROR "openssl not found and don't know where to look, please specify OPENSSL_ROOT_DIR")
    endif()
 endif()
+
+# WASM runtimes to enable. Each runtime in this list will have:
+#  * definition EOSIO_<RUNTIME>_RUNTIME_ENABLED defined in public libchain interface
+#  * ctest entries with --runtime
+list(APPEND EOSIO_WASM_RUNTIMES wabt)   #always enable wabt; it works everywhere and parts of eosio still assume it's always available
 
 if(UNIX)
   if(APPLE)
@@ -158,7 +160,7 @@ else( WIN32 ) # Apple AND Linux
 
     if( APPLE )
         # Apple Specific Options Here
-        message( STATUS "Configuring EOSIO on OS X" )
+        message( STATUS "Configuring EOSIO on macOS" )
         set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS} -Wall -Wno-deprecated-declarations" )
     else( APPLE )
         # Linux Specific Options Here
@@ -201,10 +203,10 @@ if(ENABLE_COVERAGE_TESTING)
 endif()
 
 include(utils)
-add_subdirectory( externals )
+#add_subdirectory( externals )
 
 if ("${CORE_SYMBOL_NAME}" STREQUAL "")
-  set( CORE_SYMBOL_NAME "SYS" )
+  set( CORE_SYMBOL_NAME "EOS" )
 endif()
 string(TOUPPER ${CORE_SYMBOL_NAME} CORE_SYMBOL_NAME)
 
@@ -221,9 +223,9 @@ endif()
 
 message( STATUS "Using '${EOSIO_ROOT_KEY}' as public key for 'eosio' account" )
 
-include(wasm)
+#include(wasm)
 add_subdirectory( libraries )
-add_subdirectory( contracts )
+#add_subdirectory( contracts )
 add_subdirectory( plugins )
 add_subdirectory( programs )
 add_subdirectory( scripts )

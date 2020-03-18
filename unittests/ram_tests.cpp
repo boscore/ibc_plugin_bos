@@ -14,23 +14,20 @@
 #include <fc/exception/exception.hpp>
 #include <fc/variant_object.hpp>
 
-#include "eosio_system_tester.hpp"
+#include <contracts.hpp>
 
-#include <test_ram_limit/test_ram_limit.abi.hpp>
-#include <test_ram_limit/test_ram_limit.wast.hpp>
+#include "eosio_system_tester.hpp"
 
 /*
  * register test suite `ram_tests`
  */
 BOOST_AUTO_TEST_SUITE(ram_tests)
 
-
-
 /*************************************************************************************
  * ram_tests test case
  *************************************************************************************/
 BOOST_FIXTURE_TEST_CASE(ram_tests, eosio_system::eosio_system_tester) { try {
-   auto init_request_bytes = 80000;
+   auto init_request_bytes = 80000 + 7110; // `7110' is for table token row
    const auto increment_contract_bytes = 10000;
    const auto table_allocation_bytes = 12000;
    BOOST_REQUIRE_MESSAGE(table_allocation_bytes > increment_contract_bytes, "increment_contract_bytes must be less than table_allocation_bytes for this test setup to work");
@@ -44,7 +41,7 @@ BOOST_FIXTURE_TEST_CASE(ram_tests, eosio_system::eosio_system_tester) { try {
 
    for (auto i = 0; i < 10; ++i) {
       try {
-         set_code( N(testram11111), test_ram_limit_wast );
+         set_code( N(testram11111), contracts::test_ram_limit_wasm() );
          break;
       } catch (const ram_usage_exceeded&) {
          init_request_bytes += increment_contract_bytes;
@@ -56,7 +53,7 @@ BOOST_FIXTURE_TEST_CASE(ram_tests, eosio_system::eosio_system_tester) { try {
 
    for (auto i = 0; i < 10; ++i) {
       try {
-         set_abi( N(testram11111), test_ram_limit_abi );
+         set_abi( N(testram11111), contracts::test_ram_limit_abi().data() );
          break;
       } catch (const ram_usage_exceeded&) {
          init_request_bytes += increment_contract_bytes;
@@ -65,8 +62,8 @@ BOOST_FIXTURE_TEST_CASE(ram_tests, eosio_system::eosio_system_tester) { try {
       }
    }
    produce_blocks(10);
-   set_code( N(testram22222), test_ram_limit_wast );
-   set_abi( N(testram22222), test_ram_limit_abi );
+   set_code( N(testram22222), contracts::test_ram_limit_wasm() );
+   set_abi( N(testram22222), contracts::test_ram_limit_abi().data() );
    produce_blocks(10);
 
    auto total = get_total_stake( N(testram11111) );

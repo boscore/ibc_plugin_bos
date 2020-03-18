@@ -59,6 +59,7 @@ namespace eosio {
 static appbase::abstract_plugin& _producer_plugin = app().register_plugin<producer_plugin>();
 
 using namespace eosio::chain;
+using namespace eosio::chain_apis;
 using namespace eosio::chain::plugin_interface;
 
 namespace {
@@ -954,20 +955,7 @@ producer_plugin::integrity_hash_information producer_plugin::get_integrity_hash(
    return {chain.head_block_id(), chain.calculate_integrity_hash()};
 }
 
-producer_plugin::snapshot_information producer_plugin::create_snapshot() const {
-   chain::controller& chain = my->chain_plug->chain();
-
-   auto reschedule = fc::make_scoped_exit([this](){
-      my->schedule_production_loop();
-   });
-
-   if (chain.pending_block_state()) {
-      // abort the pending block
-      chain.abort_block();
-   } else {
-      reschedule.cancel();
-   }
-
+producer_plugin::snapshot_information producer_plugin::create_blocks_snapshot(chain::controller& chain) const {
    auto head_id = chain.head_block_id();
    std::string snapshot_path = (my->_snapshots_dir / fc::format_string("snapshot-${id}.bin", fc::mutable_variant_object()("id", head_id))).generic_string();
 
@@ -983,6 +971,57 @@ producer_plugin::snapshot_information producer_plugin::create_snapshot() const {
    snap_out.close();
 
    return {head_id, snapshot_path};
+}
+
+producer_plugin::snapshot_information producer_plugin::create_acts_snapshot(chain::controller& chain) const {
+   auto head_id = chain.head_block_id();
+   std::string acts_snapshot_path = (my->_snapshots_dir / fc::format_string("acts-snapshot-${id}.txt", fc::mutable_variant_object()("id", head_id))).generic_string();
+
+   EOS_ASSERT( !fc::is_regular_file(acts_snapshot_path), snapshot_exists_exception,
+               "acts-snapshot named ${name} already exists", ("name", acts_snapshot_path));
+
+   auto acts_stream = std::ofstream(acts_snapshot_path, (std::ios::out));
+   acts_stream << "name,liquid,self_staked,other_staked,unstaking,rex_deposit" << std::endl;
+
+   const auto& idx = chain.db().get_index<account_sequence_index,by_name>();
+   auto lower = idx.lower_bound( N(1) );
+   auto upper = idx.upper_bound( N(zzzzzzzzzzzz) );
+   
+   for (auto itr = lower; itr != upper; ++itr ){
+      chain_apis::read_only::get_act_token_result result = my->chain_plug->get_read_only_api().get_act_token( itr->name );
+      acts_stream << itr->name.to_string() << "," << result.liquid_balance << "," 
+               << result.self_staked << "," << result.other_staked << "," 
+               << result.unstaking << "," << result.rex_deposit << std::endl;
+   }
+
+   acts_stream.flush();
+   acts_stream.close();
+
+   return {head_id, acts_snapshot_path};
+}
+
+producer_plugin::snapshot_information producer_plugin::create_snapshot(export_snapshot_type type) const {
+   chain::controller& chain = my->chain_plug->chain();
+
+   auto reschedule = fc::make_scoped_exit([this](){
+      my->schedule_production_loop();
+   });
+
+   if (chain.pending_block_state()) {
+      // abort the pending block
+      chain.abort_block();
+   } else {
+      reschedule.cancel();
+   }
+   switch (type) {
+      case export_snapshot_type::snapshot:
+         return this->create_blocks_snapshot(chain);
+      case export_snapshot_type::acts_snapshot:
+         return this->create_acts_snapshot(chain);
+      default:
+         elog("Not support export_snapshot_type");
+   }
+   return {};
 }
 
 optional<fc::time_point> producer_plugin_impl::calculate_next_block_time(const account_name& producer_name, const block_timestamp_type& current_block_time) const {

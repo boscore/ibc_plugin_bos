@@ -89,7 +89,7 @@ void producer_api_plugin::plugin_startup() {
        CALL(producer, producer, get_integrity_hash,
             INVOKE_R_V(producer, get_integrity_hash), 201),
        CALL(producer, producer, create_snapshot,
-            INVOKE_R_V(producer, create_snapshot), 201),
+            INVOKE_R_R(producer, create_snapshot, producer_plugin::export_snapshot_type), 201),
    });
 }
 

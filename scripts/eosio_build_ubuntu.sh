@@ -60,7 +60,7 @@
 		exit 1
 	fi
 
-	DEP_ARRAY=(clang lldb-4.0 libclang-4.0-dev cmake make automake libbz2-dev libssl-dev \
+	DEP_ARRAY=(clang-9 lldb-9 libclang-9-dev cmake make automake libbz2-dev libssl-dev \
 	libgmp3-dev autotools-dev build-essential libicu-dev python2.7-dev python3-dev \
     autoconf libtool curl zlib1g-dev doxygen graphviz)
 	COUNT=1
@@ -444,7 +444,7 @@ mongodconf
 			printf "\\n\\tExiting now.\\n"
 			exit 1;
 		fi
-		if ! git clone --depth 1 --single-branch --branch release_40 https://github.com/llvm-mirror/llvm.git
+		if ! git clone --depth 1 --single-branch --branch release_90 https://github.com/llvm-mirror/llvm.git
 		then
 			printf "\\tUnable to clone llvm repo @ https://github.com/llvm-mirror/llvm.git.\\n"
 			printf "\\n\\tExiting now.\\n"
@@ -456,7 +456,7 @@ mongodconf
 			printf "\\n\\tExiting now.\\n"
 			exit 1;
 		fi
-		if ! git clone --depth 1 --single-branch --branch release_40 https://github.com/llvm-mirror/clang.git
+		if ! git clone --depth 1 --single-branch --branch release_90 https://github.com/llvm-mirror/clang.git
 		then
 			printf "\\tUnable to clone clang repo @ https://github.com/llvm-mirror/clang.git.\\n"
 			printf "\\n\\tExiting now.\\n"
