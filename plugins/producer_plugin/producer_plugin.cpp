@@ -975,7 +975,7 @@ producer_plugin::snapshot_information producer_plugin::create_blocks_snapshot(ch
 
 producer_plugin::snapshot_information producer_plugin::create_acts_snapshot(chain::controller& chain) const {
    auto head_id = chain.head_block_id();
-   std::string acts_snapshot_path = (my->_snapshots_dir / fc::format_string("acts-snapshot-${id}.txt", fc::mutable_variant_object()("id", head_id))).generic_string();
+   std::string acts_snapshot_path = (my->_snapshots_dir / fc::format_string("acts-snapshot-${id}.csv", fc::mutable_variant_object()("id", head_id))).generic_string();
 
    EOS_ASSERT( !fc::is_regular_file(acts_snapshot_path), snapshot_exists_exception,
                "acts-snapshot named ${name} already exists", ("name", acts_snapshot_path));
