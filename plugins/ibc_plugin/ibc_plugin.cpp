@@ -162,7 +162,7 @@ namespace eosio { namespace ibc {
       fc::sha256                    peerchain_id;
       fc::sha256                    node_id;
 
-      bool                          hub_worker_enabled = false;
+      bool                          hub_process_enabled = false;
 
       ibc_transaction_index         local_origtrxs;
       ibc_transaction_index         local_cashtrxs;
@@ -1305,7 +1305,7 @@ namespace eosio { namespace ibc {
    }
 
    range_type ibc_token_contract::get_table_hubtrxs_id_range(){
-      return get_table_primary_key_range( account, account, N(hubgs) );
+      return get_table_primary_key_range( account, account, N(hubtrxs) );
    }
 
    optional<hub_trx_info> ibc_token_contract::get_table_hubtrxs_info_by_lower_id( uint64_t id ){
@@ -4189,6 +4189,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::ibc_hub_checker( ){
+      //ilog("hub step 1");
       auto head_tslot = get_head_tslot();
 
       static hub_globals hgs{};
@@ -4205,11 +4206,14 @@ namespace eosio { namespace ibc {
          return;
       }
 
+      //ilog("hub step 2");
       /// --- hub_trx_table ---
       std::vector<hub_trx_info> hub_trx_table;
       uint64_t next_index = range.first;
 
+
       while(1) {
+         idump((next_index));
          auto hub_trx_opt = token_contract->get_table_hubtrxs_info_by_lower_id( next_index );
          if ( hub_trx_opt.valid() ){
             hub_trx_table.emplace_back( *hub_trx_opt );
@@ -4219,6 +4223,7 @@ namespace eosio { namespace ibc {
          }
       }
 
+      //ilog("hub step 3");
       /// --- need_transfers ---
       std::vector<hub_transfer_params>  need_transfers;
 
@@ -4232,12 +4237,12 @@ namespace eosio { namespace ibc {
          par.to            = token_contract->get_account();
          par.quantity      = hub_trx.mini_to_quantity;
          par.orig_trx_id   = hub_trx.orig_trx_id;
-         par.worker        = hub_trx.fee_receiver;
+         par.worker        = relay;
 
-         if ( hub_trx.forward_times < 2 ){ // push forward
+         if ( hub_trx.forward_times < 1 ){ // push forward
             par.account       = hub_trx.to_account;
             par.chain         = hub_trx.to_chain;
-         } else if ( hub_trx.backward_times < 2 ){ // push backward
+         } else if ( hub_trx.backward_times < 1 ){ // push backward
             par.account       = hub_trx.from_account;
             par.chain         = hub_trx.from_chain;
          } else {
@@ -4247,6 +4252,7 @@ namespace eosio { namespace ibc {
          need_transfers.emplace_back( par );
       }
 
+      //ilog("hub step 4");
       /// --- push trxs ---
       if ( need_transfers.size() ){
          token_contract->push_hub_trxs( need_transfers );
@@ -4264,7 +4270,7 @@ namespace eosio { namespace ibc {
                ++i;
             } else {
                ibc_core_checker();
-               if ( hub_worker_enabled ){
+               if ( hub_process_enabled ){
                   ibc_hub_checker();
                }
             }
@@ -4492,7 +4498,7 @@ namespace eosio { namespace ibc {
            "   <private-key>  \tis a string form of a valid EOSIO private key which maps to the provided public key\n\n")
          ( "ibc-listen-endpoint", bpo::value<string>()->default_value( "0.0.0.0:5678" ), "The actual host:port used to listen for incoming ibc connections.")
          ( "ibc-server-address", bpo::value<string>(), "An externally accessible host:port for identifying this node. Defaults to ibc-listen-endpoint.")
-         ( "ibc-hub-worker-enable", bpo::value<bool>()->default_value(true), "True to make the ibc_plugin pushing hub transactios automatically.")
+         ( "ibc-hub-process-enable", bpo::value<bool>()->default_value(true), "True to make the ibc_plugin pushing hub transactios automatically.")
          ( "ibc-agent-name", bpo::value<string>()->default_value("\"EOSIO IBC Agent\""), "The name supplied to identify this node amongst the peers.")
          ( "ibc-peer-chain-id", bpo::value<string>()->default_value(""), "The peer chain's chain id")
          ( "ibc-peer-address", bpo::value<vector<string>>()->composing(), "The public endpoint of a peer node to connect to. Use multiple ibc-peer-address options as needed to compose a network.")
@@ -4646,7 +4652,7 @@ namespace eosio { namespace ibc {
          my->network_version_match = options.at( "ibc-version-match" ).as<bool>();
          peer_log_format = options.at( "ibc-log-format" ).as<string>();
 
-         my->hub_worker_enabled = options.at( "ibc-hub-worker-enable" ).as<bool>();
+         my->hub_process_enabled = options.at( "ibc-hub-process-enable" ).as<bool>();
 
          my->chain_plug = app().find_plugin<chain_plugin>();
          EOS_ASSERT( my->chain_plug, chain::missing_chain_plugin_exception, "missing chain plugin");
