@@ -162,6 +162,8 @@ namespace eosio { namespace ibc {
       fc::sha256                    peerchain_id;
       fc::sha256                    node_id;
 
+      bool                          hub_worker_enabled = false;
+
       ibc_transaction_index         local_origtrxs;
       ibc_transaction_index         local_cashtrxs;
       uint32_t                      new_prod_blk_num = 0;
@@ -4262,7 +4264,9 @@ namespace eosio { namespace ibc {
                ++i;
             } else {
                ibc_core_checker();
-               ibc_hub_checker();
+               if ( hub_worker_enabled ){
+                  ibc_hub_checker();
+               }
             }
          } FC_LOG_AND_DROP()
       } else {
@@ -4488,6 +4492,7 @@ namespace eosio { namespace ibc {
            "   <private-key>  \tis a string form of a valid EOSIO private key which maps to the provided public key\n\n")
          ( "ibc-listen-endpoint", bpo::value<string>()->default_value( "0.0.0.0:5678" ), "The actual host:port used to listen for incoming ibc connections.")
          ( "ibc-server-address", bpo::value<string>(), "An externally accessible host:port for identifying this node. Defaults to ibc-listen-endpoint.")
+         ( "ibc-hub-worker-enable", bpo::value<bool>()->default_value(true), "True to make the ibc_plugin pushing hub transactios automatically.")
          ( "ibc-agent-name", bpo::value<string>()->default_value("\"EOSIO IBC Agent\""), "The name supplied to identify this node amongst the peers.")
          ( "ibc-peer-chain-id", bpo::value<string>()->default_value(""), "The peer chain's chain id")
          ( "ibc-peer-address", bpo::value<vector<string>>()->composing(), "The public endpoint of a peer node to connect to. Use multiple ibc-peer-address options as needed to compose a network.")
@@ -4640,6 +4645,8 @@ namespace eosio { namespace ibc {
 
          my->network_version_match = options.at( "ibc-version-match" ).as<bool>();
          peer_log_format = options.at( "ibc-log-format" ).as<string>();
+
+         my->hub_worker_enabled = options.at( "ibc-hub-worker-enable" ).as<bool>();
 
          my->chain_plug = app().find_plugin<chain_plugin>();
          EOS_ASSERT( my->chain_plug, chain::missing_chain_plugin_exception, "missing chain plugin");
