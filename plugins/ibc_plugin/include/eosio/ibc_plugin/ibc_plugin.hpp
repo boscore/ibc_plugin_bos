@@ -180,6 +180,42 @@ namespace eosio { namespace ibc {
       string   notes;
    };
 
+   // ---- hub related ----
+   struct hub_globals {
+      hub_globals(){}
+      bool                 is_open = false;
+      name                 hub_account;
+      uint64_t             unfinished_trxs;
+    };
+
+   struct  hub_trx_info {
+      uint64_t              cash_seq_num;
+      uint64_t              cash_time_slot;
+      name                  from_chain;
+      name                  from_account;
+      asset                 from_quantity;
+      asset                 mini_to_quantity;
+      transaction_id_type   orig_trx_id;
+      name                  to_chain;
+      name                  to_account;
+      asset                 to_quantity;
+      name                  fee_receiver;
+      transaction_id_type   hub_trx_id;
+      uint64_t              hub_trx_time_slot;
+      uint8_t               forward_times;
+      uint8_t               backward_times;
+   };
+
+   struct hub_transfer_params {
+      name                    from;
+      name                    to;
+      asset                   quantity;
+      name                    account;
+      name                    chain;
+      transaction_id_type     orig_trx_id;
+      name                    worker;
+   };
+
 }}
 
 FC_REFLECT( eosio::ibc::connection_status, (peer)(connecting)(syncing)(last_handshake) )
@@ -207,3 +243,9 @@ FC_REFLECT( eosio::ibc::cashconfirm_action_params, (from_chain)(cash_trx_id)(cas
             (cash_trx_merkle_path)(cash_trx_block_num)(cash_trx_block_header)(cash_trx_block_id_merkle_path)
             (anchor_block_num)(orig_trx_id) )
 FC_REFLECT( eosio::ibc::memo_info_type, (receiver)(chain)(notes) )
+
+FC_REFLECT( eosio::ibc::hub_globals, (is_open)(hub_account)(unfinished_trxs) )
+FC_REFLECT( eosio::ibc::hub_trx_info, (cash_seq_num)(cash_time_slot)(from_chain)(from_account)(from_quantity)
+            (mini_to_quantity)(orig_trx_id)(to_chain)(to_account)(to_quantity)(fee_receiver)(hub_trx_id)
+            (hub_trx_time_slot)(forward_times)(backward_times) )
+FC_REFLECT( eosio::ibc::hub_transfer_params, (from)(to)(quantity)(account)(chain)(orig_trx_id)(worker) )

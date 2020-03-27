@@ -236,6 +236,7 @@ namespace eosio { namespace ibc {
       void check_if_remove_old_data_in_ibc_contracts();
 
       void ibc_core_checker( );
+      void ibc_hub_checker( );
       void start_ibc_core_timer( );
 
       void connection_monitor(std::weak_ptr<connection> from_connection);
@@ -959,6 +960,13 @@ namespace eosio { namespace ibc {
       optional<peer_chain_state_ibc_token>   get_peer_chain_state();
       optional<peer_chain_mutable_ibc_token> get_peer_chain_mutable();
 
+      // hub related
+      optional<hub_globals>                  get_hub_global_singleton();
+      range_type                             get_table_hubtrxs_id_range();
+      optional<hub_trx_info>                 get_table_hubtrxs_info_by_lower_id( uint64_t id );
+      void push_hub_trxs_recurse( int index, const std::shared_ptr<std::vector<hub_transfer_params>>& params );
+      void push_hub_trxs( const std::vector<hub_transfer_params>& params );
+
       // other
       optional<transaction>            get_transaction( std::vector<char> packed_trx_receipt );
       optional<transfer_action_type>   get_original_action_params( std::vector<char> packed_trx_receipt, transaction_id_type* trx_id_ptr = nullptr );
@@ -982,9 +990,15 @@ namespace eosio { namespace ibc {
       bool has_contract();
       void get_contract_state();
 
+      name get_account();
+
    private:
       name account;
    };
+
+   name ibc_token_contract::get_account(){
+      return account;
+   }
 
    optional<memo_info_type> ibc_token_contract::get_memo_info( const string& memo_str ){
 
@@ -1270,6 +1284,104 @@ namespace eosio { namespace ibc {
       } FC_LOG_AND_DROP()
 
       return optional<peer_chain_mutable_ibc_token>();
+   }
+
+   /// --- hub related ---
+
+   optional<hub_globals> ibc_token_contract::get_hub_global_singleton(){
+      auto p = get_singleton_kvo( account, account, N(hubgs) );
+      if ( p.valid() ){
+         auto obj = *p;
+         fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
+         hub_globals result;
+         try {
+            fc::raw::unpack( ds, result );
+            return result;
+         } FC_LOG_AND_DROP()
+      }
+      return optional<hub_globals>();
+   }
+
+   range_type ibc_token_contract::get_table_hubtrxs_id_range(){
+      return get_table_primary_key_range( account, account, N(hubgs) );
+   }
+
+   optional<hub_trx_info> ibc_token_contract::get_table_hubtrxs_info_by_lower_id( uint64_t id ){
+      chain_apis::read_only::get_table_rows_params par;
+      par.json = true;  // must be true
+      par.code = account;
+      par.scope = account.to_string();
+      par.table = N(hubtrxs);
+      par.table_key = "id";
+      par.lower_bound = to_string(id);
+      par.upper_bound = "";
+      par.limit = 1;
+      par.key_type = "i64";
+      par.index_position = "1";
+
+      try {
+         auto result = my_impl->chain_plug->get_read_only_api().get_table_rows( par );
+         if ( result.rows.size() != 0 ){
+            return result.rows.front().as<hub_trx_info>();
+         }
+      } FC_LOG_AND_DROP()
+      return optional<hub_trx_info>();
+   }
+
+   void ibc_token_contract::push_hub_trxs_recurse( int index, const std::shared_ptr<std::vector<hub_transfer_params>>& params ){
+      auto next = [=](const fc::static_variant<fc::exception_ptr, chain_apis::read_write::push_transaction_results>& result) {
+         if (result.contains<fc::exception_ptr>()) {
+            try {
+               result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
+            } FC_LOG_AND_DROP()
+            elog("push hub transaction failed, orig_trx_id ${id}, index ${i}",("id", params->at(index).orig_trx_id)("i",index));
+         } else {
+            auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
+            dlog("pushed hub transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+         }
+
+         int next_index = index + 1;
+         if (next_index < params->size()) {
+            push_hub_trxs_recurse( next_index, params );
+         } else {
+            dlog("all ${sum} hub transactions have tried to push",("sum",params->size()));
+         }
+      };
+
+      auto par = params->at(index);
+
+      string memo = par.account.to_string() + "@" + par.chain.to_string() + " orig_trx_id=" + string(par.orig_trx_id) + " worker=" + par.worker.to_string();
+      auto actn = get_action( account, N(transfer), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+            ("from",       par.from)
+            ("to",         par.to)
+            ("quantity",   par.quantity)
+            ("memo",       memo));
+
+      if ( ! actn.valid() ){
+         elog("get cash action failed");
+         return;
+      }
+
+      auto trx_opt = generate_signed_transaction_from_action( *actn );
+      if ( ! trx_opt.valid() ){
+         elog("generate_signed_transaction_from_action failed");
+         return;
+      }
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
+   }
+
+   void ibc_token_contract::push_hub_trxs( const std::vector<hub_transfer_params>& params ){
+      std::vector<hub_transfer_params> actions = params;
+
+      if ( actions.empty() ){
+         return;
+      }
+
+      try {
+         EOS_ASSERT( actions.size() <= 1000, too_many_tx_at_once, "Attempt to push too many transactions at once" );
+         auto params_copy = std::make_shared<std::vector<hub_transfer_params>>(actions.begin(), actions.end());
+         push_hub_trxs_recurse( 0, params_copy );
+      } FC_LOG_AND_DROP()
    }
 
    optional<transaction> ibc_token_contract::get_transaction( std::vector<char> packed_trx_receipt ){
@@ -4074,6 +4186,72 @@ namespace eosio { namespace ibc {
       }
    }
 
+   void ibc_plugin_impl::ibc_hub_checker( ){
+      auto head_tslot = get_head_tslot();
+
+      static hub_globals hgs{};
+      if ( ! hgs.is_open ){
+         auto opt = token_contract->get_hub_global_singleton();
+         if ( opt.valid() ){
+            hgs = *opt;
+         }
+         return;
+      }
+
+      auto range = token_contract->get_table_hubtrxs_id_range();
+      if ( range == range_type() ){
+         return;
+      }
+
+      /// --- hub_trx_table ---
+      std::vector<hub_trx_info> hub_trx_table;
+      uint64_t next_index = range.first;
+
+      while(1) {
+         auto hub_trx_opt = token_contract->get_table_hubtrxs_info_by_lower_id( next_index );
+         if ( hub_trx_opt.valid() ){
+            hub_trx_table.emplace_back( *hub_trx_opt );
+           next_index = hub_trx_opt->cash_seq_num + 1;
+         } else {
+            break;
+         }
+      }
+
+      /// --- need_transfers ---
+      std::vector<hub_transfer_params>  need_transfers;
+
+      for( const auto& hub_trx : hub_trx_table ){
+         if ( hub_trx.hub_trx_id != transaction_id_type() ){
+            continue;
+         }
+
+         hub_transfer_params par;
+         par.from          = hgs.hub_account;
+         par.to            = token_contract->get_account();
+         par.quantity      = hub_trx.mini_to_quantity;
+         par.orig_trx_id   = hub_trx.orig_trx_id;
+         par.worker        = hub_trx.fee_receiver;
+
+         if ( hub_trx.forward_times < 2 ){ // push forward
+            par.account       = hub_trx.to_account;
+            par.chain         = hub_trx.to_chain;
+         } else if ( hub_trx.backward_times < 2 ){ // push backward
+            par.account       = hub_trx.from_account;
+            par.chain         = hub_trx.from_chain;
+         } else {
+            continue;
+         }
+
+         need_transfers.emplace_back( par );
+      }
+
+      /// --- push trxs ---
+      if ( need_transfers.size() ){
+         token_contract->push_hub_trxs( need_transfers );
+      }
+   }
+
+
    void ibc_plugin_impl::start_ibc_core_timer( ){
 
       static int i = 0;
@@ -4084,6 +4262,7 @@ namespace eosio { namespace ibc {
                ++i;
             } else {
                ibc_core_checker();
+               ibc_hub_checker();
             }
          } FC_LOG_AND_DROP()
       } else {
