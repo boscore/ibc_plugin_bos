@@ -401,16 +401,12 @@ namespace eosio {
                 if (v) ilog("configured http with Access-Control-Allow-Credentials: true");
              })->default_value(false),
              "Specify if Access-Control-Allow-Credentials: true should be returned on each request.")
-            ("max-body-size", bpo::value<uint32_t>()->default_value(1024*1024),
-             "The maximum body size in bytes allowed for incoming RPC requests")
-            ("http-max-bytes-in-flight-mb", bpo::value<uint32_t>()->default_value(500),
-             "Maximum size in megabytes http_plugin should use for processing http requests. 503 error response when exceeded." )
-            ("verbose-http-errors", bpo::bool_switch()->default_value(false),
-             "Append the error log to HTTP responses")
-            ("http-validate-host", boost::program_options::value<bool>()->default_value(true),
-             "If set to false, then any incoming \"Host\" header is considered valid")
-            ("http-alias", bpo::value<std::vector<string>>()->composing(),
-             "Additionaly acceptable values for the \"Host\" header of incoming HTTP requests, can be specified multiple times.  Includes http/s_server_address by default.")
+            ("max-body-size", bpo::value<uint32_t>()->default_value(1024*1024), "The maximum body size in bytes allowed for incoming RPC requests")
+		    ("http-max-bytes-in-flight-mb", bpo::value<uint32_t>()->default_value(500),
+		    "Maximum size in megabytes http_plugin should use for processing http requests. 503 error response when exceeded." )
+            ("verbose-http-errors", bpo::bool_switch()->default_value(false), "Append the error log to HTTP responses")
+            ("http-validate-host", boost::program_options::value<bool>()->default_value(true), "If set to false, then any incoming \"Host\" header is considered valid")
+            ("http-alias", bpo::value<std::vector<string>>()->composing(), "Additionaly acceptable values for the \"Host\" header of incoming HTTP requests, can be specified multiple times.  Includes http/s_server_address by default.")
             ;
    }
 
