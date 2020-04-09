@@ -1352,7 +1352,7 @@ namespace eosio { namespace ibc {
 
       auto par = params->at(index);
 
-      string memo = par.account.to_string() + "@" + par.chain.to_string() + " orig_trx_id=" + string(par.orig_trx_id) + " worker=" + par.worker.to_string();
+      string memo = par.account.to_string() + "@" + par.chain.to_string() + " orig_trx_id=" + string(par.orig_trx_id) + " worker=" + par.worker.to_string() + " " + par.memo;
       auto actn = get_action( account, N(transfer), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
             ("from",       par.from)
             ("to",         par.to)
@@ -4213,7 +4213,7 @@ namespace eosio { namespace ibc {
 
 
       while(1) {
-         idump((next_index));
+         /// idump((next_index));
          auto hub_trx_opt = token_contract->get_table_hubtrxs_info_by_lower_id( next_index );
          if ( hub_trx_opt.valid() ){
             hub_trx_table.emplace_back( *hub_trx_opt );
@@ -4238,6 +4238,7 @@ namespace eosio { namespace ibc {
          par.quantity      = hub_trx.mini_to_quantity;
          par.orig_trx_id   = hub_trx.orig_trx_id;
          par.worker        = relay;
+         par.memo          = hub_trx.orig_pure_memo;
 
          if ( hub_trx.forward_times < 1 ){ // push forward
             par.account       = hub_trx.to_account;
