@@ -7,6 +7,7 @@
 #include <eosio/chain/abi_serializer.hpp>
 #include <eosio/chain/account_object.hpp>
 #include <eosio/chain/snapshot.hpp>
+#include <eosio/chain/webassembly/eos-vm-oc/config.hpp>
 
 namespace chainbase {
    class database;
@@ -98,6 +99,9 @@ namespace eosio { namespace chain {
 
             genesis_state            genesis;
             wasm_interface::vm_type  wasm_runtime = chain::config::default_wasm_runtime;
+            eosvmoc::config          eosvmoc_config;
+            bool                     eosvmoc_tierup         = false;
+
 
             db_read_mode             read_mode              = db_read_mode::SPECULATIVE;
             validation_mode          block_validation_mode  = validation_mode::FULL;
@@ -296,6 +300,9 @@ namespace eosio { namespace chain {
          void reset_pbft_my_prepare();
          void reset_pbft_prepared();
          void maybe_switch_forks();
+#if defined(EOSIO_EOS_VM_RUNTIME_ENABLED) || defined(EOSIO_EOS_VM_JIT_RUNTIME_ENABLED)
+         vm::wasm_allocator&  get_wasm_allocator();
+#endif
 
          signal<void(const signed_block_ptr&)>         pre_accepted_block;
          signal<void(const block_state_ptr&)>          accepted_block_header;
