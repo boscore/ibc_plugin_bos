@@ -1,3 +1,4 @@
+  
 FROM ubuntu:18.04
 
 LABEL author="xiaobo <peterwillcn@gmail.com>" maintainer="Xiaobo <peterwillcn@gmail.com> Huang-Ming Huang <huangh@objectcomputing.com> Winlin <pcguangtao@gmail.com>" version="0.1.2" \
@@ -12,8 +13,8 @@ RUN echo "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic main" >> /etc/ap
   && wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add - \
   && apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y git-core automake autoconf libtool build-essential pkg-config libtool \
-     mpi-default-dev libicu-dev python-dev python3-dev libbz2-dev zlib1g-dev libssl-dev libgmp-dev \
-     clang-7 lld-4.0 llvm-7-dev libclang-4.0-dev ninja-build libusb-1.0-0-dev curl libcurl4-gnutls-dev \
+     mpi-default-dev libicu-dev python-dev python3-dev libbz2-dev zlib1g-dev libssl-dev libgmp-dev doxygen graphviz libgmp3-dev \
+     clang-7 lld-4.0 llvm-7-dev libclang-4.0-dev ninja-build libusb-1.0-0-dev curl libcurl4-gnutls-dev autotools-dev ruby \
   && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/clang clang /usr/lib/llvm-7/bin/clang 700 \
