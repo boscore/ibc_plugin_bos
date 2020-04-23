@@ -4119,8 +4119,8 @@ namespace eosio { namespace ibc {
       }
 
       // --- summary ---
-      idump((reached_min_length)(orig_b)(cash_b));
       if ( ! (reached_min_length && orig_b && cash_b ) ){
+         idump((reached_min_length)(orig_b)(cash_b));
          return;
       }
 
