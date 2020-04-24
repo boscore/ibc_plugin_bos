@@ -67,12 +67,13 @@ constexpr auto intrinsic_table = boost::hana::make_tuple(
    "env.get_resource_limits"_s,
    "env.set_resource_limits"_s,
    "env.set_proposed_producers"_s,
-   "env.set_proposed_producers_ex"_s,
    "env.get_blockchain_parameters_packed"_s,
    "env.set_blockchain_parameters_packed"_s,
+   "env.set_name_list_packed"_s,
+   "env.set_guaranteed_minimum_resources"_s,
    "env.is_privileged"_s,
    "env.set_privileged"_s,
-   "env.preactivate_feature"_s,
+   "env.set_upgrade_parameters_packed"_s,
    "env.get_active_producers"_s,
    "env.db_store_i64"_s,
    "env.db_update_i64"_s,
@@ -150,8 +151,6 @@ constexpr auto intrinsic_table = boost::hana::make_tuple(
    "env.get_account_creation_time"_s,
    "env.current_time"_s,
    "env.publication_time"_s,
-   "env.is_feature_activated"_s,
-   "env.get_sender"_s,
    "env.abort"_s,
    "env.eosio_assert"_s,
    "env.eosio_assert_message"_s,
@@ -178,6 +177,10 @@ constexpr auto intrinsic_table = boost::hana::make_tuple(
    "env.printhex"_s,
    "env.read_transaction"_s,
    "env.transaction_size"_s,
+   "env.get_transaction_id"_s,
+   "env.get_action_sequence"_s,
+   "env.has_contract"_s,
+   "env.get_contract_code"_s,
    "env.expiration"_s,
    "env.tapos_block_prefix"_s,
    "env.tapos_block_num"_s,
@@ -248,7 +251,8 @@ constexpr auto intrinsic_table = boost::hana::make_tuple(
    "eosio_injection._eosio_i32_to_f64"_s,
    "eosio_injection._eosio_i64_to_f64"_s,
    "eosio_injection._eosio_ui32_to_f64"_s,
-   "eosio_injection._eosio_ui64_to_f64"_s
+   "eosio_injection._eosio_ui64_to_f64"_s,
+   "env.bpsig_action_time_seed"_s
 );
 
 }}}
