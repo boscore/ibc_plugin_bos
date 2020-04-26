@@ -5,11 +5,10 @@ ARG symbol=EOS
 ENV OPENSSL_ROOT_DIR /usr/include/openssl
 
 RUN git clone -b $branch https://github.com/boscore/bos.git --recursive \
-    && cd bos && sed -i '/add_subdirectory(tools)/c\#add_subdirectory(tools).' libraries/eos-vm/CMakeLists.txt \
     && echo "$branch:$(git rev-parse HEAD)" > /etc/boscore-version \
     && cmake -H. -B"/tmp/build" -GNinja -DCMAKE_BUILD_TYPE=Release -DWASM_ROOT=/opt/wasm -DCMAKE_CXX_COMPILER=clang++ \
        -DCMAKE_C_COMPILER=clang -DCMAKE_INSTALL_PREFIX=/tmp/build -DBUILD_MONGO_DB_PLUGIN=true -DCORE_SYMBOL_NAME=$symbol \
-       -DOPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR}" -DCMAKE_CXX_STANDARD_LIBRARIES="-lpthread"  \
+       -DOPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR}" -DCMAKE_CXX_STANDARD_LIBRARIES="-lpthread" -DENABLE_TOOLS=OFF \
     && cmake --build /tmp/build --target install
 
 FROM ubuntu:18.04
