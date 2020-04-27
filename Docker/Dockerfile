@@ -1,4 +1,4 @@
-FROM boscore/builder:v2.0.4 as builder
+FROM boscore/builder:v2.0.6 as builder
 ARG branch=master
 ARG symbol=EOS
 
