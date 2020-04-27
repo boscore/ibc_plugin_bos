@@ -39,6 +39,9 @@ using namespace eosio;
 #define INVOKE_R_R(api_handle, call_name, in_param) \
      auto result = api_handle.call_name(fc::json::from_string(body).as<in_param>());
 
+#define INVOKE_R_R_O(api_handle, call_name, in_param) \
+     auto result = (body == "{}" ? api_handle.call_name() : api_handle.call_name(fc::json::from_string(body).as<in_param>()));
+
 #define INVOKE_R_R_R_R(api_handle, call_name, in_param0, in_param1, in_param2) \
      const auto& vs = fc::json::json::from_string(body).as<fc::variants>(); \
      auto result = api_handle.call_name(vs.at(0).as<in_param0>(), vs.at(1).as<in_param1>(), vs.at(2).as<in_param2>());
@@ -89,7 +92,7 @@ void producer_api_plugin::plugin_startup() {
        CALL(producer, producer, get_integrity_hash,
             INVOKE_R_V(producer, get_integrity_hash), 201),
        CALL(producer, producer, create_snapshot,
-            INVOKE_R_R(producer, create_snapshot, producer_plugin::export_snapshot_type), 201),
+            INVOKE_R_R_O(producer, create_snapshot, producer_plugin::export_snapshot_type), 201),
    });
 }
 

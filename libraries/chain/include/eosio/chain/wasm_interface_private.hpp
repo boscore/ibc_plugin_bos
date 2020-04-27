@@ -3,6 +3,12 @@
 #include <eosio/chain/wasm_interface.hpp>
 #include <eosio/chain/webassembly/wavm.hpp>
 #include <eosio/chain/webassembly/wabt.hpp>
+#ifdef EOSIO_EOS_VM_OC_RUNTIME_ENABLED
+#include <eosio/chain/webassembly/eos-vm-oc.hpp>
+#else
+#define _REGISTER_EOSVMOC_INTRINSIC(CLS, MOD, METHOD, WASM_SIG, NAME, SIG)
+#endif
+#include <eosio/chain/webassembly/eos-vm.hpp>
 #include <eosio/chain/webassembly/runtime_interface.hpp>
 #include <eosio/chain/wasm_eosio_injection.hpp>
 #include <eosio/chain/transaction_context.hpp>
@@ -16,6 +22,10 @@
 #include "WAST/WAST.h"
 #include "IR/Validate.h"
 
+#if defined(EOSIO_EOS_VM_RUNTIME_ENABLED) || defined(EOSIO_EOS_VM_JIT_RUNTIME_ENABLED)
+#include <eosio/vm/allocator.hpp>
+#endif
+
 using namespace fc;
 using namespace eosio::chain::webassembly;
 using namespace IR;
@@ -24,6 +34,8 @@ using namespace Runtime;
 using boost::multi_index_container;
 
 namespace eosio { namespace chain {
+
+   namespace eosvmoc { struct config; }
 
    struct wasm_interface_impl {
       struct wasm_cache_entry {
@@ -38,15 +50,44 @@ namespace eosio { namespace chain {
       struct by_first_block_num;
       struct by_last_block_num;
 
-      wasm_interface_impl(wasm_interface::vm_type vm, const chainbase::database& d) : db(d), wasm_runtime_time(vm) {
+#ifdef EOSIO_EOS_VM_OC_RUNTIME_ENABLED
+      struct eosvmoc_tier {
+         eosvmoc_tier(const boost::filesystem::path& d, const eosvmoc::config& c, const chainbase::database& db) : cc(d, c, db), exec(cc) {}
+         eosvmoc::code_cache_async cc;
+         eosvmoc::executor exec;
+         eosvmoc::memory mem;
+      };
+#endif
+
+      wasm_interface_impl(wasm_interface::vm_type vm, bool eosvmoc_tierup, const chainbase::database& d, const boost::filesystem::path data_dir, const eosvmoc::config& eosvmoc_config) : db(d), wasm_runtime_time(vm) {
 #ifdef EOSIO_WAVM_RUNTIME_ENABLED
          if(vm == wasm_interface::vm_type::wavm)
             runtime_interface = std::make_unique<webassembly::wavm::wavm_runtime>();
 #endif
          if(vm == wasm_interface::vm_type::wabt)
             runtime_interface = std::make_unique<webassembly::wabt_runtime::wabt_runtime>();
+#ifdef EOSIO_EOS_VM_RUNTIME_ENABLED
+         if(vm == wasm_interface::vm_type::eos_vm)
+            runtime_interface = std::make_unique<webassembly::eos_vm_runtime::eos_vm_runtime<eosio::vm::interpreter>>();
+#endif
+#ifdef EOSIO_EOS_VM_JIT_RUNTIME_ENABLED
+         if(vm == wasm_interface::vm_type::eos_vm_jit)
+            runtime_interface = std::make_unique<webassembly::eos_vm_runtime::eos_vm_runtime<eosio::vm::jit>>();
+#endif
+#ifdef EOSIO_EOS_VM_OC_RUNTIME_ENABLED
+         if(vm == wasm_interface::vm_type::eos_vm_oc)
+            runtime_interface = std::make_unique<webassembly::eosvmoc::eosvmoc_runtime>(data_dir, eosvmoc_config, d);
+#endif
          if(!runtime_interface)
             EOS_THROW(wasm_exception, "${r} wasm runtime not supported on this platform and/or configuration", ("r", vm));
+
+#ifdef EOSIO_EOS_VM_OC_RUNTIME_ENABLED
+         if(eosvmoc_tierup) {
+            EOS_ASSERT(vm != wasm_interface::vm_type::wavm, wasm_exception, "WAVM is incompatible with EOS VM OC");
+            EOS_ASSERT(vm != wasm_interface::vm_type::eos_vm_oc, wasm_exception, "You can't use EOS VM OC as the base runtime when tier up is activated");
+            eosvmoc.emplace(data_dir, eosvmoc_config, d);
+         }
+#endif
       }
 
       ~wasm_interface_impl() {
@@ -87,6 +128,10 @@ namespace eosio { namespace chain {
          //anything last used before or on the LIB can be evicted
          const auto first_it = wasm_instantiation_cache.get<by_last_block_num>().begin();
          const auto last_it  = wasm_instantiation_cache.get<by_last_block_num>().upper_bound(lib);
+#ifdef EOSIO_EOS_VM_OC_RUNTIME_ENABLED
+         if(eosvmoc) for(auto it = first_it; it != last_it; it++)
+            eosvmoc->cc.free_code(it->code_hash, it->vm_version);
+#endif
          wasm_instantiation_cache.get<by_last_block_num>().erase(first_it, last_it);
       }
 
@@ -174,6 +219,9 @@ namespace eosio { namespace chain {
       const chainbase::database& db;
       const wasm_interface::vm_type wasm_runtime_time;
 
+#ifdef EOSIO_EOS_VM_OC_RUNTIME_ENABLED
+      fc::optional<eosvmoc_tier> eosvmoc;
+#endif
    };
 
 #define _ADD_PAREN_1(...) ((__VA_ARGS__)) _ADD_PAREN_2
@@ -184,7 +232,9 @@ namespace eosio { namespace chain {
 
 #define _REGISTER_INTRINSIC_EXPLICIT(CLS, MOD, METHOD, WASM_SIG, NAME, SIG)\
    _REGISTER_WAVM_INTRINSIC(CLS, MOD, METHOD, WASM_SIG, NAME, SIG)         \
-   _REGISTER_WABT_INTRINSIC(CLS, MOD, METHOD, WASM_SIG, NAME, SIG)
+   _REGISTER_WABT_INTRINSIC(CLS, MOD, METHOD, WASM_SIG, NAME, SIG)         \
+   _REGISTER_EOS_VM_INTRINSIC(CLS, MOD, METHOD, WASM_SIG, NAME, SIG)       \
+   _REGISTER_EOSVMOC_INTRINSIC(CLS, MOD, METHOD, WASM_SIG, NAME, SIG)
 
 #define _REGISTER_INTRINSIC4(CLS, MOD, METHOD, WASM_SIG, NAME, SIG)\
    _REGISTER_INTRINSIC_EXPLICIT(CLS, MOD, METHOD, WASM_SIG, NAME, SIG )

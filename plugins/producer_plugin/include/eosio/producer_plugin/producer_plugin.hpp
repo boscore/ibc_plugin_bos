@@ -85,7 +85,7 @@ public:
    void set_whitelist_blacklist(const whitelist_blacklist& params);
 
    integrity_hash_information get_integrity_hash() const;
-   snapshot_information create_snapshot(export_snapshot_type type) const;
+   snapshot_information create_snapshot(export_snapshot_type type=export_snapshot_type::snapshot) const;
 
    signal<void(const chain::producer_confirmation&)> confirmed_block;
 private:

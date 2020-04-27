@@ -30,3 +30,6 @@
 [submodule "libraries/wabt"]
 	path = libraries/wabt
 	url = https://github.com/EOSIO/wabt
+[submodule "libraries/eos-vm"]
+	path = libraries/eos-vm
+	url = https://github.com/eosio/eos-vm

@@ -158,6 +158,10 @@ struct controller_impl {
    map< account_name, map<handler_key, apply_handler> >   apply_handlers;
    platform_timer                 timer;
 
+#if defined(EOSIO_EOS_VM_RUNTIME_ENABLED) || defined(EOSIO_EOS_VM_JIT_RUNTIME_ENABLED)
+   vm::wasm_allocator                 wasm_alloc;
+#endif
+
    /**
     *  Transactions that were undone by pop_block or abort_block, transactions
     *  are removed from this list if they are re-applied in other blocks. Producers
@@ -199,7 +203,7 @@ struct controller_impl {
         cfg.reversible_cache_size ),
     blog( cfg.blocks_dir ),
     fork_db( cfg.state_dir ),
-    wasmif( cfg.wasm_runtime, db ),
+	wasmif( cfg.wasm_runtime, cfg.eosvmoc_tierup, db, cfg.state_dir, cfg.eosvmoc_config ),
     resource_limits( db ),
     authorization( s, db ),
     conf( cfg ),
@@ -244,10 +248,7 @@ struct controller_impl {
    template<typename Signal, typename Arg>
    void emit( const Signal& s, Arg&& a ) {
       try {
-         s( std::forward<Arg>( a ));
-      } catch (std::bad_alloc& e) {
-         wlog( "std::bad_alloc" );
-         throw e;
+        s(std::forward<Arg>(a));
       } catch (boost::interprocess::bad_alloc& e) {
          wlog( "bad alloc" );
          throw e;
@@ -766,6 +767,7 @@ struct controller_impl {
 
       return enc.result();
    }
+
 
    /**
     *  Sets fork database head to the genesis state.
@@ -2856,5 +2858,11 @@ void controller::set_upo(uint32_t target_block_num) {
         });
     }
 }
+
+#if defined(EOSIO_EOS_VM_RUNTIME_ENABLED) || defined(EOSIO_EOS_VM_JIT_RUNTIME_ENABLED)
+vm::wasm_allocator& controller::get_wasm_allocator() {
+  return my->wasm_alloc;
+}
+#endif
 
 } } /// eosio::chain
