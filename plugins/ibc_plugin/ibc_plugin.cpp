@@ -4052,7 +4052,9 @@ namespace eosio { namespace ibc {
          }
          if ( times <= 3 ){
             ilog("---------orig_trxs_to_push to push size ${n}, retry times ${try}",("n",to_push.size())("try",times));
-            token_contract->push_cash_trxs( to_push, range.second + 1 );
+            try {
+               token_contract->push_cash_trxs( to_push, range.second + 1 );
+            } FC_LOG_AND_DROP()
          }
       }
 
@@ -4090,7 +4092,9 @@ namespace eosio { namespace ibc {
             to_push = cash_trxs_to_push;
          }
          ilog("---------cash_trxs_to_push to push size ${n}",("n",to_push.size()));
-         token_contract->push_cashconfirm_trxs( to_push, last_cash_seq_num + 1 );
+         try {
+            token_contract->push_cashconfirm_trxs( to_push, last_cash_seq_num + 1 );
+         } FC_LOG_AND_DROP()
          return;
       }
 
