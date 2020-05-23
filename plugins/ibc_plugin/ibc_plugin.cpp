@@ -1024,13 +1024,13 @@ namespace eosio { namespace ibc {
       memo = trim( memo );
 
       // --- get chain name and notes ---
-      pos = memo.find(" ");
+      pos = memo.find_first_not_of("abcdefghijklmnopqrstuvwxyz");
       if ( pos == std::string::npos ){
          info.chain = name( memo );
          info.notes = "";
       } else {
          info.chain = name( memo.substr(0,pos) );
-         info.notes = memo.substr( pos + 1 );
+         info.notes = memo.substr( pos );
          info.notes = trim( info.notes );
       }
 
