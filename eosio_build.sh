@@ -63,7 +63,7 @@
    fi
    START_MAKE=true
    TIME_BEGIN=$( date -u +%s )
-   VERSION=1.2
+   VERSION=3.0.7
 
    txtbld=$(tput bold)
    bldred=${txtbld}$(tput setaf 1)
@@ -174,7 +174,7 @@
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
             export LLVM_DIR=${HOME}/opt/wasm/lib/cmake/llvm
             export CMAKE=${HOME}/opt/cmake/bin/cmake
-            export PATH=${HOME}/opt/mongodb/bin:$PATH
+            export PATH=${HOME}/opt/mongodb/bin:${HOME}/opt/wasm/bin:$PATH
          ;;
          "CentOS Linux")
             FILE="${SOURCE_DIR}/scripts/eosio_build_centos.sh"
@@ -183,14 +183,14 @@
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
             export LLVM_DIR=${HOME}/opt/wasm/lib/cmake/llvm
             export CMAKE=${HOME}/opt/cmake/bin/cmake
-            export PATH=${HOME}/opt/mongodb/bin:$PATH
+            export PATH=${HOME}/opt/mongodb/bin:${HOME}/opt/wasm/bin:$PATH
          ;;
          "elementary OS")
             FILE="${SOURCE_DIR}/scripts/eosio_build_ubuntu.sh"
             CXX_COMPILER=clang++
             C_COMPILER=clang
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
-            export PATH=${HOME}/opt/mongodb/bin:$PATH
+            export PATH=${HOME}/opt/mongodb/bin:${HOME}/opt/wasm/bin:$PATH
          ;;
          "Fedora")
             FILE="${SOURCE_DIR}/scripts/eosio_build_fedora.sh"
@@ -204,21 +204,21 @@
             CXX_COMPILER=clang++
             C_COMPILER=clang
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
-            export PATH=${HOME}/opt/mongodb/bin:$PATH
+            export PATH=${HOME}/opt/mongodb/bin:${HOME}/opt/wasm/bin:$PATH
          ;;
          "Ubuntu")
             FILE="${SOURCE_DIR}/scripts/eosio_build_ubuntu.sh"
             CXX_COMPILER=clang++
             C_COMPILER=clang
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
-            export PATH=${HOME}/opt/mongodb/bin:$PATH
+            export PATH=${HOME}/opt/mongodb/bin:${HOME}/opt/wasm/bin:$PATH
          ;;
          "Debian GNU/Linux")
             FILE=${SOURCE_DIR}/scripts/eosio_build_ubuntu.sh
             CXX_COMPILER=clang++
             C_COMPILER=clang
             MONGOD_CONF=${HOME}/opt/mongodb/mongod.conf
-            export PATH=${HOME}/opt/mongodb/bin:$PATH
+            export PATH=${HOME}/opt/mongodb/bin:${HOME}/opt/wasm/bin:$PATH
          ;;
          *)
             printf "\\n\\tUnsupported Linux Distribution. Exiting now.\\n\\n"
@@ -274,7 +274,7 @@
       -DENABLE_COVERAGE_TESTING="${ENABLE_COVERAGE_TESTING}" -DBUILD_DOXYGEN="${DOXYGEN}" \
       -DCMAKE_CXX_STANDARD_LIBRARIES="-lpthread" \
       -DCMAKE_INSTALL_PREFIX="/usr/local/eosio" ${LOCAL_CMAKE_FLAGS} "${SOURCE_DIR}" \
-      -DENABLE_TOOLS=OFF
+      -DENABLE_TOOLS=OFF 
    then
       printf "\\n\\t>>>>>>>>>>>>>>>>>>>> CMAKE building BOSCore has exited with the above error.\\n\\n"
       exit -1

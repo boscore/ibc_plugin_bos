@@ -93,13 +93,13 @@ struct dtt_action {
       return WASM_TEST_ACTION("test_transaction", "send_deferred_tx_with_dtt_action");
    }
    static uint64_t get_account() {
-      return N(testapi);
+      return N(testapi).to_uint64_t();
    }
 
-   uint64_t       payer = N(testapi);
-   uint64_t       deferred_account = N(testapi);
+   uint64_t       payer = N(testapi).to_uint64_t();
+   uint64_t       deferred_account = N(testapi).to_uint64_t();
    uint64_t       deferred_action = WASM_TEST_ACTION("test_transaction", "deferred_print");
-   uint64_t       permission_name = N(active);
+   uint64_t       permission_name = N(active).to_uint64_t();
    uint32_t       delay_sec = 2;
 };
 
@@ -246,6 +246,7 @@ transaction_trace_ptr CallFunction(TESTER& test, T ac, const vector<char>& data,
 #define CALL_TEST_FUNCTION(_TESTER, CLS, MTH, DATA) CallFunction(_TESTER, test_api_action<TEST_METHOD(CLS, MTH)>{}, DATA)
 #define CALL_TEST_FUNCTION_SYSTEM(_TESTER, CLS, MTH, DATA) CallFunction(_TESTER, test_chain_action<TEST_METHOD(CLS, MTH)>{}, DATA, {config::system_account_name} )
 #define CALL_TEST_FUNCTION_SCOPE(_TESTER, CLS, MTH, DATA, ACCOUNT) CallFunction(_TESTER, test_api_action<TEST_METHOD(CLS, MTH)>{}, DATA, ACCOUNT)
+#define CALL_TEST_FUNCTION_NO_THROW(_TESTER, CLS, MTH, DATA) CallFunction(_TESTER, test_api_action<TEST_METHOD(CLS, MTH)>{}, DATA, {N(testapi)}, true)
 #define CALL_TEST_FUNCTION_AND_CHECK_EXCEPTION(_TESTER, CLS, MTH, DATA, EXC, EXC_MESSAGE) \
 BOOST_CHECK_EXCEPTION( \
    CALL_TEST_FUNCTION( _TESTER, CLS, MTH, DATA), \
@@ -303,107 +304,107 @@ struct MySink : public bio::sink
 uint32_t last_fnc_err = 0;
 
 BOOST_FIXTURE_TEST_CASE(action_receipt_tests, TESTER) { try {
-	produce_blocks(2);
-	create_account( N(test) );
+   produce_blocks(2);
+   create_account( N(test) );
+   set_code( N(test), contracts::payloadless_wasm() );
+   produce_blocks(1);
+
+   auto call_doit_and_check = [&]( account_name contract, account_name signer, auto&& checker ) {
+      signed_transaction trx;
+      trx.actions.emplace_back( vector<permission_level>{{signer, config::active_name}}, contract, N(doit), bytes{} );
+      this->set_transaction_headers( trx, this->DEFAULT_EXPIRATION_DELTA );
+      trx.sign( this->get_private_key(signer, "active"), control->get_chain_id() );
+      auto res = this->push_transaction(trx);
+      checker( res );
+   };
+
+   auto call_provereset_and_check = [&]( account_name contract, account_name signer, auto&& checker ) {
+      signed_transaction trx;
+      trx.actions.emplace_back( vector<permission_level>{{signer, config::active_name}}, contract, N(provereset), bytes{} );
+      this->set_transaction_headers( trx, this->DEFAULT_EXPIRATION_DELTA );
+      trx.sign( this->get_private_key(signer, "active"), control->get_chain_id() );
+      auto res = this->push_transaction(trx);
+      checker( res );
+   };
+
+   auto result = push_reqauth( config::system_account_name, "active" );
+   BOOST_REQUIRE_EQUAL( result->receipt->status, transaction_receipt::executed );
+   BOOST_REQUIRE( result->action_traces[0].receipt->auth_sequence.find( config::system_account_name )
+                     != result->action_traces[0].receipt->auth_sequence.end() );
+   auto base_global_sequence_num = result->action_traces[0].receipt->global_sequence;
+   auto base_system_recv_seq_num = result->action_traces[0].receipt->recv_sequence;
+   auto base_system_auth_seq_num = result->action_traces[0].receipt->auth_sequence[config::system_account_name];
+   auto base_system_code_seq_num = result->action_traces[0].receipt->code_sequence.value;
+   auto base_system_abi_seq_num  = result->action_traces[0].receipt->abi_sequence.value;
+
+   uint64_t base_test_recv_seq_num = 0;
+   uint64_t base_test_auth_seq_num = 0;
+   call_doit_and_check( N(test), N(test), [&]( const transaction_trace_ptr& res ) {
+      BOOST_CHECK_EQUAL( res->receipt->status, transaction_receipt::executed );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->global_sequence, base_global_sequence_num + 1 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->code_sequence.value, 1 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->abi_sequence.value, 0 );
+      base_test_recv_seq_num = res->action_traces[0].receipt->recv_sequence;
+      BOOST_CHECK( base_test_recv_seq_num > 0 );
+      base_test_recv_seq_num--;
+      const auto& m = res->action_traces[0].receipt->auth_sequence;
+      BOOST_CHECK_EQUAL( m.size(), 1 );
+      BOOST_CHECK_EQUAL( m.begin()->first.to_string(), "test" );
+      base_test_auth_seq_num = m.begin()->second;
+      BOOST_CHECK( base_test_auth_seq_num > 0 );
+      --base_test_auth_seq_num;
+   } );
+
+   set_code( N(test), contracts::asserter_wasm() );
+   set_code( config::system_account_name, contracts::payloadless_wasm() );
+
+   call_provereset_and_check( N(test), N(test), [&]( const transaction_trace_ptr& res ) {
+      BOOST_CHECK_EQUAL( res->receipt->status, transaction_receipt::executed );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->global_sequence, base_global_sequence_num + 4 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->recv_sequence, base_test_recv_seq_num + 2 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->code_sequence.value, 2 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->abi_sequence.value, 0 );
+      const auto& m = res->action_traces[0].receipt->auth_sequence;
+      BOOST_CHECK_EQUAL( m.size(), 1 );
+      BOOST_CHECK_EQUAL( m.begin()->first.to_string(), "test" );
+      BOOST_CHECK_EQUAL( m.begin()->second, base_test_auth_seq_num + 3 );
+   } );
+
+   produce_blocks(1); // Added to avoid the last doit transaction from being considered a duplicate.
+   // Adding a block also retires an onblock action which increments both the global sequence number
+   // and the recv and auth sequences numbers for the system account.
+
+   call_doit_and_check( config::system_account_name, N(test), [&]( const transaction_trace_ptr& res ) {
+      BOOST_CHECK_EQUAL( res->receipt->status, transaction_receipt::executed );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->global_sequence, base_global_sequence_num + 6 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->recv_sequence, base_system_recv_seq_num + 4 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->code_sequence.value, base_system_code_seq_num + 1 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->abi_sequence.value, base_system_abi_seq_num );
+      const auto& m = res->action_traces[0].receipt->auth_sequence;
+      BOOST_CHECK_EQUAL( m.size(), 1 );
+      BOOST_CHECK_EQUAL( m.begin()->first.to_string(), "test" );
+      BOOST_CHECK_EQUAL( m.begin()->second, base_test_auth_seq_num + 4 );
+   } );
+
+   set_code( config::system_account_name, contracts::eosio_bios_wasm() );
+
+   set_code( N(test), contracts::eosio_bios_wasm() );
+   set_abi( N(test), contracts::eosio_bios_abi().data() );
 	set_code( N(test), contracts::payloadless_wasm() );
-	produce_blocks(1);
 
-	auto call_doit_and_check = [&]( account_name contract, account_name signer, auto&& checker ) {
-	  signed_transaction trx;
-	  trx.actions.emplace_back( vector<permission_level>{{signer, config::active_name}}, contract, N(doit), bytes{} );
-	  this->set_transaction_headers( trx, this->DEFAULT_EXPIRATION_DELTA );
-	  trx.sign( this->get_private_key(signer, "active"), control->get_chain_id() );
-	  auto res = this->push_transaction(trx);
-	  checker( res );
-	};
+   call_doit_and_check( N(test), N(test), [&]( const transaction_trace_ptr& res ) {
+      BOOST_CHECK_EQUAL( res->receipt->status, transaction_receipt::executed);
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->global_sequence, base_global_sequence_num + 11 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->recv_sequence, base_test_recv_seq_num + 3 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->code_sequence.value, 4 );
+      BOOST_CHECK_EQUAL( res->action_traces[0].receipt->abi_sequence.value, 1 );
+      const auto& m = res->action_traces[0].receipt->auth_sequence;
+      BOOST_CHECK_EQUAL( m.size(), 1 );
+      BOOST_CHECK_EQUAL( m.begin()->first.to_string(), "test" );
+      BOOST_CHECK_EQUAL( m.begin()->second, base_test_auth_seq_num + 8 );
+   } );
 
-	auto call_provereset_and_check = [&]( account_name contract, account_name signer, auto&& checker ) {
-	  signed_transaction trx;
-	  trx.actions.emplace_back( vector<permission_level>{{signer, config::active_name}}, contract, N(provereset), bytes{} );
-	  this->set_transaction_headers( trx, this->DEFAULT_EXPIRATION_DELTA );
-	  trx.sign( this->get_private_key(signer, "active"), control->get_chain_id() );
-	  auto res = this->push_transaction(trx);
-	  checker( res );
-	};
-
-	auto result = push_reqauth( config::system_account_name, "active" );
-	BOOST_REQUIRE_EQUAL( result->receipt->status, transaction_receipt::executed );
-	BOOST_REQUIRE( result->action_traces[0].receipt.auth_sequence.find( config::system_account_name )
-					   != result->action_traces[0].receipt.auth_sequence.end() );
-	auto base_global_sequence_num = result->action_traces[0].receipt.global_sequence;
-	auto base_system_recv_seq_num = result->action_traces[0].receipt.recv_sequence;
-	auto base_system_auth_seq_num = result->action_traces[0].receipt.auth_sequence[config::system_account_name];
-	auto base_system_code_seq_num = result->action_traces[0].receipt.code_sequence.value;
-	auto base_system_abi_seq_num  = result->action_traces[0].receipt.abi_sequence.value;
-
-	uint64_t base_test_recv_seq_num = 0;
-	uint64_t base_test_auth_seq_num = 0;
-	call_doit_and_check( N(test), N(test), [&]( const transaction_trace_ptr& res ) {
-	  BOOST_CHECK_EQUAL( res->receipt->status, transaction_receipt::executed );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.global_sequence, base_global_sequence_num + 1 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.code_sequence.value, 1 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.abi_sequence.value, 0 );
-	  base_test_recv_seq_num = res->action_traces[0].receipt.recv_sequence;
-	  BOOST_CHECK( base_test_recv_seq_num > 0 );
-	  base_test_recv_seq_num--;
-	  const auto& m = res->action_traces[0].receipt.auth_sequence;
-	  BOOST_CHECK_EQUAL( m.size(), 1 );
-	  BOOST_CHECK_EQUAL( m.begin()->first.to_string(), "test" );
-	  base_test_auth_seq_num = m.begin()->second;
-	  BOOST_CHECK( base_test_auth_seq_num > 0 );
-	  --base_test_auth_seq_num;
-	} );
-
-	set_code( N(test), contracts::asserter_wasm() );
-	set_code( config::system_account_name, contracts::payloadless_wasm() );
-
-	call_provereset_and_check( N(test), N(test), [&]( const transaction_trace_ptr& res ) {
-	  BOOST_CHECK_EQUAL( res->receipt->status, transaction_receipt::executed );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.global_sequence, base_global_sequence_num + 4 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.recv_sequence, base_test_recv_seq_num + 2 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.code_sequence.value, 2 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.abi_sequence.value, 0 );
-	  const auto& m = res->action_traces[0].receipt.auth_sequence;
-	  BOOST_CHECK_EQUAL( m.size(), 1 );
-	  BOOST_CHECK_EQUAL( m.begin()->first.to_string(), "test" );
-	  BOOST_CHECK_EQUAL( m.begin()->second, base_test_auth_seq_num + 3 );
-	} );
-
-	produce_blocks(1); // Added to avoid the last doit transaction from being considered a duplicate.
-	// Adding a block also retires an onblock action which increments both the global sequence number
-	// and the recv and auth sequences numbers for the system account.
-
-	call_doit_and_check( config::system_account_name, N(test), [&]( const transaction_trace_ptr& res ) {
-	  BOOST_CHECK_EQUAL( res->receipt->status, transaction_receipt::executed );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.global_sequence, base_global_sequence_num + 6 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.recv_sequence, base_system_recv_seq_num + 4 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.code_sequence.value, base_system_code_seq_num + 1 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.abi_sequence.value, base_system_abi_seq_num );
-	  const auto& m = res->action_traces[0].receipt.auth_sequence;
-	  BOOST_CHECK_EQUAL( m.size(), 1 );
-	  BOOST_CHECK_EQUAL( m.begin()->first.to_string(), "test" );
-	  BOOST_CHECK_EQUAL( m.begin()->second, base_test_auth_seq_num + 4 );
-	} );
-
-	set_code( config::system_account_name, contracts::eosio_bios_wasm() );
-
-	set_code( N(test), contracts::eosio_bios_wasm() );
-	set_abi( N(test), contracts::eosio_bios_abi().data() );
-	set_code( N(test), contracts::payloadless_wasm() );
-
-	call_doit_and_check( N(test), N(test), [&]( const transaction_trace_ptr& res ) {
-	  BOOST_CHECK_EQUAL( res->receipt->status, transaction_receipt::executed);
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.global_sequence, base_global_sequence_num + 11 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.recv_sequence, base_test_recv_seq_num + 3 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.code_sequence.value, 4 );
-	  BOOST_CHECK_EQUAL( res->action_traces[0].receipt.abi_sequence.value, 1 );
-	  const auto& m = res->action_traces[0].receipt.auth_sequence;
-	  BOOST_CHECK_EQUAL( m.size(), 1 );
-	  BOOST_CHECK_EQUAL( m.begin()->first.to_string(), "test" );
-	  BOOST_CHECK_EQUAL( m.begin()->second, base_test_auth_seq_num + 8 );
-	} );
-
-  } FC_LOG_AND_RETHROW() }
+} FC_LOG_AND_RETHROW() }
 
 /*************************************************************************************
  * action_tests test case
@@ -592,13 +593,13 @@ BOOST_FIXTURE_TEST_CASE(ram_billing_in_notify_tests, TESTER) { try {
 	set_code( N(testapi2), contracts::test_api_wasm() );
    produce_blocks(1);
 
-   BOOST_CHECK_EXCEPTION( CALL_TEST_FUNCTION( *this, "test_action", "test_ram_billing_in_notify", fc::raw::pack( ((unsigned __int128)N(testapi2) << 64) | N(testapi) ) ),
+   BOOST_CHECK_EXCEPTION( CALL_TEST_FUNCTION( *this, "test_action", "test_ram_billing_in_notify", fc::raw::pack( ((unsigned __int128)N(testapi2).to_uint64_t() << 64) | N(testapi).to_uint64_t() ) ),
                           subjective_block_production_exception, fc_exception_message_is("Cannot charge RAM to other accounts during notify.") );
 
 
-   CALL_TEST_FUNCTION( *this, "test_action", "test_ram_billing_in_notify", fc::raw::pack( ((unsigned __int128)N(testapi2) << 64) | 0 ) );
+   CALL_TEST_FUNCTION( *this, "test_action", "test_ram_billing_in_notify", fc::raw::pack( ((unsigned __int128)N(testapi2).to_uint64_t() << 64) | 0 ) );
 
-   CALL_TEST_FUNCTION( *this, "test_action", "test_ram_billing_in_notify", fc::raw::pack( ((unsigned __int128)N(testapi2) << 64) | N(testapi2) ) );
+   CALL_TEST_FUNCTION( *this, "test_action", "test_ram_billing_in_notify", fc::raw::pack( ((unsigned __int128)N(testapi2).to_uint64_t() << 64) | N(testapi2).to_uint64_t() ) );
 
    BOOST_REQUIRE_EQUAL( validate(), true );
 } FC_LOG_AND_RETHROW() }
@@ -628,9 +629,6 @@ BOOST_FIXTURE_TEST_CASE(cf_action_tests, TESTER) { try {
       trx.context_free_data.emplace_back(fc::raw::pack<uint32_t>(100)); // verify payload matches context free data
       trx.context_free_data.emplace_back(fc::raw::pack<uint32_t>(200));
       set_transaction_headers(trx);
-
-      // signing a transaction with only context_free_actions should not be allowed
-      //      auto sigs = trx.sign(get_private_key(N(testapi), "active"), control->get_chain_id());
 
       BOOST_CHECK_EXCEPTION(push_transaction(trx), tx_no_auths,
                             [](const fc::exception& e) {
@@ -700,12 +698,12 @@ BOOST_FIXTURE_TEST_CASE(cf_action_tests, TESTER) { try {
       // test send context free action
       auto ttrace = CALL_TEST_FUNCTION( *this, "test_transaction", "send_cf_action", {} );
 
-      BOOST_CHECK_EQUAL(ttrace->action_traces.size(), 1);
-      BOOST_CHECK_EQUAL(ttrace->action_traces[0].inline_traces.size(), 1);
-      BOOST_CHECK_EQUAL(ttrace->action_traces[0].inline_traces[0].receipt.receiver, account_name("dummy"));
-      BOOST_CHECK_EQUAL(ttrace->action_traces[0].inline_traces[0].act.account, account_name("dummy"));
-      BOOST_CHECK_EQUAL(ttrace->action_traces[0].inline_traces[0].act.name, account_name("event1"));
-      BOOST_CHECK_EQUAL(ttrace->action_traces[0].inline_traces[0].act.authorization.size(), 0);
+      BOOST_REQUIRE_EQUAL(ttrace->action_traces.size(), 2);
+      BOOST_CHECK_EQUAL((int)(ttrace->action_traces[1].creator_action_ordinal), 1);
+      BOOST_CHECK_EQUAL(ttrace->action_traces[1].receiver, account_name("dummy"));
+      BOOST_CHECK_EQUAL(ttrace->action_traces[1].act.account, account_name("dummy"));
+      BOOST_CHECK_EQUAL(ttrace->action_traces[1].act.name, account_name("event1"));
+      BOOST_CHECK_EQUAL(ttrace->action_traces[1].act.authorization.size(), 0);
 
       BOOST_CHECK_EXCEPTION( CALL_TEST_FUNCTION( *this, "test_transaction", "send_cf_action_fail", {} ),
                              eosio_assert_message_exception,
@@ -729,7 +727,7 @@ BOOST_FIXTURE_TEST_CASE(cfa_tx_signature, TESTER)  try {
    tx2.context_free_actions.push_back(cfa);
    set_transaction_headers(tx2);
 
-   const private_key_type& priv_key = get_private_key("dummy", "active");
+   const private_key_type& priv_key = get_private_key(name("dummy"), "active");
    BOOST_TEST((std::string)tx1.sign(priv_key, control->get_chain_id()) != (std::string)tx2.sign(priv_key, control->get_chain_id()));
 
    BOOST_REQUIRE_EQUAL( validate(), true );
@@ -981,42 +979,42 @@ BOOST_FIXTURE_TEST_CASE(checktime_hashing_fail, TESTER) { try {
 
         //hit deadline exception, but cache the contract
         BOOST_CHECK_EXCEPTION( call_test( *this, test_api_action<TEST_METHOD("test_checktime", "checktime_sha1_failure")>{},
-                                          5000, 10 ),
+                                          5000, 3 ),
                                deadline_exception, is_deadline_exception );
 
 #warning TODO validate that the contract was successfully cached
 
         //the contract should be cached, now we should get deadline_exception because of calls to checktime() from hashing function
         BOOST_CHECK_EXCEPTION( call_test( *this, test_api_action<TEST_METHOD("test_checktime", "checktime_sha1_failure")>{},
-                                          5000, 10 ),
+                                          5000, 3 ),
                                deadline_exception, is_deadline_exception );
 
         BOOST_CHECK_EXCEPTION( call_test( *this, test_api_action<TEST_METHOD("test_checktime", "checktime_assert_sha1_failure")>{},
-                                          5000, 10 ),
+                                          5000, 3 ),
                                deadline_exception, is_deadline_exception );
 
         BOOST_CHECK_EXCEPTION( call_test( *this, test_api_action<TEST_METHOD("test_checktime", "checktime_sha256_failure")>{},
-                                          5000, 10 ),
+                                          5000, 3 ),
                                deadline_exception, is_deadline_exception );
 
         BOOST_CHECK_EXCEPTION( call_test( *this, test_api_action<TEST_METHOD("test_checktime", "checktime_assert_sha256_failure")>{},
-                                          5000, 10 ),
+                                          5000, 3 ),
                                deadline_exception, is_deadline_exception );
 
         BOOST_CHECK_EXCEPTION( call_test( *this, test_api_action<TEST_METHOD("test_checktime", "checktime_sha512_failure")>{},
-                                          5000, 10 ),
+                                          5000, 3 ),
                                deadline_exception, is_deadline_exception );
 
         BOOST_CHECK_EXCEPTION( call_test( *this, test_api_action<TEST_METHOD("test_checktime", "checktime_assert_sha512_failure")>{},
-                                          5000, 10 ),
+                                          5000, 3 ),
                                deadline_exception, is_deadline_exception );
 
         BOOST_CHECK_EXCEPTION( call_test( *this, test_api_action<TEST_METHOD("test_checktime", "checktime_ripemd160_failure")>{},
-                                          5000, 10 ),
+                                          5000, 3 ),
                                deadline_exception, is_deadline_exception );
 
         BOOST_CHECK_EXCEPTION( call_test( *this, test_api_action<TEST_METHOD("test_checktime", "checktime_assert_ripemd160_failure")>{},
-                                          5000, 10 ),
+                                          5000, 3 ),
                                deadline_exception, is_deadline_exception );
 
    BOOST_REQUIRE_EQUAL( validate(), true );
@@ -1039,7 +1037,7 @@ BOOST_FIXTURE_TEST_CASE(transaction_tests, TESTER) { try {
       action act({}, tm);
       trx.actions.push_back(act);
 
-		set_transaction_headers(trx);
+      set_transaction_headers(trx);
       BOOST_CHECK_EXCEPTION(push_transaction(trx), transaction_exception,
          [](const fc::exception& e) {
             return expect_assert_message(e, "transaction must have at least one authorization");
@@ -1078,8 +1076,10 @@ BOOST_FIXTURE_TEST_CASE(transaction_tests, TESTER) { try {
    {
       produce_blocks(10);
       transaction_trace_ptr trace;
-      auto c = control->applied_transaction.connect([&]( const transaction_trace_ptr& t) { if (t && t->receipt && t->receipt->status != transaction_receipt::executed) { trace = t; } } );
-
+      auto c = control->applied_transaction.connect([&](std::tuple<const transaction_trace_ptr&, const signed_transaction&> x) {
+         auto& t = std::get<0>(x);
+         if (t && t->receipt && t->receipt->status != transaction_receipt::executed) { trace = t; }
+      } );
       // test error handling on deferred transaction failure
       CALL_TEST_FUNCTION(*this, "test_transaction", "send_transaction_trigger_error_handler", {});
 
@@ -1122,7 +1122,10 @@ BOOST_FIXTURE_TEST_CASE(deferred_transaction_tests, TESTER) { try {
    //schedule
    {
       transaction_trace_ptr trace;
-      auto c = control->applied_transaction.connect([&]( const transaction_trace_ptr& t) { if (t->scheduled) { trace = t; } } );
+      auto c = control->applied_transaction.connect([&](std::tuple<const transaction_trace_ptr&, const signed_transaction&> x) {
+         auto& t = std::get<0>(x);
+         if (t->scheduled) { trace = t; }
+      } );
       CALL_TEST_FUNCTION(*this, "test_transaction", "send_deferred_transaction", {} );
       BOOST_CHECK(!trace);
       produce_block( fc::seconds(2) );
@@ -1142,7 +1145,10 @@ BOOST_FIXTURE_TEST_CASE(deferred_transaction_tests, TESTER) { try {
    {
       transaction_trace_ptr trace;
       uint32_t count = 0;
-      auto c = control->applied_transaction.connect([&]( const transaction_trace_ptr& t) { if (t && t->scheduled) { trace = t; ++count; } } );
+      auto c = control->applied_transaction.connect([&](std::tuple<const transaction_trace_ptr&, const signed_transaction&> x) {
+         auto& t = std::get<0>(x);
+         if (t && t->scheduled) { trace = t; ++count; }
+      } );
       CALL_TEST_FUNCTION(*this, "test_transaction", "send_deferred_transaction", {});
       BOOST_CHECK_THROW(CALL_TEST_FUNCTION(*this, "test_transaction", "send_deferred_transaction", {}), deferred_tx_duplicate);
       produce_blocks( 3 );
@@ -1167,7 +1173,10 @@ BOOST_FIXTURE_TEST_CASE(deferred_transaction_tests, TESTER) { try {
    {
       transaction_trace_ptr trace;
       uint32_t count = 0;
-      auto c = control->applied_transaction.connect([&]( const transaction_trace_ptr& t) { if (t && t->scheduled) { trace = t; ++count; } } );
+      auto c = control->applied_transaction.connect([&](std::tuple<const transaction_trace_ptr&, const signed_transaction&> x) {
+         auto& t = std::get<0>(x);
+         if (t && t->scheduled) { trace = t; ++count; }
+      } );
       CALL_TEST_FUNCTION(*this, "test_transaction", "send_deferred_transaction_replace", {});
       CALL_TEST_FUNCTION(*this, "test_transaction", "send_deferred_transaction_replace", {});
       produce_blocks( 3 );
@@ -1190,7 +1199,10 @@ BOOST_FIXTURE_TEST_CASE(deferred_transaction_tests, TESTER) { try {
    //schedule and cancel
    {
       transaction_trace_ptr trace;
-      auto c = control->applied_transaction.connect([&]( const transaction_trace_ptr& t) { if (t && t->scheduled) { trace = t; } } );
+      auto c = control->applied_transaction.connect([&](std::tuple<const transaction_trace_ptr&, const signed_transaction&> x) {
+         auto& t = std::get<0>(x);
+         if (t && t->scheduled) { trace = t; }
+      } );
       CALL_TEST_FUNCTION(*this, "test_transaction", "send_deferred_transaction", {});
       CALL_TEST_FUNCTION(*this, "test_transaction", "cancel_deferred_transaction_success", {});
       produce_block( fc::seconds(2) );
@@ -1210,7 +1222,8 @@ BOOST_FIXTURE_TEST_CASE(deferred_transaction_tests, TESTER) { try {
    //repeated deferred transactions
    {
       vector<transaction_trace_ptr> traces;
-      auto c = control->applied_transaction.connect([&]( const transaction_trace_ptr& t) {
+      auto c = control->applied_transaction.connect([&](std::tuple<const transaction_trace_ptr&, const signed_transaction&> x) {
+         auto& t = std::get<0>(x);
          if (t && t->scheduled) {
             traces.push_back( t );
          }
@@ -1231,27 +1244,27 @@ BOOST_FIXTURE_TEST_CASE(deferred_transaction_tests, TESTER) { try {
       // Trigger a tx which in turn sends a deferred tx with payer != receiver
       // Payer is alice in this case, this tx should fail since we don't have the authorization of alice
       dtt_action dtt_act1;
-      dtt_act1.payer = N(alice);
+      dtt_act1.payer = N(alice).to_uint64_t();
       BOOST_CHECK_THROW(CALL_TEST_FUNCTION(*this, "test_transaction", "send_deferred_tx_with_dtt_action", fc::raw::pack(dtt_act1)), missing_auth_exception);
 
       // Send a tx which in turn sends a deferred tx with the deferred tx's receiver != this tx receiver
       // This will include the authorization of the receiver, and impose any related delay associated with the authority
       // We set the authorization delay to be 10 sec here, and since the deferred tx delay is set to be 5 sec, so this tx should fail
       dtt_action dtt_act2;
-      dtt_act2.deferred_account = N(testapi2);
-      dtt_act2.permission_name = N(additional);
+      dtt_act2.deferred_account = N(testapi2).to_uint64_t();
+      dtt_act2.permission_name = N(additional).to_uint64_t();
       dtt_act2.delay_sec = 5;
 
-      auto auth = authority(get_public_key("testapi", name(dtt_act2.permission_name).to_string()), 10);
+      auto auth = authority(get_public_key(name("testapi"), name(dtt_act2.permission_name).to_string()), 10);
       auth.accounts.push_back( permission_level_weight{{N(testapi), config::eosio_code_name}, 1} );
 
-      push_action(config::system_account_name, updateauth::get_name(), "testapi", fc::mutable_variant_object()
+      push_action(config::system_account_name, updateauth::get_name(), name("testapi"), fc::mutable_variant_object()
               ("account", "testapi")
               ("permission", name(dtt_act2.permission_name))
               ("parent", "active")
               ("auth", auth)
       );
-      push_action(config::system_account_name, linkauth::get_name(), "testapi", fc::mutable_variant_object()
+      push_action(config::system_account_name, linkauth::get_name(), name("testapi"), fc::mutable_variant_object()
               ("account", "testapi")
               ("code", name(dtt_act2.deferred_account))
               ("type", name(dtt_act2.deferred_action))
@@ -1263,11 +1276,12 @@ BOOST_FIXTURE_TEST_CASE(deferred_transaction_tests, TESTER) { try {
       CALL_TEST_FUNCTION(*this, "test_transaction", "send_deferred_tx_with_dtt_action", fc::raw::pack(dtt_act2));
 
       // If the deferred tx receiver == this tx receiver, the authorization checking would originally be bypassed.
-      // But not anymore. Now it should subjectively fail because testapi@additional permission is not unilaterally satisfied by testapi@eosio.code.
+      // But not anymore. With the RESTRICT_ACTION_TO_SELF protocol feature activated, it should now objectively
+      // fail because testapi@additional permission is not unilaterally satisfied by testapi@eosio.code.
       dtt_action dtt_act3;
-      dtt_act3.deferred_account = N(testapi);
-      dtt_act3.permission_name = N(additional);
-      push_action(config::system_account_name, linkauth::get_name(), "testapi", fc::mutable_variant_object()
+      dtt_act3.deferred_account = N(testapi).to_uint64_t();
+      dtt_act3.permission_name = N(additional).to_uint64_t();
+      push_action(config::system_account_name, linkauth::get_name(), name("testapi"), fc::mutable_variant_object()
             ("account", "testapi")
             ("code", name(dtt_act3.deferred_account))
             ("type", name(dtt_act3.deferred_action))

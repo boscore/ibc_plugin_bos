@@ -30,21 +30,32 @@ static inline void print_debug(account_name receiver, const action_trace& ar) {
    }
 }
 
-void apply_context::exec_one( action_trace& trace )
+apply_context::apply_context(controller& con, transaction_context& trx_ctx, uint32_t action_ordinal, uint32_t depth)
+:control(con)
+,db(con.mutable_db())
+,trx_context(trx_ctx)
+,recurse_depth(depth)
+,first_receiver_action_ordinal(action_ordinal)
+,action_ordinal(action_ordinal)
+,idx64(*this)
+,idx128(*this)
+,idx256(*this)
+,idx_double(*this)
+,idx_long_double(*this)
+{
+   action_trace& trace = trx_ctx.get_action_trace(action_ordinal);
+   act = &trace.act;
+   receiver = trace.receiver;
+   context_free = trace.context_free;
+}
+
+void apply_context::exec_one()
 {
    auto start = fc::time_point::now();
 
    action_receipt r;
    r.receiver         = receiver;
-   r.act_digest       = digest_type::hash(act);
-
-   trace.trx_id = trx_context.id;
-   trace.block_num = control.pending_block_state()->block_num;
-   trace.block_time = control.pending_block_time();
-   trace.producer_block_id = control.pending_producer_block_id();
-   trace.act = act;
-   trace.context_free = context_free;
-
+   r.act_digest       = digest_type::hash(*act);
    const auto& p = control.get_dynamic_global_properties();
    global_action_sequence = p.global_action_sequence + 1;
 
@@ -53,56 +64,67 @@ void apply_context::exec_one( action_trace& trace )
    try {
       try {
          receiver_account = &db.get<account_metadata_object,by_name>( receiver );
-		 privileged = receiver_account->is_privileged();
-         auto native = control.find_apply_handler( receiver, act.account, act.name );
+         privileged = receiver_account->is_privileged();
+         auto native = control.find_apply_handler( receiver, act->account, act->name );
          if( native ) {
             if( trx_context.enforce_whiteblacklist && control.is_producing_block() ) {
                control.check_contract_list( receiver );
-               control.check_action_list( act.account, act.name );
+               control.check_action_list( act->account, act->name );
             }
             (*native)( *this );
          }
 
-         if( receiver_account->code_hash != digest_type()  &&
-             !(act.account == config::system_account_name && act.name == N( setcode ) &&
-                  receiver == config::system_account_name) ) {
+         if( ( receiver_account->code_hash != digest_type() ) &&
+               (  !( act->account == config::system_account_name
+                     && act->name == N( setcode )
+                     && receiver == config::system_account_name )
+//                  || control.is_builtin_activated( builtin_protocol_feature_t::forward_setcode )
+               )
+         ) {
             if( trx_context.enforce_whiteblacklist && control.is_producing_block() ) {
                control.check_contract_list( receiver );
-               control.check_action_list( act.account, act.name );
+               control.check_action_list( act->account, act->name );
             }
             try {
                control.get_wasm_interface().apply( receiver_account->code_hash, receiver_account->vm_type, receiver_account->vm_version, *this );
             } catch( const wasm_exit& ) {}
          }
-      } FC_RETHROW_EXCEPTIONS( warn, "pending console output: ${console}", ("console", _pending_console_output.str()) )
+      } FC_RETHROW_EXCEPTIONS( warn, "pending console output: ${console}", ("console", _pending_console_output) )
    } catch( fc::exception& e ) {
-      trace.receipt = r; // fill with known data
-      trace.except = e;
-      finalize_trace( trace, start );
-      throw;
+       action_trace& trace = trx_context.get_action_trace( action_ordinal );
+       /// TODO
+       trace.error_code = controller::convert_exception_to_error_code( e );
+       trace.except = e;
+       finalize_trace( trace, start );
+       throw;
    }
 
+   // Note: It should not be possible for receiver_account to be invalidated because:
+   //    * a pointer to an object in a chainbase index is not invalidated if other objects in that index are modified, removed, or added;
+   //    * a pointer to an object in a chainbase index is not invalidated if the fields of that object are modified;
+   //    * and, the *receiver_account object itself cannot be removed because accounts cannot be deleted in EOSIO.
+
    r.global_sequence  = next_global_sequence();
-   r.recv_sequence    = next_recv_sequence( receiver );
+   r.recv_sequence    = next_recv_sequence( *receiver_account );
 
    const account_metadata_object* first_receiver_account = nullptr;
-   if( act.account == receiver ) {
+   if( act->account == receiver ) {
       first_receiver_account = receiver_account;
    } else {
-      first_receiver_account = &db.get<account_metadata_object, by_name>(act.account);
+      first_receiver_account = &db.get<account_metadata_object, by_name>(act->account);
    }
 
    r.code_sequence    = first_receiver_account->code_sequence; // could be modified by action execution above
    r.abi_sequence     = first_receiver_account->abi_sequence;  // could be modified by action execution above
 
-
-  for( const auto& auth : act.authorization ) {
+   for( const auto& auth : act->authorization ) {
       r.auth_sequence[auth.actor] = next_auth_sequence( auth.actor );
    }
 
+   action_trace& trace = trx_context.get_action_trace( action_ordinal );
    trace.receipt = r;
 
-   trx_context.executed.emplace_back( move(r) );
+   trx_context.executed.emplace_back( std::move(r) );
 
    finalize_trace( trace, start );
 
@@ -116,20 +138,19 @@ void apply_context::finalize_trace( action_trace& trace, const fc::time_point& s
    trace.account_ram_deltas = std::move( _account_ram_deltas );
    _account_ram_deltas.clear();
 
-   trace.console = _pending_console_output.str();
-   reset_console();
+   trace.console = std::move( _pending_console_output );
+   _pending_console_output.clear();
 
    trace.elapsed = fc::time_point::now() - start;
 }
 
-void apply_context::exec( action_trace& trace )
+void apply_context::exec()
 {
-   _notified.push_back(receiver);
-   exec_one( trace );
+   _notified.emplace_back( receiver, action_ordinal );
+   exec_one();
    for( uint32_t i = 1; i < _notified.size(); ++i ) {
-      receiver = _notified[i];
-      trace.inline_traces.emplace_back( );
-      exec_one( trace.inline_traces.back() );
+      std::tie( receiver, action_ordinal ) = _notified[i];
+      exec_one();
    }
 
    if( _cfa_inline_actions.size() > 0 || _inline_actions.size() > 0 ) {
@@ -137,14 +158,12 @@ void apply_context::exec( action_trace& trace )
                   transaction_exception, "max inline action depth per transaction reached" );
    }
 
-   for( const auto& inline_action : _cfa_inline_actions ) {
-      trace.inline_traces.emplace_back();
-      trx_context.dispatch_action( trace.inline_traces.back(), inline_action, inline_action.account, true, recurse_depth + 1 );
+   for( uint32_t ordinal : _cfa_inline_actions ) {
+      trx_context.execute_action( ordinal, recurse_depth + 1 );
    }
 
-   for( const auto& inline_action : _inline_actions ) {
-      trace.inline_traces.emplace_back();
-      trx_context.dispatch_action( trace.inline_traces.back(), inline_action, inline_action.account, false, recurse_depth + 1 );
+   for( uint32_t ordinal : _inline_actions ) {
+      trx_context.execute_action( ordinal, recurse_depth + 1 );
    }
 
 } /// exec()
@@ -154,9 +173,8 @@ bool apply_context::is_account( const account_name& account )const {
 }
 
 void apply_context::require_authorization( const account_name& account ) {
-   for( uint32_t i=0; i < act.authorization.size(); i++ ) {
-     if( act.authorization[i].actor == account ) {
-        used_authorizations[i] = true;
+   for( uint32_t i=0; i < act->authorization.size(); i++ ) {
+     if( act->authorization[i].actor == account ) {
         return;
      }
    }
@@ -164,7 +182,7 @@ void apply_context::require_authorization( const account_name& account ) {
 }
 
 bool apply_context::has_authorization( const account_name& account )const {
-   for( const auto& auth : act.authorization )
+   for( const auto& auth : act->authorization )
      if( auth.actor == account )
         return true;
   return false;
@@ -172,10 +190,9 @@ bool apply_context::has_authorization( const account_name& account )const {
 
 void apply_context::require_authorization(const account_name& account,
                                           const permission_name& permission) {
-  for( uint32_t i=0; i < act.authorization.size(); i++ )
-     if( act.authorization[i].actor == account ) {
-        if( act.authorization[i].permission == permission ) {
-           used_authorizations[i] = true;
+  for( uint32_t i=0; i < act->authorization.size(); i++ )
+     if( act->authorization[i].actor == account ) {
+        if( act->authorization[i].permission == permission ) {
            return;
         }
      }
@@ -184,15 +201,18 @@ void apply_context::require_authorization(const account_name& account,
 }
 
 bool apply_context::has_recipient( account_name code )const {
-   for( auto a : _notified )
-      if( a == code )
+   for( const auto& p : _notified )
+      if( p.first == code )
          return true;
    return false;
 }
 
 void apply_context::require_recipient( account_name recipient ) {
    if( !has_recipient(recipient) ) {
-      _notified.push_back(recipient);
+      _notified.emplace_back(
+         recipient,
+         schedule_action( action_ordinal, recipient, false )
+      );
    }
 }
 
@@ -222,7 +242,7 @@ void apply_context::execute_inline( action&& a ) {
 
    bool disallow_send_to_self_bypass = false; // eventually set to whether the appropriate protocol feature has been activated
    bool send_to_self = (a.account == receiver);
-   bool inherit_parent_authorizations = (!disallow_send_to_self_bypass && send_to_self && (receiver == act.account) && control.is_producing_block());
+   bool inherit_parent_authorizations = (!disallow_send_to_self_bypass && send_to_self && (receiver == act->account) && control.is_producing_block());
 
    flat_set<permission_level> inherited_authorizations;
    if( inherit_parent_authorizations ) {
@@ -239,7 +259,7 @@ void apply_context::execute_inline( action&& a ) {
       if( enforce_actor_whitelist_blacklist )
          actors.insert( auth.actor );
 
-      if( inherit_parent_authorizations && std::find(act.authorization.begin(), act.authorization.end(), auth) != act.authorization.end() ) {
+      if( inherit_parent_authorizations && std::find(act->authorization.begin(), act->authorization.end(), auth) != act->authorization.end() ) {
          inherited_authorizations.insert( auth );
       }
    }
@@ -283,7 +303,10 @@ void apply_context::execute_inline( action&& a ) {
       }
    }
 
-   _inline_actions.emplace_back( move(a) );
+   auto inline_receiver = a.account;
+   _inline_actions.emplace_back(
+      schedule_action( std::move(a), inline_receiver, false )
+   );
 }
 
 void apply_context::execute_context_free_inline( action&& a ) {
@@ -294,19 +317,22 @@ void apply_context::execute_context_free_inline( action&& a ) {
    EOS_ASSERT( a.authorization.size() == 0, action_validate_exception,
                "context-free actions cannot have authorizations" );
 
-   _cfa_inline_actions.emplace_back( move(a) );
+
+   auto inline_receiver = a.account;
+   _cfa_inline_actions.emplace_back(
+      schedule_action( std::move(a), inline_receiver, true )
+   );
 }
 
 
 void apply_context::schedule_deferred_transaction( const uint128_t& sender_id, account_name payer, transaction&& trx, bool replace_existing ) {
    EOS_ASSERT( trx.context_free_actions.size() == 0, cfa_inside_generated_tx, "context free actions are not currently allowed in generated transactions" );
-   trx.expiration = control.pending_block_time() + fc::microseconds(999'999); // Rounds up to nearest second (makes expiration check unnecessary)
-   trx.set_reference_block(control.head_block_id()); // No TaPoS check necessary
 
    bool enforce_actor_whitelist_blacklist = trx_context.enforce_whiteblacklist && control.is_producing_block()
                                              && !control.sender_avoids_whitelist_blacklist_enforcement( receiver );
    trx_context.validate_referenced_accounts( trx, enforce_actor_whitelist_blacklist );
-
+   trx.expiration = control.pending_block_time() + fc::microseconds(999'999); // Rounds up to nearest second (makes expiration check unnecessary)
+   trx.set_reference_block(control.head_block_id()); // No TaPoS check necessary
    // Charge ahead of time for the additional net usage needed to retire the deferred transaction
    // whether that be by successfully executing, soft failure, hard failure, or expiration.
    const auto& cfg = control.get_global_properties().configuration;
@@ -406,7 +432,7 @@ void apply_context::schedule_deferred_transaction( const uint128_t& sender_id, a
          });
    }
 
-   EOS_ASSERT( control.is_ram_billing_in_notify_allowed() || (receiver == act.account) || (receiver == payer) || privileged,
+   EOS_ASSERT( control.is_ram_billing_in_notify_allowed() || (receiver == act->account) || (receiver == payer) || privileged,
                subjective_block_production_exception, "Cannot charge RAM to other accounts during notify." );
    add_ram_usage( payer, (config::billable_size_v<generated_transaction_object> + trx_size) );
 }
@@ -419,6 +445,26 @@ bool apply_context::cancel_deferred_transaction( const uint128_t& sender_id, acc
       generated_transaction_idx.remove(*gto);
    }
    return gto;
+}
+
+uint32_t apply_context::schedule_action( uint32_t ordinal_of_action_to_schedule, account_name receiver, bool context_free )
+{
+   uint32_t scheduled_action_ordinal = trx_context.schedule_action( ordinal_of_action_to_schedule,
+                                                                    receiver, context_free,
+                                                                    action_ordinal, first_receiver_action_ordinal );
+
+   act = &trx_context.get_action_trace( action_ordinal ).act;
+   return scheduled_action_ordinal;
+}
+
+uint32_t apply_context::schedule_action( action&& act_to_schedule, account_name receiver, bool context_free )
+{
+   uint32_t scheduled_action_ordinal = trx_context.schedule_action( std::move(act_to_schedule),
+                                                                    receiver, context_free,
+                                                                    action_ordinal, first_receiver_action_ordinal );
+
+   act = &trx_context.get_action_trace( action_ordinal ).act;
+   return scheduled_action_ordinal;
 }
 
 const table_id_object* apply_context::find_table( name code, name scope, name table ) {
@@ -456,11 +502,6 @@ vector<account_name> apply_context::get_active_producers() const {
    return accounts;
 }
 
-void apply_context::reset_console() {
-   _pending_console_output = std::ostringstream();
-   _pending_console_output.setf( std::ios::scientific, std::ios::floatfield );
-}
-
 bytes apply_context::get_packed_transaction() {
    auto r = fc::raw::pack( static_cast<const transaction&>(trx_context.trx) );
    return r;
@@ -469,7 +510,7 @@ bytes apply_context::get_packed_transaction() {
 void apply_context::update_db_usage( const account_name& payer, int64_t delta ) {
    if( delta > 0 ) {
       if( !(privileged || payer == account_name(receiver)) ) {
-         EOS_ASSERT( control.is_ram_billing_in_notify_allowed() || (receiver == act.account),
+         EOS_ASSERT( control.is_ram_billing_in_notify_allowed() || (receiver == act->account),
                      subjective_block_production_exception, "Cannot charge RAM to other accounts during notify." );
          require_authorization( payer );
       }
@@ -519,11 +560,11 @@ int apply_context::get_context_free_data( uint32_t index, char* buffer, size_t b
    return copy_size;
 }
 
-int apply_context::db_store_i64( uint64_t scope, uint64_t table, const account_name& payer, uint64_t id, const char* buffer, size_t buffer_size ) {
+int apply_context::db_store_i64( name scope, name table, const account_name& payer, uint64_t id, const char* buffer, size_t buffer_size ) {
    return db_store_i64( receiver, scope, table, payer, id, buffer, buffer_size);
 }
 
-int apply_context::db_store_i64( uint64_t code, uint64_t scope, uint64_t table, const account_name& payer, uint64_t id, const char* buffer, size_t buffer_size ) {
+int apply_context::db_store_i64( name code, name scope, name table, const account_name& payer, uint64_t id, const char* buffer, size_t buffer_size ) {
 //   require_write_lock( scope );
    const auto& tab = find_or_create_table( code, scope, table, payer );
    auto tableid = tab.id;
@@ -659,7 +700,7 @@ int apply_context::db_previous_i64( int iterator, uint64_t& primary ) {
    return keyval_cache.add(*itr);
 }
 
-int apply_context::db_find_i64( uint64_t code, uint64_t scope, uint64_t table, uint64_t id ) {
+int apply_context::db_find_i64( name code, name scope, name table, uint64_t id ) {
    //require_read_lock( code, scope ); // redundant?
 
    const auto* tab = find_table( code, scope, table );
@@ -673,7 +714,7 @@ int apply_context::db_find_i64( uint64_t code, uint64_t scope, uint64_t table, u
    return keyval_cache.add( *obj );
 }
 
-int apply_context::db_lowerbound_i64( uint64_t code, uint64_t scope, uint64_t table, uint64_t id ) {
+int apply_context::db_lowerbound_i64( name code, name scope, name table, uint64_t id ) {
    //require_read_lock( code, scope ); // redundant?
 
    const auto* tab = find_table( code, scope, table );
@@ -689,7 +730,7 @@ int apply_context::db_lowerbound_i64( uint64_t code, uint64_t scope, uint64_t ta
    return keyval_cache.add( *itr );
 }
 
-int apply_context::db_upperbound_i64( uint64_t code, uint64_t scope, uint64_t table, uint64_t id ) {
+int apply_context::db_upperbound_i64( name code, name scope, name table, uint64_t id ) {
    //require_read_lock( code, scope ); // redundant?
 
    const auto* tab = find_table( code, scope, table );
@@ -705,7 +746,7 @@ int apply_context::db_upperbound_i64( uint64_t code, uint64_t scope, uint64_t ta
    return keyval_cache.add( *itr );
 }
 
-int apply_context::db_end_i64( uint64_t code, uint64_t scope, uint64_t table ) {
+int apply_context::db_end_i64( name code, name scope, name table ) {
    //require_read_lock( code, scope ); // redundant?
 
    const auto* tab = find_table( code, scope, table );
@@ -722,19 +763,18 @@ uint64_t apply_context::next_global_sequence() {
    return p.global_action_sequence;
 }
 
-uint64_t apply_context::next_recv_sequence( account_name receiver ) {
-   const auto& rs = db.get<account_metadata_object,by_name>( receiver );
-   db.modify( rs, [&]( auto& mrs ) {
-      ++mrs.recv_sequence;
+uint64_t apply_context::next_recv_sequence( const account_metadata_object& receiver_account ) {
+   db.modify( receiver_account, [&]( auto& ra ) {
+      ++ra.recv_sequence;
    });
-   return rs.recv_sequence;
+   return receiver_account.recv_sequence;
 }
 uint64_t apply_context::next_auth_sequence( account_name actor ) {
-   const auto& rs = db.get<account_metadata_object,by_name>( actor );
-   db.modify( rs, [&](auto& mrs ){
-      ++mrs.auth_sequence;
+   const auto& amo = db.get<account_metadata_object,by_name>( actor );
+   db.modify( amo, [&](auto& am ){
+      ++am.auth_sequence;
    });
-   return rs.auth_sequence;
+   return amo.auth_sequence;
 }
 
 void apply_context::add_ram_usage( account_name account, int64_t ram_delta ) {
@@ -746,5 +786,13 @@ void apply_context::add_ram_usage( account_name account, int64_t ram_delta ) {
    }
 }
 
+action_name apply_context::get_sender() const {
+   const action_trace& trace = trx_context.get_action_trace( action_ordinal );
+   if (trace.creator_action_ordinal > 0) {
+      const action_trace& creator_trace = trx_context.get_action_trace( trace.creator_action_ordinal );
+      return creator_trace.receiver;
+   }
+   return action_name();
+}
 
 } } /// eosio::chain

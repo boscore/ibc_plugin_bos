@@ -213,7 +213,8 @@ struct controller_impl {
    {
 
 #define SET_APP_HANDLER( receiver, contract, action) \
-   set_apply_handler( #receiver, #contract, #action, &BOOST_PP_CAT(apply_, BOOST_PP_CAT(contract, BOOST_PP_CAT(_,action) ) ) )
+   set_apply_handler( account_name(#receiver), account_name(#contract), action_name(#action), \
+                      &BOOST_PP_CAT(apply_, BOOST_PP_CAT(contract, BOOST_PP_CAT(_,action) ) ) )
 
    SET_APP_HANDLER( eosio, eosio, newaccount );
    SET_APP_HANDLER( eosio, eosio, setcode );
@@ -1104,8 +1105,7 @@ struct controller_impl {
       try {
          trx_context.init_for_implicit_trx();
          trx_context.published = gtrx.published;
-         trx_context.trace->action_traces.emplace_back();
-         trx_context.dispatch_action( trx_context.trace->action_traces.back(), etrx.actions.back(), gtrx.sender );
+         trx_context.execute_action( trx_context.schedule_action( etrx.actions.back(), gtrx.sender, false, 0, 0 ), 0 );
          trx_context.finalize(); // Automatically rounds up network and CPU usage in trace and bills payers if successful
 
          auto restore = make_block_restore_point();
@@ -1201,7 +1201,7 @@ struct controller_impl {
          trace->scheduled = true;
          trace->receipt = push_receipt( gtrx.trx_id, transaction_receipt::expired, billed_cpu_time_us, 0 ); // expire the transaction
          emit( self.accepted_transaction, trx );
-         emit( self.applied_transaction, trace );
+         emit( self.applied_transaction, std::tie(trace, dtrx) );
          undo_session.squash();
          return trace;
       }
@@ -1241,7 +1241,7 @@ struct controller_impl {
          fc::move_append( pending->_actions, move(trx_context.executed) );
 
          emit( self.accepted_transaction, trx );
-         emit( self.applied_transaction, trace );
+         emit( self.applied_transaction, std::tie(trace, dtrx) );
 
          trx_context.squash();
          undo_session.squash();
@@ -1269,7 +1269,7 @@ struct controller_impl {
          trace = error_trace;
          if( !trace->except_ptr ) {
             emit( self.accepted_transaction, trx );
-            emit( self.applied_transaction, trace );
+            emit( self.applied_transaction, std::tie(trace, dtrx) );
             undo_session.squash();
             return trace;
          }
@@ -1306,12 +1306,12 @@ struct controller_impl {
          trace->receipt = push_receipt(gtrx.trx_id, transaction_receipt::hard_fail, cpu_time_to_bill_us, 0);
 
          emit( self.accepted_transaction, trx );
-         emit( self.applied_transaction, trace );
+         emit( self.applied_transaction, std::tie(trace, dtrx) );
 
          undo_session.squash();
       } else {
          emit( self.accepted_transaction, trx );
-         emit( self.applied_transaction, trace );
+         emit( self.applied_transaction, std::tie(trace, dtrx) );
       }
 
       return trace;
@@ -1421,7 +1421,7 @@ struct controller_impl {
                emit( self.accepted_transaction, trx);
             }
 
-            emit(self.applied_transaction, trace);
+            emit(self.applied_transaction, std::tie(trace, trn));
 
 
             if ( read_mode != db_read_mode::SPECULATIVE && pending->_block_status == controller::block_status::incomplete ) {
@@ -1446,7 +1446,7 @@ struct controller_impl {
          }
 
          emit( self.accepted_transaction, trx );
-         emit( self.applied_transaction, trace );
+         emit( self.applied_transaction, std::tie(trace, trn) );
 
          return trace;
       } FC_CAPTURE_AND_RETHROW((trace))
@@ -1758,17 +1758,18 @@ struct controller_impl {
       if (!pbft_enabled) return;
 
       if ( pending_pbft_lib ) {
-         //this is a temp solution for getting current lib, should not use anywhere else;
-         auto current_lib = fork_db.get_block_in_current_chain_by_num(head->bft_irreversible_blocknum)->id;
+         auto current_lib_num = std::max(std::max(head->bft_irreversible_blocknum, head->dpos_irreversible_blocknum), snapshot_head_block);
          fork_db.set_bft_irreversible(*pending_pbft_lib);
          if (!replaying) {
+             // emit lib signals to a separate channel, plugins should connect to this channel in order to process libs asap.
              auto libs_to_be_emitted = vector<block_state_ptr>{};
              auto b = fork_db.get_block(*pending_pbft_lib);
-             while (b->id != current_lib) {
+             while (b && b->block_num > current_lib_num) {
                  libs_to_be_emitted.emplace_back(b);
                  b = fork_db.get_block(b->prev());
              }
              while (!libs_to_be_emitted.empty()) {
+                 // emit all libs in ascending order.
                  emit( self.new_irreversible_block, libs_to_be_emitted.back() );
                  libs_to_be_emitted.pop_back();
              }
@@ -2481,6 +2482,15 @@ signed_block_ptr controller::fetch_block_by_number( uint32_t block_num )const  {
    return my->blog.read_block_by_num(block_num);
 } FC_CAPTURE_AND_RETHROW( (block_num) ) }
 
+signed_block_ptr controller::fetch_block_by_number_state_history( uint32_t block_num )const  { try {
+    auto blk_state = fetch_block_state_by_number_state_history( block_num );
+    if( blk_state ) {
+        return blk_state->block;
+    }
+
+    return my->blog.read_block_by_num(block_num);
+} FC_CAPTURE_AND_RETHROW( (block_num) ) }
+
 block_state_ptr controller::fetch_block_state_by_id( block_id_type id )const {
    auto state = my->fork_db.get_block(id);
    return state;
@@ -2489,6 +2499,21 @@ block_state_ptr controller::fetch_block_state_by_id( block_id_type id )const {
 block_state_ptr controller::fetch_block_state_by_number( uint32_t block_num )const  { try {
    auto blk_state = my->fork_db.get_block_in_current_chain_by_num( block_num );
    return blk_state;
+} FC_CAPTURE_AND_RETHROW( (block_num) ) }
+
+block_state_ptr controller::fetch_block_state_by_number_state_history( uint32_t block_num )const  { try {
+    const auto& rev_blocks = my->reversible_blocks.get_index<reversible_block_index,by_num>();
+    auto objitr = rev_blocks.find(block_num);
+
+    if( objitr == rev_blocks.end() ) {
+        if( my->read_mode == db_read_mode::IRREVERSIBLE ) {
+            return my->fork_db.search_on_branch( my->pending->_pending_block_state->id, block_num );
+        } else {
+            return block_state_ptr();
+        }
+    }
+
+    return my->fork_db.get_block( objitr->get_block_id() );
 } FC_CAPTURE_AND_RETHROW( (block_num) ) }
 
 block_id_type controller::get_block_id_for_num( uint32_t block_num )const { try {
@@ -2864,5 +2889,15 @@ vm::wasm_allocator& controller::get_wasm_allocator() {
   return my->wasm_alloc;
 }
 #endif
+
+fc::optional<uint64_t> controller::convert_exception_to_error_code( const fc::exception& e ) {
+    const chain_exception* e_ptr = dynamic_cast<const chain_exception*>( &e );
+
+    if( e_ptr == nullptr ) return {};
+
+    if( !e_ptr->error_code ) return static_cast<uint64_t>(system_error_code::generic_system_error);
+
+    return e_ptr->error_code;
+}
 
 } } /// eosio::chain

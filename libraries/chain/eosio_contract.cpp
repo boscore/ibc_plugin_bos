@@ -12,6 +12,7 @@
 #include <eosio/chain/exceptions.hpp>
 
 #include <eosio/chain/account_object.hpp>
+#include <eosio/chain/code_object.hpp>
 #include <eosio/chain/permission_object.hpp>
 #include <eosio/chain/permission_link_object.hpp>
 #include <eosio/chain/global_property_object.hpp>
@@ -68,7 +69,7 @@ void validate_authority_precondition( const apply_context& context, const author
  *  This method is called assuming precondition_system_newaccount succeeds a
  */
 void apply_eosio_newaccount(apply_context& context) {
-   auto create = context.act.data_as<newaccount>();
+   auto create = context.get_action().data_as<newaccount>();
    try {
    context.require_authorization(create.creator);
 //   context.require_write_lock( config::eosio_auth_scope );
@@ -129,7 +130,7 @@ void apply_eosio_setcode(apply_context& context) {
    const auto& cfg = context.control.get_global_properties().configuration;
 
    auto& db = context.db;
-   auto  act = context.act.data_as<setcode>();
+   auto  act = context.get_action().data_as<setcode>();
    context.require_authorization(act.account);
 
    EOS_ASSERT( act.vmtype == 0, invalid_contract_vm_type, "code should be 0" );
@@ -201,7 +202,7 @@ void apply_eosio_setcode(apply_context& context) {
 
 void apply_eosio_setabi(apply_context& context) {
    auto& db  = context.db;
-   auto  act = context.act.data_as<setabi>();
+   auto  act = context.get_action().data_as<setabi>();
 
    context.require_authorization(act.account);
 
@@ -220,9 +221,9 @@ void apply_eosio_setabi(apply_context& context) {
       }
    });
 
-   const auto& account_sequence = db.get<account_metadata_object, by_name>(act.account);
-   db.modify( account_sequence, [&]( auto& aso ) {
-      aso.abi_sequence += 1;
+   const auto& account_metadata = db.get<account_metadata_object, by_name>(act.account);
+   db.modify( account_metadata, [&]( auto& a ) {
+      a.abi_sequence += 1;
    });
 
    if (new_size != old_size) {
@@ -232,7 +233,7 @@ void apply_eosio_setabi(apply_context& context) {
 
 void apply_eosio_updateauth(apply_context& context) {
 
-   auto update = context.act.data_as<updateauth>();
+   auto update = context.get_action().data_as<updateauth>();
    context.require_authorization(update.account); // only here to mark the single authority on this action as used
 
    auto& authorization = context.control.get_mutable_authorization_manager();
@@ -297,7 +298,7 @@ void apply_eosio_updateauth(apply_context& context) {
 void apply_eosio_deleteauth(apply_context& context) {
 //   context.require_write_lock( config::eosio_auth_scope );
 
-   auto remove = context.act.data_as<deleteauth>();
+   auto remove = context.get_action().data_as<deleteauth>();
    context.require_authorization(remove.account); // only here to mark the single authority on this action as used
 
    EOS_ASSERT(remove.permission != config::active_name, action_validate_exception, "Cannot delete active authority");
@@ -313,7 +314,7 @@ void apply_eosio_deleteauth(apply_context& context) {
       auto range = index.equal_range(boost::make_tuple(remove.account, remove.permission));
       EOS_ASSERT(range.first == range.second, action_validate_exception,
                  "Cannot delete a linked authority. Unlink the authority first. This authority is linked to ${code}::${type}.",
-                 ("code", string(range.first->code))("type", string(range.first->message_type)));
+                 ("code", range.first->code)("type", range.first->message_type));
    }
 
    const auto& permission = authorization.get_permission({remove.account, remove.permission});
@@ -328,7 +329,7 @@ void apply_eosio_deleteauth(apply_context& context) {
 void apply_eosio_linkauth(apply_context& context) {
 //   context.require_write_lock( config::eosio_auth_scope );
 
-   auto requirement = context.act.data_as<linkauth>();
+   auto requirement = context.get_action().data_as<linkauth>();
    try {
       EOS_ASSERT(!requirement.requirement.empty(), action_validate_exception, "Required permission cannot be empty");
 
@@ -377,7 +378,7 @@ void apply_eosio_unlinkauth(apply_context& context) {
 //   context.require_write_lock( config::eosio_auth_scope );
 
    auto& db = context.db;
-   auto unlink = context.act.data_as<unlinkauth>();
+   auto unlink = context.get_action().data_as<unlinkauth>();
 
    context.require_authorization(unlink.account); // only here to mark the single authority on this action as used
 
@@ -393,7 +394,7 @@ void apply_eosio_unlinkauth(apply_context& context) {
 }
 
 void apply_eosio_canceldelay(apply_context& context) {
-   auto cancel = context.act.data_as<canceldelay>();
+   auto cancel = context.get_action().data_as<canceldelay>();
    context.require_authorization(cancel.canceling_auth.actor); // only here to mark the single authority on this action as used
 
    const auto& trx_id = cancel.trx_id;

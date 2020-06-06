@@ -144,7 +144,7 @@ class privileged_api : public context_aware_api {
       privileged_api( apply_context& ctx )
       :context_aware_api(ctx)
       {
-         EOS_ASSERT( context.privileged, unaccessible_api, "${code} does not have permission to call this API", ("code",context.receiver) );
+         EOS_ASSERT( context.is_privileged(), unaccessible_api, "${code} does not have permission to call this API", ("code",context.get_receiver()) );
       }
 
       /**
@@ -1464,6 +1464,7 @@ class context_free_transaction_api : public context_aware_api {
           id = context.trx_context.id;
        }
 
+       /// TODO
        void get_action_sequence(uint64_t& seq){
            seq = context.global_action_sequence;
       }

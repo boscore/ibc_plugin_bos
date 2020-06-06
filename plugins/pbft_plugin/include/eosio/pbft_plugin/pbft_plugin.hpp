@@ -7,6 +7,7 @@
 #include <eosio/chain/pbft.hpp>
 #include <eosio/chain_plugin/chain_plugin.hpp>
 #include <eosio/net_plugin/net_plugin.hpp>
+#include <eosio/producer_plugin/producer_plugin.hpp>
 
 namespace eosio {
 
@@ -33,12 +34,15 @@ public:
    const char* get_pbft_status()const;
    block_id_type get_pbft_prepared_id()const;
    block_id_type get_pbft_my_prepare_id()const;
-
+   vector<producer_key> get_view_change_missing_bps(pbft_view_type view)const;
+   vector<producer_key> get_prepare_missing_bps(const block_id_type& bid)const;
+   vector<producer_key> get_commit_missing_bps(const block_id_type& bid)const;
    void set_pbft_current_view(pbft_view_type view);
 
 
 private:
    std::unique_ptr<class pbft_plugin_impl> my;
+   chain_plugin*                           chain_plug = nullptr;
 };
 
 }

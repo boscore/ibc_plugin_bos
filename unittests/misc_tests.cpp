@@ -30,7 +30,8 @@ namespace eosio
 using namespace chain;
 using namespace std;
 
-static constexpr uint64_t name_suffix( uint64_t n ) {
+static constexpr uint64_t name_suffix( name nv ) {
+   uint64_t n = nv.to_uint64_t();
    uint32_t remaining_bits_after_last_actual_dot = 0;
    uint32_t tmp = 0;
    for( int32_t remaining_bits = 59; remaining_bits >= 4; remaining_bits -= 5 ) { // Note: remaining_bits must remain signed integer
@@ -64,7 +65,7 @@ BOOST_AUTO_TEST_SUITE(misc_tests)
 
 BOOST_AUTO_TEST_CASE(name_suffix_tests)
 {
-   BOOST_CHECK_EQUAL( name{name_suffix(0)}, name{0} );
+   BOOST_CHECK_EQUAL( name{name_suffix(name(0))}, name{0} );
    BOOST_CHECK_EQUAL( name{name_suffix(N(abcdehijklmn))}, name{N(abcdehijklmn)} );
    BOOST_CHECK_EQUAL( name{name_suffix(N(abcdehijklmn1))}, name{N(abcdehijklmn1)} );
    BOOST_CHECK_EQUAL( name{name_suffix(N(abc.def))}, name{N(def)} );
@@ -233,9 +234,9 @@ struct permission_visitor {
 BOOST_AUTO_TEST_CASE(authority_checker)
 { try {
    testing::TESTER test;
-   auto a = test.get_public_key("a", "active");
-   auto b = test.get_public_key("b", "active");
-   auto c = test.get_public_key("c", "active");
+   auto a = test.get_public_key(name("a"), "active");
+   auto b = test.get_public_key(name("b"), "active");
+   auto c = test.get_public_key(name("c"), "active");
 
    auto GetNullAuthority = [](auto){abort(); return authority();};
 
@@ -244,31 +245,31 @@ BOOST_AUTO_TEST_CASE(authority_checker)
       auto checker = make_auth_checker(GetNullAuthority, 2, {a, b});
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 2);
-      BOOST_TEST(checker.unused_keys().size() == 0);
+      BOOST_TEST(checker.used_keys().size() == 2u);
+      BOOST_TEST(checker.unused_keys().size() == 0u);
    }
    {
       auto checker = make_auth_checker(GetNullAuthority, 2, {a, c});
       BOOST_TEST(!checker.satisfied(A));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 0);
-      BOOST_TEST(checker.unused_keys().size() == 2);
+      BOOST_TEST(checker.used_keys().size() == 0u);
+      BOOST_TEST(checker.unused_keys().size() == 2u);
    }
    {
       auto checker = make_auth_checker(GetNullAuthority, 2, {a, b, c});
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 2);
-      BOOST_TEST(checker.used_keys().count(a) == 1);
-      BOOST_TEST(checker.used_keys().count(b) == 1);
-      BOOST_TEST(checker.unused_keys().size() == 1);
-      BOOST_TEST(checker.unused_keys().count(c) == 1);
+      BOOST_TEST(checker.used_keys().size() == 2u);
+      BOOST_TEST(checker.used_keys().count(a) == 1u);
+      BOOST_TEST(checker.used_keys().count(b) == 1u);
+      BOOST_TEST(checker.unused_keys().size() == 1u);
+      BOOST_TEST(checker.unused_keys().count(c) == 1u);
    }
    {
       auto checker = make_auth_checker(GetNullAuthority, 2, {b, c});
       BOOST_TEST(!checker.satisfied(A));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 0);
+      BOOST_TEST(checker.used_keys().size() == 0u);
    }
 
    A = authority(3, {key_weight{a, 1}, key_weight{b, 1}, key_weight{c, 1}});
@@ -291,7 +292,7 @@ BOOST_AUTO_TEST_CASE(authority_checker)
       return authority(1, {key_weight{c, 1}});
    };
 
-   A = authority(2, {key_weight{a, 2}, key_weight{b, 1}}, {permission_level_weight{{"hello",  "world"}, 1}});
+   A = authority(2, {key_weight{a, 2}, key_weight{b, 1}}, {permission_level_weight{{name("hello"), name("world")}, 1}});
    {
       auto checker = make_auth_checker(GetCAuthority, 2, {a});
       BOOST_TEST(checker.satisfied(A));
@@ -300,38 +301,38 @@ BOOST_AUTO_TEST_CASE(authority_checker)
    {
       auto checker = make_auth_checker(GetCAuthority, 2, {b});
       BOOST_TEST(!checker.satisfied(A));
-      BOOST_TEST(checker.used_keys().size() == 0);
-      BOOST_TEST(checker.unused_keys().size() == 1);
-      BOOST_TEST(checker.unused_keys().count(b) == 1);
+      BOOST_TEST(checker.used_keys().size() == 0u);
+      BOOST_TEST(checker.unused_keys().size() == 1u);
+      BOOST_TEST(checker.unused_keys().count(b) == 1u);
    }
    {
       auto checker = make_auth_checker(GetCAuthority, 2, {c});
       BOOST_TEST(!checker.satisfied(A));
-      BOOST_TEST(checker.used_keys().size() == 0);
-      BOOST_TEST(checker.unused_keys().size() == 1);
-      BOOST_TEST(checker.unused_keys().count(c) == 1);
+      BOOST_TEST(checker.used_keys().size() == 0u);
+      BOOST_TEST(checker.unused_keys().size() == 1u);
+      BOOST_TEST(checker.unused_keys().count(c) == 1u);
    }
    {
       auto checker = make_auth_checker(GetCAuthority, 2, {b, c});
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 2);
-      BOOST_TEST(checker.unused_keys().size() == 0);
-      BOOST_TEST(checker.used_keys().count(b) == 1);
-      BOOST_TEST(checker.used_keys().count(c) == 1);
+      BOOST_TEST(checker.used_keys().size() == 2u);
+      BOOST_TEST(checker.unused_keys().size() == 0u);
+      BOOST_TEST(checker.used_keys().count(b) == 1u);
+      BOOST_TEST(checker.used_keys().count(c) == 1u);
    }
    {
       auto checker = make_auth_checker(GetCAuthority, 2, {b, c, a});
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 1);
-      BOOST_TEST(checker.used_keys().count(a) == 1);
-      BOOST_TEST(checker.unused_keys().size() == 2);
-      BOOST_TEST(checker.unused_keys().count(b) == 1);
-      BOOST_TEST(checker.unused_keys().count(c) == 1);
+      BOOST_TEST(checker.used_keys().size() == 1u);
+      BOOST_TEST(checker.used_keys().count(a) == 1u);
+      BOOST_TEST(checker.unused_keys().size() == 2u);
+      BOOST_TEST(checker.unused_keys().count(b) == 1u);
+      BOOST_TEST(checker.unused_keys().count(c) == 1u);
    }
 
-   A = authority(3, {key_weight{a, 2}, key_weight{b, 1}}, {permission_level_weight{{"hello",  "world"}, 3}});
+   A = authority(3, {key_weight{a, 2}, key_weight{b, 1}}, {permission_level_weight{{name("hello"), name("world")}, 3}});
    {
       auto checker = make_auth_checker(GetCAuthority, 2, {a, b});
       BOOST_TEST(checker.satisfied(A));
@@ -341,14 +342,14 @@ BOOST_AUTO_TEST_CASE(authority_checker)
       auto checker = make_auth_checker(GetCAuthority, 2, {a, b, c});
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 1);
-      BOOST_TEST(checker.used_keys().count(c) == 1);
-      BOOST_TEST(checker.unused_keys().size() == 2);
-      BOOST_TEST(checker.unused_keys().count(a) == 1);
-      BOOST_TEST(checker.unused_keys().count(b) == 1);
+      BOOST_TEST(checker.used_keys().size() == 1u);
+      BOOST_TEST(checker.used_keys().count(c) == 1u);
+      BOOST_TEST(checker.unused_keys().size() == 2u);
+      BOOST_TEST(checker.unused_keys().count(a) == 1u);
+      BOOST_TEST(checker.unused_keys().count(b) == 1u);
    }
 
-   A = authority(2, {key_weight{a, 1}, key_weight{b, 1}}, {permission_level_weight{{"hello",  "world"}, 1}});
+   A = authority(2, {key_weight{a, 1}, key_weight{b, 1}}, {permission_level_weight{{name("hello"), name("world")}, 1}});
    BOOST_TEST(!make_auth_checker(GetCAuthority, 2, {a}).satisfied(A));
    BOOST_TEST(!make_auth_checker(GetCAuthority, 2, {b}).satisfied(A));
    BOOST_TEST(!make_auth_checker(GetCAuthority, 2, {c}).satisfied(A));
@@ -359,12 +360,12 @@ BOOST_AUTO_TEST_CASE(authority_checker)
       auto checker = make_auth_checker(GetCAuthority, 2, {a, b, c});
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 2);
-      BOOST_TEST(checker.unused_keys().size() == 1);
-      BOOST_TEST(checker.unused_keys().count(c) == 1);
+      BOOST_TEST(checker.used_keys().size() == 2u);
+      BOOST_TEST(checker.unused_keys().size() == 1u);
+      BOOST_TEST(checker.unused_keys().count(c) == 1u);
    }
 
-   A = authority(2, {key_weight{a, 1}, key_weight{b, 1}}, {permission_level_weight{{"hello",  "world"}, 2}});
+   A = authority(2, {key_weight{a, 1}, key_weight{b, 1}}, {permission_level_weight{{name("hello"), name("world")}, 2}});
    BOOST_TEST(make_auth_checker(GetCAuthority, 2, {a, b}).satisfied(A));
    BOOST_TEST(make_auth_checker(GetCAuthority, 2, {c}).satisfied(A));
    BOOST_TEST(!make_auth_checker(GetCAuthority, 2, {a}).satisfied(A));
@@ -373,21 +374,21 @@ BOOST_AUTO_TEST_CASE(authority_checker)
       auto checker = make_auth_checker(GetCAuthority, 2, {a, b, c});
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 1);
-      BOOST_TEST(checker.unused_keys().size() == 2);
-      BOOST_TEST(checker.used_keys().count(c) == 1);
+      BOOST_TEST(checker.used_keys().size() == 1u);
+      BOOST_TEST(checker.unused_keys().size() == 2u);
+      BOOST_TEST(checker.used_keys().count(c) == 1u);
    }
 
-   auto d = test.get_public_key("d", "active");
-   auto e = test.get_public_key("e", "active");
+   auto d = test.get_public_key(name("d"), "active");
+   auto e = test.get_public_key(name("e"), "active");
 
    auto GetAuthority = [d, e] (const permission_level& perm) {
-      if (perm.actor == "top")
-         return authority(2, {key_weight{d, 1}}, {permission_level_weight{{"bottom",  "bottom"}, 1}});
+      if (perm.actor == name("top"))
+         return authority(2, {key_weight{d, 1}}, {permission_level_weight{{name("bottom"), name("bottom")}, 1}});
       return authority{1, {{e, 1}}, {}};
    };
 
-   A = authority(5, {key_weight{a, 2}, key_weight{b, 2}, key_weight{c, 2}}, {permission_level_weight{{"top",  "top"}, 5}});
+   A = authority(5, {key_weight{a, 2}, key_weight{b, 2}, key_weight{c, 2}}, {permission_level_weight{{name("top"), name("top")}, 5}});
    {
       auto checker = make_auth_checker(GetAuthority, 2, {d, e});
       BOOST_TEST(checker.satisfied(A));
@@ -397,20 +398,20 @@ BOOST_AUTO_TEST_CASE(authority_checker)
       auto checker = make_auth_checker(GetAuthority, 2, {a, b, c, d, e});
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 2);
-      BOOST_TEST(checker.unused_keys().size() == 3);
-      BOOST_TEST(checker.used_keys().count(d) == 1);
-      BOOST_TEST(checker.used_keys().count(e) == 1);
+      BOOST_TEST(checker.used_keys().size() == 2u);
+      BOOST_TEST(checker.unused_keys().size() == 3u);
+      BOOST_TEST(checker.used_keys().count(d) == 1u);
+      BOOST_TEST(checker.used_keys().count(e) == 1u);
    }
    {
       auto checker = make_auth_checker(GetAuthority, 2, {a, b, c, e});
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.used_keys().size() == 3);
-      BOOST_TEST(checker.unused_keys().size() == 1);
-      BOOST_TEST(checker.used_keys().count(a) == 1);
-      BOOST_TEST(checker.used_keys().count(b) == 1);
-      BOOST_TEST(checker.used_keys().count(c) == 1);
+      BOOST_TEST(checker.used_keys().size() == 3u);
+      BOOST_TEST(checker.unused_keys().size() == 1u);
+      BOOST_TEST(checker.used_keys().count(a) == 1u);
+      BOOST_TEST(checker.used_keys().count(b) == 1u);
+      BOOST_TEST(checker.used_keys().count(c) == 1u);
    }
    BOOST_TEST(make_auth_checker(GetAuthority, 1, {a, b, c}).satisfied(A));
    // Fails due to short recursion depth limit
@@ -442,50 +443,50 @@ BOOST_AUTO_TEST_CASE(authority_checker)
       BOOST_TEST(!validate(F));
 
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.unused_keys().count(b) == 1);
-      BOOST_TEST(checker.unused_keys().count(a) == 1);
-      BOOST_TEST(checker.unused_keys().count(c) == 1);
+      BOOST_TEST(checker.unused_keys().count(b) == 1u);
+      BOOST_TEST(checker.unused_keys().count(a) == 1u);
+      BOOST_TEST(checker.unused_keys().count(c) == 1u);
       BOOST_TEST(checker.satisfied(A));
       BOOST_TEST(checker.satisfied(B));
       BOOST_TEST(!checker.all_keys_used());
-      BOOST_TEST(checker.unused_keys().count(b) == 0);
-      BOOST_TEST(checker.unused_keys().count(a) == 0);
-      BOOST_TEST(checker.unused_keys().count(c) == 1);
+      BOOST_TEST(checker.unused_keys().count(b) == 0u);
+      BOOST_TEST(checker.unused_keys().count(a) == 0u);
+      BOOST_TEST(checker.unused_keys().count(c) == 1u);
    }
    {
       auto A2 = authority(4, {key_weight{b, 1}, key_weight{a, 1}, key_weight{c, 1}},
-                          { permission_level_weight{{"a",  "world"},     1},
-                            permission_level_weight{{"hello",  "world"}, 1},
-                            permission_level_weight{{"hi",  "world"},    1}
+                          { permission_level_weight{{name("a"), name("world")},     1},
+                            permission_level_weight{{name("hello"), name("world")}, 1},
+                            permission_level_weight{{name("hi"), name("world")},    1}
                           });
       auto B2 = authority(4, {key_weight{b, 1}, key_weight{a, 1}, key_weight{c, 1}},
-                          {permission_level_weight{{"hello",  "world"}, 1}
+                          {permission_level_weight{{name("hello"), name("world")}, 1}
                           });
       auto C2 = authority(4, {key_weight{b, 1}, key_weight{a, 1}, key_weight{c, 1}},
-                          { permission_level_weight{{"hello",  "there"}, 1},
-                            permission_level_weight{{"hello",  "world"}, 1}
+                          { permission_level_weight{{name("hello"), name("there")}, 1},
+                            permission_level_weight{{name("hello"), name("world")}, 1}
                           });
       // invalid: duplicate
       auto D2 = authority(4, {key_weight{b, 1}, key_weight{a, 1}, key_weight{c, 1}},
-                          { permission_level_weight{{"hello",  "world"}, 1},
-                            permission_level_weight{{"hello",  "world"}, 2}
+                          { permission_level_weight{{name("hello"), name("world")}, 1},
+                            permission_level_weight{{name("hello"), name("world")}, 2}
                           });
       // invalid: wrong order
       auto E2 = authority(4, {key_weight{b, 1}, key_weight{a, 1}, key_weight{c, 1}},
-                          { permission_level_weight{{"hello",  "world"}, 2},
-                            permission_level_weight{{"hello",  "there"}, 1}
+                          { permission_level_weight{{name("hello"), name("world")}, 2},
+                            permission_level_weight{{name("hello"), name("there")}, 1}
                           });
       // invalid: wrong order
       auto F2 = authority(4, {key_weight{b, 1}, key_weight{a, 1}, key_weight{c, 1}},
-                          { permission_level_weight{{"hi",  "world"}, 2},
-                            permission_level_weight{{"hello",  "world"}, 1}
+                          { permission_level_weight{{name("hi"), name("world")}, 2},
+                            permission_level_weight{{name("hello"), name("world")}, 1}
                           });
 
       // invalid: insufficient weight
       auto G2 = authority(7, {key_weight{b, 1}, key_weight{a, 1}, key_weight{c, 1}},
-                             { permission_level_weight{{"a",  "world"},     1},
-                               permission_level_weight{{"hello",  "world"}, 1},
-                               permission_level_weight{{"hi",  "world"},    1}
+                             { permission_level_weight{{name("a"), name("world")},     1},
+                               permission_level_weight{{name("hello"), name("world")}, 1},
+                               permission_level_weight{{name("hi"), name("world")},    1}
                              });
 
       BOOST_TEST(validate(A2));
@@ -530,7 +531,7 @@ BOOST_AUTO_TEST_CASE(alphabetic_sort)
   vector<uint64_t> uwords;
   for(const auto w: words) {
     auto n = name(w.c_str());
-    uwords.push_back(n.value);
+    uwords.push_back(n.to_uint64_t());
   }
 
   std::sort(uwords.begin(), uwords.end(), std::less<uint64_t>());
@@ -541,7 +542,7 @@ BOOST_AUTO_TEST_CASE(alphabetic_sort)
     tmp.push_back(str);
   }
 
-  for(int i = 0; i < words.size(); ++i ) {
+  for(size_t i = 0; i < words.size(); ++i ) {
     BOOST_TEST(tmp[i] == words[i]);
   }
 
@@ -583,7 +584,7 @@ BOOST_AUTO_TEST_CASE(transaction_test) { try {
 
    trx.expiration = fc::time_point::now();
    trx.validate();
-   BOOST_CHECK_EQUAL(0, trx.signatures.size());
+   BOOST_CHECK_EQUAL(0u, trx.signatures.size());
    ((const signed_transaction &)trx).sign( test.get_private_key( config::system_account_name, "active" ), test.control->get_chain_id());
    BOOST_CHECK_EQUAL(0, trx.signatures.size());
    trx.sign( test.get_private_key( config::system_account_name, "active" ), test.control->get_chain_id()  );

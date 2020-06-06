@@ -164,7 +164,7 @@ struct txn_test_gen_plugin_impl {
                   auto owner_auth   = eosio::chain::authority{1, {{txn_text_receiver_A_pub_key, 1}}, {}};
                   auto active_auth  = eosio::chain::authority{1, {{txn_text_receiver_A_pub_key, 1}}, {}};
 
-                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,"active"}}, newaccount{creator, newaccountA, owner_auth, active_auth});
+                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,name("active")}}, newaccount{creator, newaccountA, owner_auth, active_auth});
 
                   //delegate cpu net and buyram
                   auto act_delegatebw = create_action_delegatebw(creator, newaccountA,net,cpu,abi_serializer_max_time);
@@ -179,7 +179,7 @@ struct txn_test_gen_plugin_impl {
                   auto owner_auth   = eosio::chain::authority{1, {{txn_text_receiver_B_pub_key, 1}}, {}};
                   auto active_auth  = eosio::chain::authority{1, {{txn_text_receiver_B_pub_key, 1}}, {}};
 
-                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,"active"}}, newaccount{creator, newaccountB, owner_auth, active_auth});
+                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,name("active")}}, newaccount{creator, newaccountB, owner_auth, active_auth});
 
                   //delegate cpu net and buyram
                   auto act_delegatebw = create_action_delegatebw(creator, newaccountB,net,cpu,abi_serializer_max_time);
@@ -193,7 +193,7 @@ struct txn_test_gen_plugin_impl {
                   auto owner_auth   = eosio::chain::authority{1, {{txn_text_receiver_C_pub_key, 1}}, {}};
                   auto active_auth  = eosio::chain::authority{1, {{txn_text_receiver_C_pub_key, 1}}, {}};
 
-                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,"active"}}, newaccount{creator, newaccountC, owner_auth, active_auth});
+                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,name("active")}}, newaccount{creator, newaccountC, owner_auth, active_auth});
 
                   //delegate cpu net and buyram
                   auto act_delegatebw = create_action_delegatebw(creator, newaccountC,net,cpu,abi_serializer_max_time);
@@ -220,13 +220,13 @@ struct txn_test_gen_plugin_impl {
               handler.account = newaccountC;
               handler.code.assign(wasm.begin(), wasm.end());
 
-              trx.actions.emplace_back( vector<chain::permission_level>{{newaccountC,"active"}}, handler);
+              trx.actions.emplace_back( vector<chain::permission_level>{{newaccountC,name("active")}}, handler);
 
               {
                   setabi handler;
                   handler.account = newaccountC;
 				  handler.abi = fc::raw::pack(eosio_token_abi);
-                  trx.actions.emplace_back( vector<chain::permission_level>{{newaccountC,"active"}}, handler);
+                  trx.actions.emplace_back( vector<chain::permission_level>{{newaccountC,name("active")}}, handler);
               }
 
               {
@@ -289,7 +289,7 @@ struct txn_test_gen_plugin_impl {
 	  abi_serializer eosio_system_serializer(eosio_abi, abi_serializer_max_time);
 
       auto payload_delegate = eosio_system_serializer.variant_to_binary( "delegatebw", variant_delegate, abi_serializer_max_time);
-      eosio::chain::action act_delegate{vector<chain::permission_level>{{from,"active"}},
+      eosio::chain::action act_delegate{vector<chain::permission_level>{{from,name("active")}},
               config::system_account_name, N(delegatebw), payload_delegate};
 
       return act_delegate;
@@ -306,7 +306,7 @@ struct txn_test_gen_plugin_impl {
 	  abi_serializer eosio_system_serializer(eosio_abi, abi_serializer_max_time);
 
 	  auto payload_buyram = eosio_system_serializer.variant_to_binary( "buyram", variant_buyram, abi_serializer_max_time);
-      eosio::chain::action act_buyram{vector<chain::permission_level>{{from,"active"}},
+      eosio::chain::action act_buyram{vector<chain::permission_level>{{from,name("active")}},
               config::system_account_name, N(buyram), payload_buyram};
 
       return act_buyram;
@@ -411,7 +411,7 @@ struct txn_test_gen_plugin_impl {
               {
                   signed_transaction trx;
                   trx.actions.push_back(act_a_to_b);
-                  trx.context_free_actions.emplace_back(action({}, config::null_account_name, "nonce", fc::raw::pack(nonce++)));
+                  trx.context_free_actions.emplace_back(action({}, config::null_account_name, name("nonce"), fc::raw::pack(nonce++)));
                   trx.set_reference_block(reference_block_id);
                   trx.expiration = cc.head_block_time() + fc::seconds(30);
                   trx.max_net_usage_words = 100;
@@ -422,7 +422,7 @@ struct txn_test_gen_plugin_impl {
               {
                   signed_transaction trx;
                   trx.actions.push_back(act_b_to_a);
-                  trx.context_free_actions.emplace_back(action({}, config::null_account_name, "nonce", fc::raw::pack(nonce++)));
+                  trx.context_free_actions.emplace_back(action({}, config::null_account_name, name("nonce"), fc::raw::pack(nonce++)));
                   trx.set_reference_block(reference_block_id);
                   trx.expiration = cc.head_block_time() + fc::seconds(30);
                   trx.max_net_usage_words = 100;

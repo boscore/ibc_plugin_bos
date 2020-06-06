@@ -136,27 +136,23 @@ void kafka::push_transaction_trace(const chain::transaction_trace_ptr& tx_trace)
 void kafka::push_action(const chain::action_trace& action_trace, uint64_t parent_seq, const TransactionTracePtr& tx) {
     auto a = std::make_shared<Action>();
 
-    a->global_seq = action_trace.receipt.global_sequence;
-    a->recv_seq = action_trace.receipt.recv_sequence;
+    a->global_seq = action_trace.receipt->global_sequence;
+    a->recv_seq = action_trace.receipt->recv_sequence;
     a->parent_seq = parent_seq;
-    a->account = action_trace.act.account;
-    a->name = action_trace.act.name;
+    a->account = action_trace.act.account.to_uint64_t();
+    a->name = action_trace.act.name.to_uint64_t();
     if (not action_trace.act.authorization.empty()) a->auth = fc::raw::pack(action_trace.act.authorization);
     a->data = action_trace.act.data;
-    a->receiver = action_trace.receipt.receiver;
-    if (not action_trace.receipt.auth_sequence.empty()) a->auth_seq = fc::raw::pack(action_trace.receipt.auth_sequence);
-    a->code_seq = action_trace.receipt.code_sequence;
-    a->abi_seq = action_trace.receipt.abi_sequence;
+    a->receiver = action_trace.receipt->receiver.to_uint64_t();
+    if (not action_trace.receipt->auth_sequence.empty()) a->auth_seq = fc::raw::pack(action_trace.receipt->auth_sequence);
+    a->code_seq = action_trace.receipt->code_sequence;
+    a->abi_seq = action_trace.receipt->abi_sequence;
     a->block_num = action_trace.block_num;
     a->block_time = action_trace.block_time;
     a->tx_id = checksum_bytes(action_trace.trx_id);
     if (not action_trace.console.empty()) a->console = action_trace.console;
 
     consume_action(a);
-
-    for (auto& inline_trace: action_trace.inline_traces) {
-        push_action(inline_trace, action_trace.receipt.global_sequence, tx);
-    }
 }
 
 void kafka::consume_block(BlockPtr block) {

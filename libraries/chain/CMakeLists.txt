@@ -95,6 +95,7 @@ add_library( eosio_chain
 #             global_property_object.cpp
 #
 #             contracts/chain_initializer.cpp
+              trace.cpp
               protocol_state_object.cpp
               genesis_intrinsics.cpp
               whitelisted_intrinsics.cpp

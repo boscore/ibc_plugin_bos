@@ -55,6 +55,7 @@ namespace eosio { namespace chain {
          pair< branch_type, branch_type >  fetch_branch_from( const block_id_type& first,
                                                               const block_id_type& second )const;
 
+         block_state_ptr search_on_branch( const block_id_type& h, uint32_t block_num )const;
 
          /**
           * If the block is invalid, it will be removed. If it is valid, then blocks older

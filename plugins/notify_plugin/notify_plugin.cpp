@@ -111,11 +111,11 @@ public:
 
 bool notify_plugin_impl::filter(const action_trace &act)
 {
-  if (filter_on.find({act.receipt.receiver, act.act.name}) != filter_on.end())
+  if (filter_on.find({act.receipt->receiver, act.act.name}) != filter_on.end())
   {
     return true;
   }
-  else if (filter_on.find({act.receipt.receiver, 0}) != filter_on.end())
+  else if (filter_on.find({act.receipt->receiver, {}}) != filter_on.end())
   {
     return true;
   }
@@ -126,7 +126,7 @@ fc::variant notify_plugin_impl::deserialize_action_data(action act)
 {
   auto &chain = chain_plug->chain();
   auto serializer = chain.get_abi_serializer(act.account, max_deserialization_time);
-  FC_ASSERT(serializer.valid() && serializer->get_action_type(act.name) != action_name(),
+  FC_ASSERT(serializer.valid() && serializer->get_action_type(act.name) != "",
             "Unable to get abi for account: ${acc}, action: ${a} Not sending notification.",
             ("acc", act.account)("a", act.name));
   return serializer->binary_to_variant(act.name.to_string(), act.data, max_deserialization_time);
@@ -161,17 +161,13 @@ action_seq_type notify_plugin_impl::on_action_trace(const action_trace &act, con
 {
   if (filter(act))
   {
-    const auto pair = std::make_pair(tx_id, sequenced_action(act.act, act_s, act.receipt.receiver));
+    const auto pair = std::make_pair(tx_id, sequenced_action(act.act, act_s, act.receipt->receiver));
     action_queue.insert(pair);
     irreversible_action_queue.insert(pair);
     // dlog("on_action_trace: ${a}", ("a", fc::json::to_pretty_string(act.act)));
   }
   act_s++;
 
-  for (const auto &iline : act.inline_traces)
-  {
-    act_s = on_action_trace(iline, tx_id, act_s);
-  }
   return act_s;
 }
 
@@ -307,8 +303,8 @@ void notify_plugin::plugin_initialize(const variables_map &options)
         EOS_ASSERT(v.size() == 2, fc::invalid_arg_exception,
                    "Invalid value ${s} for --notify-filter-on",
                    ("s", s));
-        notify_plugin_impl::filter_entry fe{v[0], v[1]};
-        EOS_ASSERT(fe.receiver.value, fc::invalid_arg_exception, "Invalid value ${s} for --notify-filter-on", ("s", s));
+        notify_plugin_impl::filter_entry fe{eosio::chain::name(v[0]), eosio::chain::name(v[1])};
+        EOS_ASSERT(fe.receiver.to_uint64_t(), fc::invalid_arg_exception, "Invalid value ${s} for --notify-filter-on", ("s", s));
         my->filter_on.insert(fe);
       }
     }
@@ -327,14 +323,14 @@ void notify_plugin::plugin_initialize(const variables_map &options)
           my->on_accepted_block(b_state);
         }));
 
-    my->irreversible_block_conn.emplace(chain.irreversible_block.connect(
+    my->irreversible_block_conn.emplace(chain.new_irreversible_block.connect(
         [&](const block_state_ptr &bs) {
           my->on_irreversible_block(bs);
         }));
 
     my->applied_tx_conn.emplace(chain.applied_transaction.connect(
-        [&](const transaction_trace_ptr &tx) {
-          my->on_applied_tx(tx);
+        [&](std::tuple<const chain::transaction_trace_ptr&, const chain::signed_transaction&> t) {
+          my->on_applied_tx(std::get<0>(t));
         }));
   }
   FC_LOG_AND_RETHROW()

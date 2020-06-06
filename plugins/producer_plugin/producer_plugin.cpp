@@ -599,10 +599,12 @@ T dejsonify(const string& s) {
    return fc::json::from_string(s).as<T>();
 }
 
-#define LOAD_VALUE_SET(options, name, container, type) \
-if( options.count(name) ) { \
-   const std::vector<std::string>& ops = options[name].as<std::vector<std::string>>(); \
-   std::copy(ops.begin(), ops.end(), std::inserter(container, container.end())); \
+#define LOAD_VALUE_SET(options, op_name, container) \
+if( options.count(op_name) ) { \
+   const std::vector<std::string>& ops = options[op_name].as<std::vector<std::string>>(); \
+   for( const auto& v : ops ) { \
+      container.emplace( eosio::chain::name( v ) ); \
+   } \
 }
 
 static producer_plugin_impl::signature_provider_type
@@ -641,7 +643,7 @@ void producer_plugin::plugin_initialize(const boost::program_options::variables_
    my->chain_plug = app().find_plugin<chain_plugin>();
    EOS_ASSERT( my->chain_plug, plugin_config_exception, "chain_plugin not found" );
    my->_options = &options;
-   LOAD_VALUE_SET(options, "producer-name", my->_producers, types::account_name)
+   LOAD_VALUE_SET(options, "producer-name", my->_producers)
 
    if( options.count("private-key") )
    {

@@ -15,14 +15,6 @@
 using namespace eosio::chain;
 using namespace eosio::testing;
 
-private_key_type get_private_key( name keyname, string role ) {
-   return private_key_type::regenerate<fc::ecc::private_key_shim>(fc::sha256::hash(string(keyname)+role));
-}
-
-public_key_type  get_public_key( name keyname, string role ){
-   return get_private_key( keyname, role ).get_public_key();
-}
-
 void push_blocks( tester& from, tester& to ) {
    while( to.control->fork_db_head_block_num() < from.control->fork_db_head_block_num() ) {
       auto fb = from.control->fetch_block_by_number( to.control->fork_db_head_block_num()+1 );
@@ -37,15 +29,11 @@ BOOST_AUTO_TEST_CASE( irrblock ) try {
    c.produce_blocks(10);
    auto r = c.create_accounts( {N(dan),N(sam),N(pam),N(scott)} );
    auto res = c.set_producers( {N(dan),N(sam),N(pam),N(scott)} );
-   vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
-                                {N(sam),get_public_key(N(sam), "active")},
-                                {N(scott),get_public_key(N(scott), "active")},
-                                {N(pam),get_public_key(N(pam), "active")}
-                              };
+
    wlog("set producer schedule to [dan,sam,pam]");
    c.produce_blocks(50);
 
-} FC_LOG_AND_RETHROW() 
+} FC_LOG_AND_RETHROW()
 
 struct fork_tracker {
    vector<signed_block_ptr> blocks;
@@ -145,15 +133,14 @@ BOOST_AUTO_TEST_CASE( fork_with_bad_block ) try {
 
 BOOST_AUTO_TEST_CASE( forking ) try {
    tester c;
-   c.produce_block();
-   c.produce_block();
+   while (c.control->head_block_num() < 3) {
+      c.produce_block();
+   }
    auto r = c.create_accounts( {N(dan),N(sam),N(pam)} );
    wdump((fc::json::to_pretty_string(r)));
    c.produce_block();
    auto res = c.set_producers( {N(dan),N(sam),N(pam)} );
-   vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
-                                {N(sam),get_public_key(N(sam), "active")},
-                                {N(pam),get_public_key(N(pam), "active")}};
+
    wdump((fc::json::to_pretty_string(res)));
    wlog("set producer schedule to [dan,sam,pam]");
    c.produce_blocks(30);
@@ -170,15 +157,19 @@ BOOST_AUTO_TEST_CASE( forking ) try {
               ("maximum_supply", core_from_string("10000000.0000"))
       );
 
-   wdump((fc::json::to_pretty_string(cr)));
-
    cr = c.push_action( N(eosio.token), N(issue), config::system_account_name, mutable_variant_object()
+              ("to",       "eosio" )
+              ("quantity", core_from_string("100.0000"))
+              ("memo", "")
+      );
+
+   cr = c.push_action( N(eosio.token), N(transfer), config::system_account_name, mutable_variant_object()
+              ("from",     "eosio")
               ("to",       "dan" )
               ("quantity", core_from_string("100.0000"))
               ("memo", "")
       );
 
-   wdump((fc::json::to_pretty_string(cr)));
 
 
    tester c2;

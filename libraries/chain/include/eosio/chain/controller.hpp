@@ -233,9 +233,11 @@ namespace eosio { namespace chain {
          block_id_type last_irreversible_block_id() const;
 
          signed_block_ptr fetch_block_by_number( uint32_t block_num )const;
+         signed_block_ptr fetch_block_by_number_state_history( uint32_t block_num )const;
          signed_block_ptr fetch_block_by_id( block_id_type id )const;
 
          block_state_ptr fetch_block_state_by_number( uint32_t block_num )const;
+         block_state_ptr fetch_block_state_by_number_state_history( uint32_t block_num )const;
          block_state_ptr fetch_block_state_by_id( block_id_type id )const;
 
          block_id_type get_block_id_for_num( uint32_t block_num )const;
@@ -303,6 +305,7 @@ namespace eosio { namespace chain {
 #if defined(EOSIO_EOS_VM_RUNTIME_ENABLED) || defined(EOSIO_EOS_VM_JIT_RUNTIME_ENABLED)
          vm::wasm_allocator&  get_wasm_allocator();
 #endif
+         static fc::optional<uint64_t> convert_exception_to_error_code( const fc::exception& e );
 
          signal<void(const signed_block_ptr&)>         pre_accepted_block;
          signal<void(const block_state_ptr&)>          accepted_block_header;
@@ -310,7 +313,7 @@ namespace eosio { namespace chain {
          signal<void(const block_state_ptr&)>          irreversible_block;
          signal<void(const block_state_ptr&)>          new_irreversible_block;
          signal<void(const transaction_metadata_ptr&)> accepted_transaction;
-         signal<void(const transaction_trace_ptr&)>    applied_transaction;
+         signal<void(std::tuple<const transaction_trace_ptr&, const signed_transaction&>)> applied_transaction;
          signal<void(const header_confirmation&)>      accepted_confirmation;
          signal<void(const int&)>                      bad_alloc;
 

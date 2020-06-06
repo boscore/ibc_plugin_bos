@@ -60,9 +60,9 @@ struct filter_entry {
 
    //            receiver          action       actor
    bool match( const name& rr, const name& an, const name& ar ) const {
-      return (receiver.value == 0 || receiver == rr) &&
-             (action.value == 0 || action == an) &&
-             (actor.value == 0 || actor == ar);
+      return (receiver.to_uint64_t() == 0 || receiver == rr) &&
+             (action.to_uint64_t() == 0 || action == an) &&
+             (actor.to_uint64_t() == 0 || actor == ar);
    }
 };
 
@@ -229,7 +229,7 @@ bool mongo_db_plugin_impl::filter_include( const account_name& receiver, const a
       include = true;
    } else {
       auto itr = std::find_if( filter_on.cbegin(), filter_on.cend(), [&receiver, &act_name]( const auto& filter ) {
-         return filter.match( receiver, act_name, 0 );
+         return filter.match( receiver, act_name, {} );
       } );
       if( itr != filter_on.cend() ) {
          include = true;
@@ -250,7 +250,7 @@ bool mongo_db_plugin_impl::filter_include( const account_name& receiver, const a
    if( filter_out.empty() ) { return true; }
 
    auto itr = std::find_if( filter_out.cbegin(), filter_out.cend(), [&receiver, &act_name]( const auto& filter ) {
-      return filter.match( receiver, act_name, 0 );
+      return filter.match( receiver, act_name, {} );
    } );
    if( itr != filter_out.cend() ) { return false; }
 
@@ -816,22 +816,20 @@ mongo_db_plugin_impl::add_action_trace( mongocxx::bulk_write& bulk_action_traces
    using namespace bsoncxx::types;
    using bsoncxx::builder::basic::kvp;
 
-   if( executed && atrace.receipt.receiver == chain::config::system_account_name ) {
+   if( executed && atrace.receiver == chain::config::system_account_name ) {
       update_account( atrace.act );
    }
 
    bool added = false;
    const bool in_filter = (store_action_traces || store_transaction_traces) && start_block_reached &&
-                    filter_include( atrace.receipt.receiver, atrace.act.name, atrace.act.authorization );
+                    filter_include( atrace.receiver, atrace.act.name, atrace.act.authorization );
    write_ttrace |= in_filter;
    if( start_block_reached && store_action_traces && in_filter ) {
       auto action_traces_doc = bsoncxx::builder::basic::document{};
-      const chain::base_action_trace& base = atrace; // without inline action traces
-
       // improve data distributivity when using mongodb sharding
       action_traces_doc.append( kvp( "_id", make_custom_oid() ) );
 
-      auto v = to_variant_with_abi( base );
+      auto v = to_variant_with_abi( atrace );
       string json = fc::json::to_string( v );
       try {
          const auto& value = bsoncxx::from_json( json );
@@ -855,10 +853,6 @@ mongo_db_plugin_impl::add_action_trace( mongocxx::bulk_write& bulk_action_traces
       mongocxx::model::insert_one insert_op{action_traces_doc.view()};
       bulk_action_traces.append( insert_op );
       added = true;
-   }
-
-   for( const auto& iline_atrace : atrace.inline_traces ) {
-      added |= add_action_trace( bulk_action_traces, iline_atrace, t, executed, now, write_ttrace );
    }
 
    return added;
@@ -1063,7 +1057,6 @@ void mongo_db_plugin_impl::_process_irreversible_block(const chain::block_state_
       }
 
       auto update_doc = make_document( kvp( "$set", make_document( kvp( "irreversible", b_bool{true} ),
-                                                                   kvp( "validated", b_bool{bs->validated} ),
                                                                    kvp( "updatedAt", b_date{now} ) ) ) );
 
       _blocks.update_one( make_document( kvp( "_id", ir_block->view()["_id"].get_oid() ) ), update_doc.view() );
@@ -1078,7 +1071,6 @@ void mongo_db_plugin_impl::_process_irreversible_block(const chain::block_state_
       }
 
       auto update_doc = make_document( kvp( "$set", make_document( kvp( "irreversible", b_bool{true} ),
-                                                                   kvp( "validated", b_bool{bs->validated} ),
                                                                    kvp( "updatedAt", b_date{now} ) ) ) );
 
       _block_states.update_one( make_document( kvp( "_id", ir_block->view()["_id"].get_oid() ) ), update_doc.view() );
@@ -1573,7 +1565,7 @@ void mongo_db_plugin::plugin_initialize(const variables_map& options)
                std::vector<std::string> v;
                boost::split( v, s, boost::is_any_of( ":" ));
                EOS_ASSERT( v.size() == 3, fc::invalid_arg_exception, "Invalid value ${s} for --mongodb-filter-on", ("s", s));
-               filter_entry fe{v[0], v[1], v[2]};
+               filter_entry fe{eosio::chain::name(v[0]), eosio::chain::name(v[1]), eosio::chain::name(v[2])};
                my->filter_on.insert( fe );
             }
          } else {
@@ -1585,7 +1577,7 @@ void mongo_db_plugin::plugin_initialize(const variables_map& options)
                std::vector<std::string> v;
                boost::split( v, s, boost::is_any_of( ":" ));
                EOS_ASSERT( v.size() == 3, fc::invalid_arg_exception, "Invalid value ${s} for --mongodb-filter-out", ("s", s));
-               filter_entry fe{v[0], v[1], v[2]};
+               filter_entry fe{eosio::chain::name(v[0]), eosio::chain::name(v[1]), eosio::chain::name(v[2])};
                my->filter_out.insert( fe );
             }
          }
@@ -1616,7 +1608,7 @@ void mongo_db_plugin::plugin_initialize(const variables_map& options)
             my->accepted_block( bs );
          } ));
          my->irreversible_block_connection.emplace(
-               chain.irreversible_block.connect( [&]( const chain::block_state_ptr& bs ) {
+               chain.new_irreversible_block.connect( [&]( const chain::block_state_ptr& bs ) {
                   my->applied_irreversible_block( bs );
                } ));
          my->accepted_transaction_connection.emplace(
@@ -1624,8 +1616,8 @@ void mongo_db_plugin::plugin_initialize(const variables_map& options)
                   my->accepted_transaction( t );
                } ));
          my->applied_transaction_connection.emplace(
-               chain.applied_transaction.connect( [&]( const chain::transaction_trace_ptr& t ) {
-                  my->applied_transaction( t );
+               chain.applied_transaction.connect( [&]( std::tuple<const chain::transaction_trace_ptr&, const chain::signed_transaction&> t ) {
+                  my->applied_transaction( std::get<0>(t) );
                } ));
 
          if( my->wipe_database_on_startup ) {

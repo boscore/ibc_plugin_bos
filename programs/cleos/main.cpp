@@ -225,7 +225,7 @@ vector<chain::permission_level> get_account_permissions(const vector<string>& pe
       vector<string> pieces;
       split(pieces, p, boost::algorithm::is_any_of("@"));
       if( pieces.size() == 1 ) pieces.push_back( "active" );
-      return chain::permission_level{ .actor = pieces[0], .permission = pieces[1] };
+      return chain::permission_level{ .actor = name(pieces[0]), .permission = name(pieces[1]) };
    });
    vector<chain::permission_level> accountPermissions;
    boost::range::copy(fixedPermissions, back_inserter(accountPermissions));
@@ -273,7 +273,7 @@ string generate_nonce_string() {
 }
 
 chain::action generate_nonce_action() {
-   return chain::action( {}, config::null_account_name, "nonce", fc::raw::pack(fc::time_point::now().time_since_epoch().count()));
+   return chain::action( {}, config::null_account_name, name("nonce"), fc::raw::pack(fc::time_point::now().time_since_epoch().count()));
 }
 
 void prompt_for_wallet_password(string& pw, const string& name) {
@@ -577,8 +577,8 @@ chain::action create_open(const string& contract, const name& owner, symbol sym,
       ("symbol", sym)
       ("ram_payer", ram_payer);
     return action {
-      get_account_permissions(tx_permission, {ram_payer,config::active_name}),
-      contract, "open", variant_to_bin( contract, N(open), open_ )
+      get_account_permissions(tx_permission, {ram_payer, config::active_name}),
+      name(contract), N(open), variant_to_bin( name(contract), N(open), open_ )
    };
 }
 
@@ -592,7 +592,7 @@ chain::action create_transfer(const string& contract, const name& sender, const 
 
    return action {
       get_account_permissions(tx_permission, {sender,config::active_name}),
-      contract, "transfer", variant_to_bin( contract, N(transfer), transfer )
+      name(contract), N(transfer), variant_to_bin( name(contract), N(transfer), transfer )
    };
 }
 
@@ -693,10 +693,10 @@ inline asset to_asset( const string& s ) {
 }
 
 struct set_account_permission_subcommand {
-   name account;
-   name permission;
+   string account;
+   string permission;
    string authority_json_or_file;
-   name parent;
+   string parent;
    bool add_code;
    bool remove_code;
 
@@ -717,34 +717,34 @@ struct set_account_permission_subcommand {
 
          authority auth;
 
-         bool need_parent = parent.empty() && (permission != name("owner"));
+         bool need_parent = parent.empty() && (name(permission) != name("owner"));
          bool need_auth = add_code || remove_code;
 
          if ( !need_auth && boost::iequals(authority_json_or_file, "null") ) {
-            send_actions( { create_deleteauth(account, permission) } );
+            send_actions( { create_deleteauth(name(account), name(permission)) } );
             return;
          }
 
          if ( need_parent || need_auth ) {
-            fc::variant json = call(get_account_func, fc::mutable_variant_object("account_name", account.to_string()));
+            fc::variant json = call(get_account_func, fc::mutable_variant_object("account_name", account));
             auto res = json.as<eosio::chain_apis::read_only::get_account_results>();
             auto itr = std::find_if(res.permissions.begin(), res.permissions.end(), [&](const auto& perm) {
-               return perm.perm_name == permission;
+               return perm.perm_name == name(permission);
             });
 
             if ( need_parent ) {
                // see if we can auto-determine the proper parent
                if ( itr != res.permissions.end() ) {
-                  parent = (*itr).parent;
+                  parent = (*itr).parent.to_string();
                } else {
                   // if this is a new permission and there is no parent we default to "active"
-                  parent = name(config::active_name);
+                  parent = config::active_name.to_string();
                }
             }
 
             if ( need_auth ) {
-               auto actor = (authority_json_or_file.empty()) ? account : name(authority_json_or_file);
-               auto code_name = name(config::eosio_code_name);
+               auto actor = (authority_json_or_file.empty()) ? name(account) : name(authority_json_or_file);
+               auto code_name = config::eosio_code_name;
 
                if ( itr != res.permissions.end() ) {
                   // fetch existing authority
@@ -787,7 +787,7 @@ struct set_account_permission_subcommand {
                         // remove code permission, if authority becomes empty by the removal of code permission, delete permission
                         auth.accounts.erase( itr2 );
                         if ( auth.keys.empty() && auth.accounts.empty() && auth.waits.empty() ) {
-                           send_actions( { create_deleteauth(account, permission) } );
+                           send_actions( { create_deleteauth(name(account), name(permission)) } );
                            return;
                         }
                      } else {
@@ -818,7 +818,7 @@ struct set_account_permission_subcommand {
             auth = parse_json_authority_or_key(authority_json_or_file);
          }
 
-         send_actions( { create_updateauth(account, permission, parent, auth) } );
+         send_actions( { create_updateauth(name(account), name(permission), name(parent), auth) } );
       });
    }
 };
@@ -994,8 +994,8 @@ struct register_producer_subcommand {
             producer_key = public_key_type(producer_key_str);
          } EOS_RETHROW_EXCEPTIONS(public_key_type_exception, "Invalid producer public key: ${public_key}", ("public_key", producer_key_str))
 
-         auto regprod_var = regproducer_variant(producer_str, producer_key, url, loc );
-         auto accountPermissions = get_account_permissions(tx_permission, {producer_str,config::active_name});
+         auto regprod_var = regproducer_variant(name(producer_str), producer_key, url, loc );
+         auto accountPermissions = get_account_permissions(tx_permission, {name(producer_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(regproducer), regprod_var)});
       });
    }
@@ -1052,16 +1052,16 @@ struct create_account_subcommand {
             try {
                active_key = public_key_type(active_key_str);
             } EOS_RETHROW_EXCEPTIONS(public_key_type_exception, "Invalid active public key: ${public_key}", ("public_key", active_key_str));
-            auto create = create_newaccount(creator, account_name, owner_key, active_key);
+            auto create = create_newaccount(name(creator), name(account_name), owner_key, active_key);
             if (!simple) {
                EOSC_ASSERT( buy_ram_eos.size() || buy_ram_bytes_in_kbytes || buy_ram_bytes, "ERROR: One of --buy-ram, --buy-ram-kbytes or --buy-ram-bytes should have non-zero value" );
                EOSC_ASSERT( !buy_ram_bytes_in_kbytes || !buy_ram_bytes, "ERROR: --buy-ram-kbytes and --buy-ram-bytes cannot be set at the same time" );
-               action buyram = !buy_ram_eos.empty() ? create_buyram(creator, account_name, to_asset(buy_ram_eos))
-                  : create_buyrambytes(creator, account_name, (buy_ram_bytes_in_kbytes) ? (buy_ram_bytes_in_kbytes * 1024) : buy_ram_bytes);
+               action buyram = !buy_ram_eos.empty() ? create_buyram(name(creator), name(account_name), to_asset(buy_ram_eos))
+                  : create_buyrambytes(name(creator), name(account_name), (buy_ram_bytes_in_kbytes) ? (buy_ram_bytes_in_kbytes * 1024) : buy_ram_bytes);
                auto net = to_asset(stake_net);
                auto cpu = to_asset(stake_cpu);
                if ( net.get_amount() != 0 || cpu.get_amount() != 0 ) {
-                  action delegate = create_delegate( creator, account_name, net, cpu, transfer);
+                  action delegate = create_delegate( name(creator), name(account_name), net, cpu, transfer);
                   send_actions( { create, buyram, delegate } );
                } else {
                   send_actions( { create, buyram } );
@@ -1085,7 +1085,7 @@ struct unregister_producer_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("producer", producer_str);
 
-         auto accountPermissions = get_account_permissions(tx_permission, {producer_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(producer_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(unregprod), act_payload)});
       });
    }
@@ -1106,7 +1106,7 @@ struct vote_producer_proxy_subcommand {
                   ("voter", voter_str)
                   ("proxy", proxy_str)
                   ("producers", std::vector<account_name>{});
-         auto accountPermissions = get_account_permissions(tx_permission, {voter_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(voter_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(voteproducer), act_payload)});
       });
    }
@@ -1114,7 +1114,7 @@ struct vote_producer_proxy_subcommand {
 
 struct vote_producers_subcommand {
    string voter_str;
-   vector<eosio::name> producer_names;
+   vector<std::string> producer_names;
 
    vote_producers_subcommand(CLI::App* actionRoot) {
       auto vote_producers = actionRoot->add_subcommand("prods", localized("Vote for one or more producers"));
@@ -1130,15 +1130,15 @@ struct vote_producers_subcommand {
                   ("voter", voter_str)
                   ("proxy", "")
                   ("producers", producer_names);
-         auto accountPermissions = get_account_permissions(tx_permission, {voter_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(voter_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(voteproducer), act_payload)});
       });
    }
 };
 
 struct approve_producer_subcommand {
-   eosio::name voter;
-   eosio::name producer_name;
+   string voter;
+   string producer_name;
 
    approve_producer_subcommand(CLI::App* actionRoot) {
       auto approve_producer = actionRoot->add_subcommand("approve", localized("Add one producer to list of voted producers"));
@@ -1152,8 +1152,8 @@ struct approve_producer_subcommand {
                                ("scope", name(config::system_account_name).to_string())
                                ("table", "voters")
                                ("table_key", "owner")
-                               ("lower_bound", voter.value)
-                               ("upper_bound", voter.value + 1)
+                               ("lower_bound", name(voter).to_uint64_t())
+                               ("upper_bound", name(voter).to_uint64_t() + 1)
                                // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                // Change to voter.value when cleos no longer needs to support nodeos versions older than 1.5.0
                                ("limit", 1)
@@ -1172,7 +1172,7 @@ struct approve_producer_subcommand {
             for ( auto& x : prod_vars ) {
                prods.push_back( name(x.as_string()) );
             }
-            prods.push_back( producer_name );
+            prods.push_back( name(producer_name) );
             std::sort( prods.begin(), prods.end() );
             auto it = std::unique( prods.begin(), prods.end() );
             if (it != prods.end() ) {
@@ -1183,15 +1183,15 @@ struct approve_producer_subcommand {
                ("voter", voter)
                ("proxy", "")
                ("producers", prods);
-            auto accountPermissions = get_account_permissions(tx_permission, {voter,config::active_name});
+            auto accountPermissions = get_account_permissions(tx_permission, {name(voter), config::active_name});
             send_actions({create_action(accountPermissions, config::system_account_name, N(voteproducer), act_payload)});
       });
    }
 };
 
 struct unapprove_producer_subcommand {
-   eosio::name voter;
-   eosio::name producer_name;
+   string voter;
+   string producer_name;
 
    unapprove_producer_subcommand(CLI::App* actionRoot) {
       auto approve_producer = actionRoot->add_subcommand("unapprove", localized("Remove one producer from list of voted producers"));
@@ -1205,8 +1205,8 @@ struct unapprove_producer_subcommand {
                                ("scope", name(config::system_account_name).to_string())
                                ("table", "voters")
                                ("table_key", "owner")
-                               ("lower_bound", voter.value)
-                               ("upper_bound", voter.value + 1)
+                               ("lower_bound", name(voter).to_uint64_t())
+                               ("upper_bound", name(voter).to_uint64_t() + 1)
                                // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                // Change to voter.value when cleos no longer needs to support nodeos versions older than 1.5.0
                                ("limit", 1)
@@ -1225,7 +1225,7 @@ struct unapprove_producer_subcommand {
             for ( auto& x : prod_vars ) {
                prods.push_back( name(x.as_string()) );
             }
-            auto it = std::remove( prods.begin(), prods.end(), producer_name );
+            auto it = std::remove( prods.begin(), prods.end(), name(producer_name) );
             if (it == prods.end() ) {
                std::cerr << "Cannot remove: producer \"" << producer_name << "\" is not on the list." << std::endl;
                return;
@@ -1235,7 +1235,7 @@ struct unapprove_producer_subcommand {
                ("voter", voter)
                ("proxy", "")
                ("producers", prods);
-            auto accountPermissions = get_account_permissions(tx_permission, {voter,config::active_name});
+            auto accountPermissions = get_account_permissions(tx_permission, {name(voter), config::active_name});
             send_actions({create_action(accountPermissions, config::system_account_name, N(voteproducer), act_payload)});
       });
    }
@@ -1397,13 +1397,13 @@ struct delegate_bandwidth_subcommand {
                   ("stake_net_quantity", to_asset(stake_net_amount))
                   ("stake_cpu_quantity", to_asset(stake_cpu_amount))
                   ("transfer", transfer);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          std::vector<chain::action> acts{create_action(accountPermissions, config::system_account_name, N(delegatebw), act_payload)};
          EOSC_ASSERT( !(buy_ram_amount.size()) || !buy_ram_bytes, "ERROR: --buyram and --buy-ram-bytes cannot be set at the same time" );
          if (buy_ram_amount.size()) {
-            acts.push_back( create_buyram(from_str, receiver_str, to_asset(buy_ram_amount)) );
+            acts.push_back( create_buyram(name(from_str), name(receiver_str), to_asset(buy_ram_amount)) );
          } else if (buy_ram_bytes) {
-            acts.push_back( create_buyrambytes(from_str, receiver_str, buy_ram_bytes) );
+            acts.push_back( create_buyrambytes(name(from_str), name(receiver_str), buy_ram_bytes) );
          }
          send_actions(std::move(acts));
       });
@@ -1431,7 +1431,7 @@ struct undelegate_bandwidth_subcommand {
                   ("receiver", receiver_str)
                   ("unstake_net_quantity", to_asset(unstake_net_amount))
                   ("unstake_cpu_quantity", to_asset(unstake_cpu_amount));
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(undelegatebw), act_payload)});
       });
    }
@@ -1452,7 +1452,7 @@ struct bidname_subcommand {
                   ("bidder", bidder_str)
                   ("newname", newname_str)
                   ("bid", to_asset(bid_amount));
-         auto accountPermissions = get_account_permissions(tx_permission, {bidder_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(bidder_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(bidname), act_payload)});
       });
    }
@@ -1460,7 +1460,7 @@ struct bidname_subcommand {
 
 struct bidname_info_subcommand {
    bool print_json = false;
-   name newname;
+   string newname;
    bidname_info_subcommand(CLI::App* actionRoot) {
       auto list_producers = actionRoot->add_subcommand("bidnameinfo", localized("Get bidname info"));
       list_producers->add_flag("--json,-j", print_json, localized("Output in JSON format"));
@@ -1468,19 +1468,18 @@ struct bidname_info_subcommand {
       list_producers->set_callback([this] {
          auto rawResult = call(get_table_func, fc::mutable_variant_object("json", true)
                                ("code", "eosio")("scope", "eosio")("table", "namebids")
-                               ("lower_bound", newname.value)
-                               ("upper_bound", newname.value + 1)
+                               ("lower_bound", name(newname).to_uint64_t())
+                               ("upper_bound", name(newname).to_uint64_t() + 1)
                                // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                // Change to newname.value when cleos no longer needs to support nodeos versions older than 1.5.0
                                ("limit", 1));
-
          if ( print_json ) {
             std::cout << fc::json::to_pretty_string(rawResult) << std::endl;
             return;
          }
          auto result = rawResult.as<eosio::chain_apis::read_only::get_table_rows_result>();
          // Condition in if statement below can simply be res.rows.empty() when cleos no longer needs to support nodeos versions older than 1.5.0
-         if( result.rows.empty() || result.rows[0].get_object()["newname"].as_string() != newname.to_string() ) {
+         if( result.rows.empty() || result.rows[0].get_object()["newname"].as_string() != name(newname).to_string() ) {
             std::cout << "No bidname record found" << std::endl;
             return;
          }
@@ -1501,7 +1500,7 @@ struct bidname_info_subcommand {
 };
 
 struct list_bw_subcommand {
-   eosio::name account;
+   string account;
    bool print_json = false;
 
    list_bw_subcommand(CLI::App* actionRoot) {
@@ -1513,7 +1512,7 @@ struct list_bw_subcommand {
             //get entire table in scope of user account
             auto result = call(get_table_func, fc::mutable_variant_object("json", true)
                                ("code", name(config::system_account_name).to_string())
-                               ("scope", account.to_string())
+                               ("scope", name(account).to_string())
                                ("table", "delband")
             );
             if (!print_json) {
@@ -1555,9 +1554,9 @@ struct buyram_subcommand {
       buyram->set_callback([this] {
          EOSC_ASSERT( !kbytes || !bytes, "ERROR: --kbytes and --bytes cannot be set at the same time" );
          if (kbytes || bytes) {
-            send_actions( { create_buyrambytes(from_str, receiver_str, fc::to_uint64(amount) * ((kbytes) ? 1024ull : 1ull)) } );
+            send_actions( { create_buyrambytes(name(from_str), name(receiver_str), fc::to_uint64(amount) * ((kbytes) ? 1024ull : 1ull)) } );
          } else {
-            send_actions( { create_buyram(from_str, receiver_str, to_asset(amount)) } );
+            send_actions( { create_buyram(name(from_str), name(receiver_str), to_asset(amount)) } );
          }
       });
    }
@@ -1578,7 +1577,7 @@ struct sellram_subcommand {
             fc::variant act_payload = fc::mutable_variant_object()
                ("account", receiver_str)
                ("bytes", amount);
-            auto accountPermissions = get_account_permissions(tx_permission, {receiver_str,config::active_name});
+            auto accountPermissions = get_account_permissions(tx_permission, {name(receiver_str), config::active_name});
             send_actions({create_action(accountPermissions, config::system_account_name, N(sellram), act_payload)});
          });
    }
@@ -1595,7 +1594,7 @@ struct claimrewards_subcommand {
       claim_rewards->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("owner", owner);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(claimrewards), act_payload)});
       });
    }
@@ -1613,7 +1612,7 @@ struct regproxy_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("proxy", proxy)
                   ("isproxy", true);
-         auto accountPermissions = get_account_permissions(tx_permission, {proxy,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(proxy), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(regproxy), act_payload)});
       });
    }
@@ -1631,7 +1630,7 @@ struct unregproxy_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("proxy", proxy)
                   ("isproxy", false);
-         auto accountPermissions = get_account_permissions(tx_permission, {proxy,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(proxy), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(regproxy), act_payload)});
       });
    }
@@ -1650,7 +1649,7 @@ struct canceldelay_subcommand {
       add_standard_transaction_options(cancel_delay, "canceling_account@canceling_permission");
 
       cancel_delay->set_callback([this] {
-         auto canceling_auth = permission_level{canceling_account, canceling_permission};
+         auto canceling_auth = permission_level{name(canceling_account), name(canceling_permission)};
          fc::variant act_payload = fc::mutable_variant_object()
                   ("canceling_auth", canceling_auth)
                   ("trx_id", trx_id);
@@ -1674,7 +1673,7 @@ struct deposit_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("owner",  owner_str)
             ("amount", amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1694,7 +1693,7 @@ struct withdraw_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("owner",  owner_str)
             ("amount", amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1714,7 +1713,7 @@ struct buyrex_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("from",   from_str)
             ("amount", amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1738,7 +1737,7 @@ struct lendrex_subcommand {
          fc::variant act_payload2 = fc::mutable_variant_object()
             ("from",   from_str)
             ("amount", amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name1, act_payload1),
                        create_action(accountPermissions, config::system_account_name, act_name2, act_payload2)});
       });
@@ -1756,8 +1755,8 @@ struct unstaketorex_subcommand {
       auto unstaketorex = actionRoot->add_subcommand("unstaketorex", localized("Buy REX using staked tokens"));
       unstaketorex->add_option("owner",    owner_str,    localized("Account buying REX tokens"))->required();
       unstaketorex->add_option("receiver", receiver_str, localized("Account that tokens have been staked to"))->required();
-      unstaketorex->add_option("from_net", from_net_str, localized("Amount to be unstaked from CPU resources and used in REX purchase"))->required();
-      unstaketorex->add_option("from_cpu", from_cpu_str, localized("Amount to be unstaked from Net resources and used in REX purchase"))->required();
+      unstaketorex->add_option("from_net", from_net_str, localized("Amount to be unstaked from Net resources and used in REX purchase"))->required();
+      unstaketorex->add_option("from_cpu", from_cpu_str, localized("Amount to be unstaked from CPU resources and used in REX purchase"))->required();
       add_standard_transaction_options(unstaketorex, "owner@active");
       unstaketorex->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()
@@ -1765,7 +1764,7 @@ struct unstaketorex_subcommand {
             ("receiver", receiver_str)
             ("from_net", from_net_str)
             ("from_cpu", from_cpu_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1785,7 +1784,7 @@ struct sellrex_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("from", from_str)
             ("rex",  rex_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1801,7 +1800,7 @@ struct cancelrexorder_subcommand {
       add_standard_transaction_options(cancelrexorder, "owner@active");
       cancelrexorder->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()("owner", owner_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1827,7 +1826,7 @@ struct rentcpu_subcommand {
             ("receiver",     receiver_str)
             ("loan_payment", loan_payment_str)
             ("loan_fund",    loan_fund_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1853,7 +1852,7 @@ struct rentnet_subcommand {
             ("receiver",     receiver_str)
             ("loan_payment", loan_payment_str)
             ("loan_fund",    loan_fund_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1876,7 +1875,7 @@ struct fundcpuloan_subcommand {
             ("from",     from_str)
             ("loan_num", loan_num_str)
             ("payment",  payment_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1899,7 +1898,7 @@ struct fundnetloan_subcommand {
             ("from",     from_str)
             ("loan_num", loan_num_str)
             ("payment",  payment_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1922,7 +1921,7 @@ struct defcpuloan_subcommand {
             ("from",     from_str)
             ("loan_num", loan_num_str)
             ("amount",   amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1945,7 +1944,7 @@ struct defnetloan_subcommand {
             ("from",     from_str)
             ("loan_num", loan_num_str)
             ("amount",   amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1965,7 +1964,7 @@ struct mvtosavings_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("owner", owner_str)
             ("rex",   rex_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1985,7 +1984,7 @@ struct mvfrsavings_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("owner", owner_str)
             ("rex",   rex_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -2001,7 +2000,7 @@ struct updaterex_subcommand {
       add_standard_transaction_options(updaterex, "owner@active");
       updaterex->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()("owner", owner_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -2017,7 +2016,7 @@ struct consolidate_subcommand {
       add_standard_transaction_options(consolidate, "owner@active");
       consolidate->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()("owner", owner_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -2037,7 +2036,7 @@ struct rexexec_subcommand {
             fc::variant act_payload = fc::mutable_variant_object()
                ("user", user_str)
                ("max",  max_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {user_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(user_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -2053,7 +2052,7 @@ struct closerex_subcommand {
       add_standard_transaction_options(closerex, "owner@active");
       closerex->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()("owner", owner_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -2108,7 +2107,7 @@ void get_account( const string& accountName, const string& coresym, bool json_fo
             sep = ", ";
          }
          for ( auto& acc : p.required_auth.accounts ) {
-            std::cout << sep << acc.weight << ' ' << string(acc.permission.actor) << '@' << string(acc.permission.permission);
+            std::cout << sep << acc.weight << ' ' << acc.permission.actor.to_string() << '@' << acc.permission.permission.to_string();
             sep = ", ";
          }
          std::cout << std::endl;
@@ -2304,7 +2303,7 @@ void get_account( const string& accountName, const string& coresym, bool json_fo
             auto& prods = obj["producers"].get_array();
             std::cout << "producers:";
             if ( !prods.empty() ) {
-               for ( int i = 0; i < prods.size(); ++i ) {
+               for ( size_t i = 0; i < prods.size(); ++i ) {
                   if ( i%3 == 0 ) {
                      std::cout << std::endl << indent;
                   }
@@ -2467,11 +2466,11 @@ int main( int argc, char** argv ) {
    pack_action_data->add_option("name", unpacked_action_data_name_string, localized("The name of the function that's called by this action"))->required();
    pack_action_data->add_option("unpacked_action_data", unpacked_action_data_string, localized("The action data expressed as json"))->required();
    pack_action_data->set_callback([&] {
-      fc::variant unpacked_action_data_json;
+      fc::variant unpacked_action_data_json = json_from_file_or_string(unpacked_action_data_string);
+      bytes packed_action_data_string;
       try {
-         unpacked_action_data_json = json_from_file_or_string(unpacked_action_data_string);
+         packed_action_data_string = variant_to_bin(name(unpacked_action_data_account_string), name(unpacked_action_data_name_string), unpacked_action_data_json);
       } EOS_RETHROW_EXCEPTIONS(transaction_type_exception, "Fail to parse unpacked action data JSON")
-      bytes packed_action_data_string = variant_to_bin(unpacked_action_data_account_string, unpacked_action_data_name_string, unpacked_action_data_json);
       std::cout << fc::to_hex(packed_action_data_string.data(), packed_action_data_string.size()) << std::endl;
    });
 
@@ -2487,7 +2486,7 @@ int main( int argc, char** argv ) {
       EOS_ASSERT( packed_action_data_string.size() >= 2, transaction_type_exception, "No packed_action_data found" );
       vector<char> packed_action_data_blob(packed_action_data_string.size()/2);
       fc::from_hex(packed_action_data_string, packed_action_data_blob.data(), packed_action_data_blob.size());
-      fc::variant unpacked_action_data_json = bin_to_variant(packed_action_data_account_string, packed_action_data_name_string, packed_action_data_blob);
+      fc::variant unpacked_action_data_json = bin_to_variant(name(packed_action_data_account_string), name(packed_action_data_name_string), packed_action_data_blob);
       std::cout << fc::json::to_pretty_string(unpacked_action_data_json) << std::endl;
    });
 
@@ -2621,7 +2620,6 @@ int main( int argc, char** argv ) {
    getTable->add_option( "account", code, localized("The account who owns the table") )->required();
    getTable->add_option( "scope", scope, localized("The scope within the contract in which the table is found") )->required();
    getTable->add_option( "table", table, localized("The name of the table as specified by the contract abi") )->required();
-   getTable->add_option( "-b,--binary", binary, localized("Return the value as BINARY rather than using abi to interpret as JSON") );
    getTable->add_option( "-l,--limit", limit, localized("The maximum number of rows to return") );
    getTable->add_option( "-k,--key", table_key, localized("Deprecated") );
    getTable->add_option( "-L,--lower", lower, localized("JSON representation of lower bound value of key, defaults to first") );
@@ -2635,6 +2633,7 @@ int main( int argc, char** argv ) {
    getTable->add_option( "--encode-type", encode_type,
                          localized("The encoding type of key_type (i64 , i128 , float64, float128) only support decimal encoding e.g. 'dec'"
                                     "i256 - supports both 'dec' and 'hex', ripemd160 and sha256 is 'hex' only"));
+   getTable->add_flag("-b,--binary", binary, localized("Return the value as BINARY rather than using abi to interpret as JSON"));
    getTable->add_flag("-r,--reverse", reverse, localized("Iterate in reverse order"));
    getTable->add_flag("--show-payer", show_payer, localized("show RAM payer"));
 
@@ -2681,23 +2680,28 @@ int main( int argc, char** argv ) {
    // currency accessors
    // get currency balance
    string symbol;
+   bool currency_balance_print_json = false;
    auto get_currency = get->add_subcommand( "currency", localized("Retrieve information related to standard currencies"), true);
    get_currency->require_subcommand();
    auto get_balance = get_currency->add_subcommand( "balance", localized("Retrieve the balance of an account for a given currency"), false);
    get_balance->add_option( "contract", code, localized("The contract that operates the currency") )->required();
    get_balance->add_option( "account", accountName, localized("The account to query balances for") )->required();
    get_balance->add_option( "symbol", symbol, localized("The symbol for the currency if the contract operates multiple currencies") );
+   get_balance->add_flag("--json,-j", currency_balance_print_json, localized("Output in JSON format") );
    get_balance->set_callback([&] {
       auto result = call(get_currency_balance_func, fc::mutable_variant_object
          ("account", accountName)
          ("code", code)
          ("symbol", symbol.empty() ? fc::variant() : symbol)
       );
-
-      const auto& rows = result.get_array();
-      for( const auto& r : rows ) {
-         std::cout << r.as_string()
-                   << std::endl;
+      if (!currency_balance_print_json) {
+        const auto& rows = result.get_array();
+        for( const auto& r : rows ) {
+           std::cout << r.as_string()
+                     << std::endl;
+        }
+      } else {
+        std::cout << fc::json::to_pretty_string(result) << std::endl;
       }
    });
 
@@ -2994,7 +2998,7 @@ int main( int argc, char** argv ) {
       }
 
       if (!duplicate) {
-         actions.emplace_back( create_setcode(account, code_bytes ) );
+         actions.emplace_back( create_setcode(name(account), code_bytes ) );
          if ( shouldSend ) {
             std::cerr << localized("Setting Code...") << std::endl;
             send_actions(std::move(actions), 10000, packed_transaction::zlib);
@@ -3041,7 +3045,7 @@ int main( int argc, char** argv ) {
 
       if (!duplicate) {
          try {
-            actions.emplace_back( create_setabi(account, abi_bytes) );
+            actions.emplace_back( create_setabi(name(account), abi_bytes) );
          } EOS_RETHROW_EXCEPTIONS(abi_type_exception,  "Fail to parse ABI JSON")
          if ( shouldSend ) {
             std::cerr << localized("Setting ABI...") << std::endl;
@@ -3108,12 +3112,12 @@ int main( int argc, char** argv ) {
          tx_force_unique = false;
       }
 
-      auto transfer_amount = to_asset(con, amount);
-      auto transfer = create_transfer(con, sender, recipient, transfer_amount, memo);
+      auto transfer_amount = to_asset(name(con), amount);
+      auto transfer = create_transfer(con, name(sender), name(recipient), transfer_amount, memo);
       if (!pay_ram) {
          send_actions( { transfer });
       } else {
-         auto open_ = create_open(con, recipient, transfer_amount.get_symbol(), sender);
+         auto open_ = create_open(con, name(recipient), transfer_amount.get_symbol(), name(sender));
          send_actions( { open_, transfer } );
       }
    });
@@ -3380,7 +3384,8 @@ int main( int argc, char** argv ) {
       }
       auto accountPermissions = get_account_permissions(tx_permission);
 
-      send_actions({chain::action{accountPermissions, contract_account, action, variant_to_bin( contract_account, action, action_args_var ) }});
+      send_actions({chain::action{accountPermissions, name(contract_account), name(action),
+                                  variant_to_bin( name(contract_account), name(action), action_args_var ) }});
    });
 
    // push transaction
@@ -3467,7 +3472,7 @@ int main( int argc, char** argv ) {
          trx_var = json_from_file_or_string(proposed_transaction);
       } EOS_RETHROW_EXCEPTIONS(transaction_type_exception, "Fail to parse transaction JSON '${data}'", ("data",proposed_transaction))
       transaction proposed_trx = trx_var.as<transaction>();
-      bytes proposed_trx_serialized = variant_to_bin( proposed_contract, proposed_action, trx_var );
+      bytes proposed_trx_serialized = variant_to_bin( name(proposed_contract), name(proposed_action), trx_var );
 
       vector<permission_level> reqperm;
       try {
@@ -3482,7 +3487,7 @@ int main( int argc, char** argv ) {
       auto accountPermissions = get_account_permissions(tx_permission);
       if (accountPermissions.empty()) {
          if (!proposer.empty()) {
-            accountPermissions = vector<permission_level>{{proposer, config::active_name}};
+            accountPermissions = vector<permission_level>{{name(proposer), config::active_name}};
          } else {
             EOS_THROW(missing_auth_exception, "Authority is not provided (either by multisig parameter <proposer> or -p)");
          }
@@ -3509,7 +3514,7 @@ int main( int argc, char** argv ) {
          ("requested", requested_perm_var)
          ("trx", trx_var);
 
-      send_actions({chain::action{accountPermissions, "eosio.msig", "propose", variant_to_bin( N(eosio.msig), N(propose), args ) }});
+      send_actions({chain::action{accountPermissions, N(eosio.msig), N(propose), variant_to_bin( N(eosio.msig), N(propose), args ) }});
    });
 
    //multisig propose transaction
@@ -3534,7 +3539,7 @@ int main( int argc, char** argv ) {
       auto accountPermissions = get_account_permissions(tx_permission);
       if (accountPermissions.empty()) {
          if (!proposer.empty()) {
-            accountPermissions = vector<permission_level>{{proposer, config::active_name}};
+            accountPermissions = vector<permission_level>{{name(proposer), config::active_name}};
          } else {
             EOS_THROW(missing_auth_exception, "Authority is not provided (either by multisig parameter <proposer> or -p)");
          }
@@ -3549,7 +3554,7 @@ int main( int argc, char** argv ) {
          ("requested", requested_perm_var)
          ("trx", trx_var);
 
-      send_actions({chain::action{accountPermissions, "eosio.msig", "propose", variant_to_bin( N(eosio.msig), N(propose), args ) }});
+      send_actions({chain::action{accountPermissions, N(eosio.msig), N(propose), variant_to_bin( N(eosio.msig), N(propose), args ) }});
    });
 
 
@@ -3566,8 +3571,8 @@ int main( int argc, char** argv ) {
                                  ("scope", proposer)
                                  ("table", "proposal")
                                  ("table_key", "")
-                                 ("lower_bound", name(proposal_name).value)
-                                 ("upper_bound", name(proposal_name).value + 1)
+                                 ("lower_bound", name(proposal_name).to_uint64_t())
+                                 ("upper_bound", name(proposal_name).to_uint64_t() + 1)
                                  // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                  // Change to name(proposal_name).value when cleos no longer needs to support nodeos versions older than 1.5.0
                                  ("limit", 1)
@@ -3604,8 +3609,8 @@ int main( int argc, char** argv ) {
                                        ("scope", proposer)
                                        ("table", "approvals2")
                                        ("table_key", "")
-                                       ("lower_bound", name(proposal_name).value)
-                                       ("upper_bound", name(proposal_name).value + 1)
+                                       ("lower_bound", name(proposal_name).to_uint64_t())
+                                       ("upper_bound", name(proposal_name).to_uint64_t() + 1)
                                        // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                        // Change to name(proposal_name).value when cleos no longer needs to support nodeos versions older than 1.5.0
                                        ("limit", 1)
@@ -3621,7 +3626,7 @@ int main( int argc, char** argv ) {
             for( const auto& ra : approvals_object["requested_approvals"].get_array() ) {
                const auto& ra_obj = ra.get_object();
                auto pl = ra["level"].as<permission_level>();
-               auto res = all_approvals.emplace( pl, std::make_pair(ra["time"].as<fc::time_point>(), approval_status::unapproved) );
+               all_approvals.emplace( pl, std::make_pair(ra["time"].as<fc::time_point>(), approval_status::unapproved) );
             }
 
             for( const auto& pa : approvals_object["provided_approvals"].get_array() ) {
@@ -3636,8 +3641,8 @@ int main( int argc, char** argv ) {
                                        ("scope", proposer)
                                        ("table", "approvals")
                                        ("table_key", "")
-                                       ("lower_bound", name(proposal_name).value)
-                                       ("upper_bound", name(proposal_name).value + 1)
+                                       ("lower_bound", name(proposal_name).to_uint64_t())
+                                       ("upper_bound", name(proposal_name).to_uint64_t() + 1)
                                        // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                        // Change to name(proposal_name).value when cleos no longer needs to support nodeos versions older than 1.5.0
                                        ("limit", 1)
@@ -3652,7 +3657,7 @@ int main( int argc, char** argv ) {
 
             for( const auto& ra : approvals_object["requested_approvals"].get_array() ) {
                auto pl = ra.as<permission_level>();
-               auto res = all_approvals.emplace( pl, std::make_pair(fc::time_point{}, approval_status::unapproved) );
+               all_approvals.emplace( pl, std::make_pair(fc::time_point{}, approval_status::unapproved) );
             }
 
             for( const auto& pa : approvals_object["provided_approvals"].get_array() ) {
@@ -3669,8 +3674,8 @@ int main( int argc, char** argv ) {
                                           ("scope", "eosio.msig")
                                           ("table", "invals")
                                           ("table_key", "")
-                                          ("lower_bound", a.first.value)
-                                          ("upper_bound", a.first.value + 1)
+                                          ("lower_bound", a.first.to_uint64_t())
+                                          ("upper_bound", a.first.to_uint64_t() + 1)
                                           // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                           // Change to name(proposal_name).value when cleos no longer needs to support nodeos versions older than 1.5.0
                                           ("limit", 1)
@@ -3699,8 +3704,8 @@ int main( int argc, char** argv ) {
                                        ("scope", proposer)
                                        ("table", "opposes")
                                        ("table_key", "")
-                                       ("lower_bound", name(proposal_name).value)
-                                       ("upper_bound", name(proposal_name).value + 1)
+                                       ("lower_bound", name(proposal_name).to_uint64_t())
+                                       ("upper_bound", name(proposal_name).to_uint64_t() + 1)
                                        // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                        // Change to name(proposal_name).value when cleos no longer needs to support nodeos versions older than 1.5.0
                                        ("limit", 1)
@@ -3820,8 +3825,8 @@ int main( int argc, char** argv ) {
          args("proposal_hash", proposal_hash);
       }
 
-      auto accountPermissions = get_account_permissions(tx_permission, {proposer,config::active_name});
-      send_actions({chain::action{accountPermissions, "eosio.msig", action, variant_to_bin( N(eosio.msig), action, args ) }});
+      auto accountPermissions = get_account_permissions(tx_permission, {name(proposer), config::active_name});
+      send_actions({chain::action{accountPermissions, N(eosio.msig), name(action), variant_to_bin( N(eosio.msig), name(action), args ) }});
    };
 
    // multisig approve
@@ -3884,8 +3889,8 @@ int main( int argc, char** argv ) {
       auto args = fc::mutable_variant_object()
          ("account", invalidator);
 
-      auto accountPermissions = get_account_permissions(tx_permission, {invalidator,config::active_name});
-      send_actions({chain::action{accountPermissions, "eosio.msig", "invalidate", variant_to_bin( N(eosio.msig), "invalidate", args ) }});
+      auto accountPermissions = get_account_permissions(tx_permission, {name(invalidator), config::active_name});
+      send_actions({chain::action{accountPermissions, N(eosio.msig), N(invalidate), variant_to_bin( N(eosio.msig), N(invalidate), args ) }});
    });
 
    // multisig cancel
@@ -3899,7 +3904,7 @@ int main( int argc, char** argv ) {
       auto accountPermissions = get_account_permissions(tx_permission);
       if (accountPermissions.empty()) {
          if (!canceler.empty()) {
-            accountPermissions = vector<permission_level>{{canceler, config::active_name}};
+            accountPermissions = vector<permission_level>{{name(canceler), config::active_name}};
          } else {
             EOS_THROW(missing_auth_exception, "Authority is not provided (either by multisig parameter <canceler> or -p)");
          }
@@ -3912,7 +3917,7 @@ int main( int argc, char** argv ) {
          ("proposal_name", proposal_name)
          ("canceler", canceler);
 
-      send_actions({chain::action{accountPermissions, "eosio.msig", "cancel", variant_to_bin( N(eosio.msig), N(cancel), args ) }});
+      send_actions({chain::action{accountPermissions, N(eosio.msig), N(cancel), variant_to_bin( N(eosio.msig), N(cancel), args ) }});
       }
    );
 
@@ -3927,7 +3932,7 @@ int main( int argc, char** argv ) {
       auto accountPermissions = get_account_permissions(tx_permission);
       if (accountPermissions.empty()) {
          if (!executer.empty()) {
-            accountPermissions = vector<permission_level>{{executer, config::active_name}};
+            accountPermissions = vector<permission_level>{{name(executer), config::active_name}};
          } else {
             EOS_THROW(missing_auth_exception, "Authority is not provided (either by multisig parameter <executer> or -p)");
          }
@@ -3941,7 +3946,7 @@ int main( int argc, char** argv ) {
          ("proposal_name", proposal_name)
          ("executer", executer);
 
-      send_actions({chain::action{accountPermissions, "eosio.msig", "exec", variant_to_bin( N(eosio.msig), N(exec), args ) }});
+      send_actions({chain::action{accountPermissions, N(eosio.msig), N(exec), variant_to_bin( N(eosio.msig), N(exec), args ) }});
       }
    );
 
@@ -3967,14 +3972,14 @@ int main( int argc, char** argv ) {
 
       auto accountPermissions = get_account_permissions(tx_permission);
       if( accountPermissions.empty() ) {
-         accountPermissions = vector<permission_level>{{executer, config::active_name}, {wrap_con, config::active_name}};
+         accountPermissions = vector<permission_level>{{name(executer), config::active_name}, {name(wrap_con), config::active_name}};
       }
 
       auto args = fc::mutable_variant_object()
          ("executer", executer )
          ("trx", trx_var);
 
-      send_actions({chain::action{accountPermissions, wrap_con, "exec", variant_to_bin( wrap_con, N(exec), args ) }});
+      send_actions({chain::action{accountPermissions, name(wrap_con), N(exec), variant_to_bin( name(wrap_con), N(exec), args ) }});
    });
 
    // system subcommand
@@ -4000,7 +4005,7 @@ int main( int argc, char** argv ) {
    auto bidname = bidname_subcommand(system);
    auto bidnameinfo = bidname_info_subcommand(system);
 
-   auto biyram = buyram_subcommand(system);
+   auto buyram = buyram_subcommand(system);
    auto sellram = sellram_subcommand(system);
 
    auto claimRewards = claimrewards_subcommand(system);

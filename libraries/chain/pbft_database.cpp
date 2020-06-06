@@ -2,6 +2,7 @@
 #include <fc/io/fstream.hpp>
 #include <fstream>
 #include <eosio/chain/global_property_object.hpp>
+#include <random>
 
 namespace eosio {
     namespace chain {
@@ -597,19 +598,29 @@ namespace eosio {
             auto highest_pcc = vector<pbft_committed_certificate>{};
             auto highest_sc = pbft_stable_checkpoint();
 
-            for (const auto& vc: vcc.view_changes) {
-                if (vc.prepared_cert.block_info.block_num() > highest_ppc.block_info.block_num()) {
-                    highest_ppc = vc.prepared_cert;
+            // shuffle view changes to avoid fixed orders.
+            std::vector<int> idx_v(vcc.view_changes.size()) ;
+            std::iota (std::begin(idx_v), std::end(idx_v), 0);
+            auto seed = std::chrono::system_clock::now().time_since_epoch().count();
+            std::shuffle( idx_v.begin(), idx_v.end(), std::default_random_engine(seed));
+            for (const auto i: idx_v) {
+                auto& prepared_cert = vcc.view_changes[i].prepared_cert;
+                auto& committed_certs = vcc.view_changes[i].committed_certs;
+                auto& stable_ckpts = vcc.view_changes[i].stable_checkpoint;
+                if (prepared_cert.block_info.block_num() > highest_ppc.block_info.block_num()
+                && is_valid_prepared_certificate(prepared_cert)) {
+                    highest_ppc = prepared_cert;
                 }
 
-                for (const auto& cc: vc.committed_certs) {
+                for (const auto& cc:committed_certs ) {
                     auto p_itr = find_if(highest_pcc.begin(), highest_pcc.end(),
                             [&](const pbft_committed_certificate& ext) { return ext.block_info.block_id == cc.block_info.block_id; });
-                    if (p_itr == highest_pcc.end()) highest_pcc.emplace_back(cc);
+                    if (p_itr == highest_pcc.end() && is_valid_committed_certificate(cc)) highest_pcc.emplace_back(cc);
                 }
 
-                if (vc.stable_checkpoint.block_info.block_num() > highest_sc.block_info.block_num()) {
-                    highest_sc = vc.stable_checkpoint;
+                if (stable_ckpts.block_info.block_num() > highest_sc.block_info.block_num()
+                && is_valid_stable_checkpoint(stable_ckpts)) {
+                    highest_sc = stable_ckpts;
                 }
             }
 

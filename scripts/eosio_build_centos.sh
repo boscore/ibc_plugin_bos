@@ -610,8 +610,20 @@ mongodconf
 
 	printf "\\n"
 
-	printf "\\tChecking LLVM with WASM support installation...\\n"
-	if [ ! -d "${HOME}/opt/wasm/bin" ]; then
+	printf "\\n\\tChecking for LLVM with WASM support.\\n"
+	CLANG_INSTALL=false
+	if ! type clang > /dev/null ; then
+		CLANG_INSTALL=true
+		echo "Failed to find clang, it will install automatically."
+	else
+		CLANG_V=$(clang --version | grep version 2>/dev/null |  sed 's/[^0-9]*//g' | head -c1)
+		if [ "${CLANG_V}" -lt 7 ] ; then
+			echo "BOSCore need clange version high than v7, current install $CLANG_V, it will install automatically."
+			CLANG_INSTALL=true
+		fi 
+	fi
+
+	if [ $CLANG_INSTALL == true ]; then
 		printf "\\tInstalling LLVM with WASM...\\n"
 		if ! cd "${TEMP_DIR}"; then
 			printf "\\t!! Unable to enter directory %s !!\\n" "${TEMP_DIR}"
@@ -629,7 +641,7 @@ mongodconf
 			exit 1;
 		fi
 		LLVMURL="https://github.com/llvm-mirror/llvm.git"
-		if ! git clone --depth 1 --single-branch --branch release_40 "${LLVMURL}"; then
+		if ! git clone --depth 1 --single-branch --branch release_90 "${LLVMURL}"; then
 			printf "\\t!! Unable to clone llvm repo from ${LLVMURL} !!\\n"
 			printf "\\tExiting now.\\n"
 			exit 1;
@@ -641,7 +653,7 @@ mongodconf
 			exit 1;
 		fi
 		CLANGURL="https://github.com/llvm-mirror/clang.git"
-		if ! git clone --depth 1 --single-branch --branch release_40 "${CLANGURL}"; then
+		if ! git clone --depth 1 --single-branch --branch release_90 "${CLANGURL}"; then
 			printf "\\t!! Unable to clone clang repo from ${CLANGURL} !!\\n"
 			printf "\\tExiting now.\\n"
 			exit 1;
@@ -663,7 +675,7 @@ mongodconf
 			exit 1;
 		fi
 		if ! "${CMAKE}" -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${HOME}/opt/wasm" \
-		-DLLVM_TARGETS_TO_BUILD="host" -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="WebAssembly" \
+		-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="WebAssembly" \
 		-DLLVM_ENABLE_RTTI=1 -DCMAKE_BUILD_TYPE="Release" ..; then
 			printf "\\t!! CMake has exited with the above error !!\\n"
 			printf "\\tExiting now.\\n"

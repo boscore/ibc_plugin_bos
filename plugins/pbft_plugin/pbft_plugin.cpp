@@ -51,6 +51,7 @@ namespace eosio {
         bool is_replaying();
         bool is_syncing();
         bool pbft_ready();
+        bool is_production_paused();
     };
 
     void pbft_plugin_impl::on_committed_transition() {
@@ -142,6 +143,10 @@ namespace eosio {
         return app().get_plugin<net_plugin>().is_syncing();
     }
 
+    bool pbft_plugin_impl::is_production_paused() {
+        return app().get_plugin<producer_plugin>().paused();
+    }
+
     bool pbft_plugin_impl::pbft_ready() {
         // only trigger pbft related logic if I am in sync and replayed.
 
@@ -162,7 +167,7 @@ namespace eosio {
             upgraded = true;
         }
 
-        return enabled && !is_syncing() && !is_replaying();
+        return enabled && !is_syncing() && !is_replaying() && !is_production_paused();
     }
 
     pbft_plugin::pbft_plugin() : my(new pbft_plugin_impl()) {}
@@ -178,6 +183,7 @@ namespace eosio {
         my->commit_timer = std::make_unique<boost::asio::steady_timer>(app().get_io_service());
         my->view_change_timer = std::make_unique<boost::asio::steady_timer>(app().get_io_service());
         my->checkpoint_timer = std::make_unique<boost::asio::steady_timer>(app().get_io_service());
+        chain_plug = app().find_plugin<chain_plugin>();
     }
 
     void pbft_plugin::plugin_startup() {
@@ -198,53 +204,126 @@ namespace eosio {
     void pbft_plugin::plugin_shutdown() {}
 
     pbft_state pbft_plugin::get_pbft_record( const block_id_type& bid ) const {
-        pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
+        auto& pbft_ctrl = chain_plug->pbft_ctrl();
         auto record = pbft_ctrl.pbft_db.get_pbft_state_by_id(bid);
         if (record) return *record;
         return pbft_state();
     }
 
     vector<pbft_checkpoint_state> pbft_plugin::get_pbft_checkpoints_record(block_num_type bnum) const {
-        pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
+        auto& pbft_ctrl = chain_plug->pbft_ctrl();
         auto records = pbft_ctrl.pbft_db.get_checkpoints_by_num(bnum);
         if (!records.empty()) return records;
         return vector<pbft_checkpoint_state>();
     }
     pbft_view_change_state pbft_plugin::get_view_change_record(pbft_view_type view) const {
-        pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
+        auto& pbft_ctrl = chain_plug->pbft_ctrl();
         auto record = pbft_ctrl.pbft_db.get_view_changes_by_target_view(view);
         if (record) return *record;
         return pbft_view_change_state();
     }
 
     vector<block_num_type> pbft_plugin::get_watermarks() const {
-        pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
+        auto& pbft_ctrl = chain_plug->pbft_ctrl();
         return pbft_ctrl.pbft_db.get_pbft_watermarks();
     }
 
     flat_map<public_key_type, uint32_t> pbft_plugin::get_fork_schedules() const {
-        pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
+        auto& pbft_ctrl = chain_plug->pbft_ctrl();
         return pbft_ctrl.pbft_db.get_pbft_fork_schedules();
     }
 
     const char* pbft_plugin::get_pbft_status() const {
-        pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
+        auto& pbft_ctrl = chain_plug->pbft_ctrl();
         return pbft_ctrl.state_machine.get_current()->get_name();
     }
 
     block_id_type pbft_plugin::get_pbft_prepared_id() const {
-        auto& ctrl = app().get_plugin<chain_plugin>().chain();
+        auto& ctrl = chain_plug->chain();
         return ctrl.get_pbft_prepared();
     }
 
     block_id_type pbft_plugin::get_pbft_my_prepare_id() const {
-        auto& ctrl = app().get_plugin<chain_plugin>().chain();
+        auto& ctrl = chain_plug->chain();
         return ctrl.get_pbft_my_prepare();
     }
 
+    vector<producer_key> pbft_plugin::get_view_change_missing_bps(pbft_view_type view) const {
+        auto& pbft_ctrl = chain_plug->pbft_ctrl();
+        auto missing_bps = vector<producer_key>{};
+        auto records = get_view_change_record(view);
+        if (!records.view_changes.empty() && !records.is_view_changed) {
+            auto lscb_bps = pbft_ctrl.pbft_db.lscb_active_producers().producers;
+            missing_bps.reserve(lscb_bps.size());
+            for (const auto& bp: lscb_bps) {
+                auto found = false;
+                for (const auto& v: records.view_changes) {
+                    if (bp.block_signing_key == v.first) found = true;
+                }
+                if (!found) missing_bps.emplace_back(bp);
+            }
+        }
+        return missing_bps;
+    }
+
+    vector<producer_key> pbft_plugin::get_prepare_missing_bps(const block_id_type& bid) const {
+        auto& ctrl = chain_plug->chain();
+        auto missing_bps = vector<producer_key>{};
+        auto blk = ctrl.fetch_block_state_by_id(bid);
+        if (blk) {
+            auto records = get_pbft_record(bid);
+            if (!records.prepares.empty() && !records.is_prepared) {
+                pbft_view_type highest_view;
+                for (const auto &p: records.prepares) {
+                    if (p.first.first > highest_view) highest_view = p.first.first;
+                }
+                auto active_bps = blk->active_schedule.producers;;
+                missing_bps.reserve(active_bps.size());
+                for (const auto &bp: active_bps) {
+                    auto found = false;
+                    for (const auto &p: records.prepares) {
+                        if (p.first.first == highest_view && bp.block_signing_key == p.first.second) {
+                            found = true;
+                        }
+                    }
+                    if (!found) missing_bps.emplace_back(bp);
+                }
+            }
+
+        }
+        return missing_bps;
+    }
+
+    vector<producer_key> pbft_plugin::get_commit_missing_bps(const block_id_type& bid) const {
+        auto& ctrl = chain_plug->chain();
+        auto missing_bps = vector<producer_key>{};
+        auto blk = ctrl.fetch_block_state_by_id(bid);
+        if (blk) {
+            auto records = get_pbft_record(bid);
+            if (!records.commits.empty() && !records.is_committed) {
+                pbft_view_type highest_view;
+                for (const auto &p: records.commits) {
+                    if (p.first.first > highest_view) highest_view = p.first.first;
+                }
+                auto active_bps = blk->active_schedule.producers;;
+                missing_bps.reserve(active_bps.size());
+                for (const auto &bp: active_bps) {
+                    auto found = false;
+                    for (const auto &c: records.commits) {
+                        if (c.first.first == highest_view && bp.block_signing_key == c.first.second) {
+                            found = true;
+                        }
+                    }
+                    if (!found) missing_bps.emplace_back(bp);
+                }
+            }
+        }
+        return missing_bps;
+    }
+
     void pbft_plugin::set_pbft_current_view(pbft_view_type view) {
+        auto& pbft_ctrl = chain_plug->pbft_ctrl();
         //this is used to boost the recovery from a disaster, do not set this unless you have to do so.
-        pbft_controller& pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         pbft_ctrl.state_machine.manually_set_current_view(view);
     }
 }

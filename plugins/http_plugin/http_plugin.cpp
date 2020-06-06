@@ -283,7 +283,11 @@ namespace eosio {
 
                if( bytes_in_flight > max_bytes_in_flight ) {
                   dlog( "503 - too many bytes in flight: ${bytes}", ("bytes", bytes_in_flight.load()) );
-                  error_results results{websocketpp::http::status_code::too_many_requests, "Busy", error_results::error_info()};
+                  error_results::error_info ei;
+               	  ei.code = websocketpp::http::status_code::too_many_requests;
+               	  ei.name = "Busy";
+               	  ei.what = "Too many bytes in flight: " + std::to_string( bytes_in_flight );
+                  error_results results{websocketpp::http::status_code::too_many_requests, "Busy", ei};
                   con->set_body( fc::json::to_string( results ));
                   con->set_status( websocketpp::http::status_code::too_many_requests );
                   return;
@@ -294,7 +298,6 @@ namespace eosio {
                auto handler_itr = url_handlers.find( resource );
                if( handler_itr != url_handlers.end()) {
                   con->defer_http_response();
-                  bytes_in_flight += body.size();
                   handler_itr->second( resource, body, [&bytes_in_flight = this->bytes_in_flight, con]( int code, fc::variant response_body ) {
                      std::string json = fc::json::to_string( response_body );
                      response_body.clear();

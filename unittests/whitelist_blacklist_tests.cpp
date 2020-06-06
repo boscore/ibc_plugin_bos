@@ -453,7 +453,7 @@ BOOST_AUTO_TEST_CASE( actor_blacklist_inline_deferred ) { try {
    tester1.chain->set_abi( N(charlie),  contracts::deferred_test_abi().data() );
    tester1.chain->produce_blocks();
 
-   auto auth = authority(eosio::testing::base_tester::get_public_key("alice", "active"));
+   auto auth = authority(eosio::testing::base_tester::get_public_key(name("alice"), "active"));
    auth.accounts.push_back( permission_level_weight{{N(alice), config::eosio_code_name}, 1} );
 
    tester1.chain->push_action( N(eosio), N(updateauth), N(alice), mvo()
@@ -463,7 +463,7 @@ BOOST_AUTO_TEST_CASE( actor_blacklist_inline_deferred ) { try {
       ( "auth", auth )
    );
 
-   auth = authority(eosio::testing::base_tester::get_public_key("bob", "active"));
+   auth = authority(eosio::testing::base_tester::get_public_key(name("bob"), "active"));
    auth.accounts.push_back( permission_level_weight{{N(alice), config::eosio_code_name}, 1} );
    auth.accounts.push_back( permission_level_weight{{N(bob), config::eosio_code_name}, 1} );
 
@@ -474,7 +474,7 @@ BOOST_AUTO_TEST_CASE( actor_blacklist_inline_deferred ) { try {
       ( "auth", auth )
    );
 
-   auth = authority(eosio::testing::base_tester::get_public_key("charlie", "active"));
+   auth = authority(eosio::testing::base_tester::get_public_key(name("charlie"), "active"));
    auth.accounts.push_back( permission_level_weight{{N(charlie), config::eosio_code_name}, 1} );
 
    tester1.chain->push_action( N(eosio), N(updateauth), N(charlie), mvo()
@@ -499,7 +499,8 @@ BOOST_AUTO_TEST_CASE( actor_blacklist_inline_deferred ) { try {
       tester2.chain->push_block( b );
    }
 
-   auto log_trxs = [&]( const transaction_trace_ptr& t) {
+   auto log_trxs = [&](std::tuple<const transaction_trace_ptr&, const signed_transaction&> x) {
+      auto& t = std::get<0>(x);
       if( !t || t->action_traces.size() == 0 ) return;
 
       const auto& act = t->action_traces[0].act;
@@ -527,7 +528,7 @@ BOOST_AUTO_TEST_CASE( actor_blacklist_inline_deferred ) { try {
 
 
    auto num_deferred = tester1.chain->control->db().get_index<generated_transaction_multi_index,by_trx_id>().size();
-   BOOST_REQUIRE_EQUAL(0, num_deferred);
+   BOOST_REQUIRE_EQUAL(0u, num_deferred);
 
    // Schedule a deferred transaction authorized by charlie@active
    tester1.chain->push_action( N(charlie), N(defercall), N(alice), mvo()
@@ -538,14 +539,14 @@ BOOST_AUTO_TEST_CASE( actor_blacklist_inline_deferred ) { try {
    );
 
    num_deferred = tester1.chain->control->db().get_index<generated_transaction_multi_index,by_trx_id>().size();
-   BOOST_REQUIRE_EQUAL(1, num_deferred);
+   BOOST_REQUIRE_EQUAL(1u, num_deferred);
 
    // Do not allow that deferred transaction to retire yet
    tester1.chain->finish_block();
    tester1.chain->produce_blocks(2, true); // Produce 2 empty blocks (other than onblock of course).
 
    num_deferred = tester1.chain->control->db().get_index<generated_transaction_multi_index,by_trx_id>().size();
-   BOOST_REQUIRE_EQUAL(1, num_deferred);
+   BOOST_REQUIRE_EQUAL(1u, num_deferred);
 
    c1.disconnect();
 
@@ -596,7 +597,7 @@ BOOST_AUTO_TEST_CASE( blacklist_sender_bypass ) { try {
    tester1.chain->set_abi( N(charlie),  contracts::deferred_test_abi().data() );
    tester1.chain->produce_blocks();
 
-   auto auth = authority(eosio::testing::base_tester::get_public_key("alice", "active"));
+   auto auth = authority(eosio::testing::base_tester::get_public_key(name("alice"), "active"));
    auth.accounts.push_back( permission_level_weight{{N(alice), config::eosio_code_name}, 1} );
 
    tester1.chain->push_action( N(eosio), N(updateauth), N(alice), mvo()
@@ -606,7 +607,7 @@ BOOST_AUTO_TEST_CASE( blacklist_sender_bypass ) { try {
       ( "auth", auth )
    );
 
-   auth = authority(eosio::testing::base_tester::get_public_key("bob", "active"));
+   auth = authority(eosio::testing::base_tester::get_public_key(name("bob"), "active"));
    auth.accounts.push_back( permission_level_weight{{N(bob), config::eosio_code_name}, 1} );
 
    tester1.chain->push_action( N(eosio), N(updateauth), N(bob), mvo()
@@ -616,7 +617,7 @@ BOOST_AUTO_TEST_CASE( blacklist_sender_bypass ) { try {
       ( "auth", auth )
    );
 
-   auth = authority(eosio::testing::base_tester::get_public_key("charlie", "active"));
+   auth = authority(eosio::testing::base_tester::get_public_key(name("charlie"), "active"));
    auth.accounts.push_back( permission_level_weight{{N(charlie), config::eosio_code_name}, 1} );
 
    tester1.chain->push_action( N(eosio), N(updateauth), N(charlie), mvo()

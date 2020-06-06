@@ -85,3 +85,24 @@
     ```
     curl --request POST --data uint32_t --url http://localhost:8888/v1/pbft/set_pbft_current_view  
     ```
+* **get_view_change_missing_bps**
+
+    -- To get missing bp names of a given pbft view on my node, empty will be returned if all have been collected or not in view change state    
+    
+    ```
+    curl --request POST --data uint32_t --url http://localhost:8888/v1/pbft/get_view_change_missing_bps  
+    ```
+* **get_prepare_missing_bps**
+
+    -- To get missing bp names of prepare messages of a given block id at the highest view on my node, empty will be returned if all have been collected or the block id is unreachable    
+    
+    ```
+    curl --request POST --data string --url http://localhost:8888/v1/pbft/get_prepare_missing_bps  
+    ```      
+* **get_commit_missing_bps**
+
+    -- To get missing bp names of commit messages of a given block id at the highest view on my node, empty will be returned if all have been collected or the block id is unreachable    
+    
+    ```
+    curl --request POST --data string --url http://localhost:8888/v1/pbft/get_commit_missing_bps  
+    ```

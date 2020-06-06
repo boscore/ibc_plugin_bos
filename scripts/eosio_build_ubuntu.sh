@@ -421,19 +421,31 @@ mongodconf
 	else
 		printf "\\tMongo C++ driver found at /usr/local/lib/libmongocxx-static.a.\\n"
 	fi
-
+	
 	printf "\\n\\tChecking for LLVM with WASM support.\\n"
-	if [ ! -d "${HOME}/opt/wasm/bin" ]; then
+	CLANG_INSTALL=false
+	if ! type clang > /dev/null ; then
+		CLANG_INSTALL=true
+		echo "Failed to find clang, it will install automatically."
+	else
+		CLANG_V=$(clang --version | grep version 2>/dev/null |  sed 's/[^0-9]*//g' | head -c1)
+		if [ "${CLANG_V}" -lt 7 ] ; then
+			echo "BOSCore need clange version high than v7, current install $CLANG_V, it will install automatically."
+			CLANG_INSTALL=true
+		fi 
+	fi
+
+	if [ $CLANG_INSTALL == true ]; then
 		# Build LLVM and clang with WASM support:
 		printf "\\tInstalling LLVM with WASM\\n"
 		if ! cd "${TEMP_DIR}"
-		then
+		then 
 			printf "\\n\\tUnable to cd into directory %s.\\n" "${TEMP_DIR}"
 			printf "\\n\\tExiting now.\\n"
 			exit 1;
 		fi
 		if ! mkdir "${TEMP_DIR}/llvm-compiler"  2>/dev/null
-		then
+		then 
 			printf "\\n\\tUnable to create directory %s/llvm-compiler.\\n" "${TEMP_DIR}"
 			printf "\\n\\tExiting now.\\n"
 			exit 1;
@@ -480,7 +492,8 @@ mongodconf
 			printf "\\n\\tExiting now.\\n"
 			exit 1;
 		fi
-		if ! cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${HOME}/opt/wasm" -DLLVM_TARGETS_TO_BUILD= \
+		# Refer : https://llvm.org/docs/CMake.html
+		if ! cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${HOME}/opt/wasm" -DLLVM_ENABLE_RTTI=1 \
 		-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly -DCMAKE_BUILD_TYPE=Release ../
 		then
 			printf "\\tError compiling LLVM and clang with EXPERIMENTAL WASM support.0\\n"

@@ -293,6 +293,15 @@ namespace eosio { namespace chain {
       return result;
    } /// fetch_branch_from
 
+    block_state_ptr fork_database::search_on_branch( const block_id_type& h, uint32_t block_num )const {
+        for( auto s = get_block(h); s; s = get_block( s->header.previous ) ) {
+            if( s->block_num == block_num )
+                return s;
+        }
+
+        return {};
+    }
+
    /// remove all of the invalid forks built of this id including this id
    void fork_database::remove( const block_id_type& id ) {
       vector<block_id_type> remove_queue{id};

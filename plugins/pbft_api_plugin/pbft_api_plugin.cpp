@@ -59,6 +59,9 @@ void pbft_api_plugin::plugin_startup() {
        CALL(pbft, pbft, get_pbft_status, INVOKE_R(pbft, get_pbft_status), 200),
        CALL(pbft, pbft, get_pbft_prepared_id, INVOKE_R(pbft, get_pbft_prepared_id), 200),
        CALL(pbft, pbft, get_pbft_my_prepare_id, INVOKE_R(pbft, get_pbft_my_prepare_id), 200),
+       CALL(pbft, pbft, get_view_change_missing_bps, INVOKE_R_P(pbft, get_view_change_missing_bps, pbft_view_type), 200),
+       CALL(pbft, pbft, get_prepare_missing_bps, INVOKE_R_P(pbft, get_prepare_missing_bps, block_id_type), 200),
+       CALL(pbft, pbft, get_commit_missing_bps, INVOKE_R_P(pbft, get_commit_missing_bps, block_id_type), 200),
        CALL(pbft, pbft, set_pbft_current_view, INVOKE_W_P(pbft, set_pbft_current_view, pbft_view_type), 201),
    });
 }
