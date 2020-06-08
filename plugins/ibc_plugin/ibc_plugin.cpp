@@ -609,7 +609,7 @@ namespace eosio { namespace ibc {
             } FC_LOG_AND_DROP()
          } else {
             // auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            // fc_dlog("pushed transaction: ${id}", ( "id", trx_id ));
+            // fc_dlog(logger,"pushed transaction: ${id}", ( "id", trx_id ));
          }
       };
 
@@ -625,7 +625,7 @@ namespace eosio { namespace ibc {
             if ( !allow_failure ){ return; }
          } else {
             // auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            // fc_dlog("pushed transaction: ${id}", ( "id", trx_id ));
+            // fc_dlog(logger,"pushed transaction: ${id}", ( "id", trx_id ));
          }
 
          int next_index = index + 1;
@@ -1065,7 +1065,7 @@ namespace eosio { namespace ibc {
                bool_gs = true;
             }
          } else {
-            fc_dlog("get ibc.token contract's global_state_singleton failed, is it initialized?");
+            fc_dlog(logger,"get ibc.token contract's global_state_singleton failed, is it initialized?");
          }
 
          auto pchs = get_peer_chain_state();
@@ -1080,7 +1080,7 @@ namespace eosio { namespace ibc {
                elog("'thischain_ibc_chain_contract' configed in table 'peerchains' of ibc.token not consist with 'chain_name' configed in singleton 'global' of ibc.chain");
             }
          } else {
-            fc_dlog("get ibc.token contract's peer_chain_state failed, is it initialized?");
+            fc_dlog(logger,"get ibc.token contract's peer_chain_state failed, is it initialized?");
          }
 
          if( bool_pchs && bool_gs ){
@@ -1340,14 +1340,14 @@ namespace eosio { namespace ibc {
             elog("push hub transaction failed, orig_trx_id ${id}, index ${i}",("id", params->at(index).orig_trx_id)("i",index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            fc_dlog("pushed hub transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            fc_dlog(logger,"pushed hub transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
          }
 
          int next_index = index + 1;
          if (next_index < params->size()) {
             push_hub_trxs_recurse( next_index, params );
          } else {
-            fc_dlog("all ${sum} hub transactions have tried to push",("sum",params->size()));
+            fc_dlog(logger,"all ${sum} hub transactions have tried to push",("sum",params->size()));
          }
       };
 
@@ -1429,7 +1429,7 @@ namespace eosio { namespace ibc {
             elog("push cash transaction failed, orig_trx_id ${id}, index ${i}",("id", params->at(index).orig_trx_id)("i",index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            fc_dlog("pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            fc_dlog(logger,"pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
             next_seq_num += 1;
          }
 
@@ -1438,7 +1438,7 @@ namespace eosio { namespace ibc {
          if (next_index < params->size()) {
             push_cash_recurse( next_index, params, next_seq_num );
          } else {
-            fc_dlog("all ${sum} cash transactions have tried to push, which belongs to blocks [${f},${t}]",
+            fc_dlog(logger,"all ${sum} cash transactions have tried to push, which belongs to blocks [${f},${t}]",
                  ("sum",params->size())("f",params->front().orig_trx_block_num)("t",params->back().orig_trx_block_num));
          }
       };
@@ -1535,14 +1535,14 @@ namespace eosio { namespace ibc {
             return;
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            fc_dlog("pushed cashconfirm transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            fc_dlog(logger,"pushed cashconfirm transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
          }
 
          int next_index = index + 1;
          if (next_index < params->size()) {
             push_cashconfirm_recurse( next_index, params );
          } else {
-            fc_dlog("successfully pushed all ${sum} cashconfirm transactions, which belongs to blocks [${f},${t}]",
+            fc_dlog(logger,"successfully pushed all ${sum} cashconfirm transactions, which belongs to blocks [${f},${t}]",
                ("sum",params->size())("f",params->front().cash_trx_block_num)("t",params->back().cash_trx_block_num));
          }
       };
@@ -1685,7 +1685,7 @@ namespace eosio { namespace ibc {
             elog("push rollback transaction failed, index ${idx}", ("idx", index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            fc_dlog("pushed rollback transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            fc_dlog(logger,"pushed rollback transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
          }
 
          int next_index = index + 1;
@@ -2656,7 +2656,7 @@ namespace eosio { namespace ibc {
          elog("didn't find blockroot_merkle of block ${n} in block_log.dat, can't calculate block ${m}'s blockroot_merkle",("n",walk_point.block_num )("m",check_num));
          return empty;
       } else {
-         fc_dlog("calculate block ${n}'s blockroot_merkle from block ${m}",("n",check_num)("m",walk_point.block_num ));
+         fc_dlog(logger,"calculate block ${n}'s blockroot_merkle from block ${m}",("n",check_num)("m",walk_point.block_num ));
       }
 
       uint32_t count = check_num - walk_point.block_num;
@@ -3164,7 +3164,7 @@ namespace eosio { namespace ibc {
    bool ibc_plugin_impl::should_send_ibc_heartbeat(){
 
 //      if ( chain_plug->chain().fork_db_head_block_num() < 400 ){
-//         fc_dlog("waiting chain's head block number greater than 400");
+//         fc_dlog(logger,"waiting chain's head block number greater than 400");
 //         return false;
 //      }
       
@@ -3284,7 +3284,7 @@ namespace eosio { namespace ibc {
                   if( c->current() ) {
                      peer_ilog(c,"sending ibc_heartbeat_message");
 
-                     fc_dlog("origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst},${v}]",
+                     fc_dlog(logger,"origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst},${v}]",
                           ("of",msg.origtrxs_table_id_range.first)("ot",msg.origtrxs_table_id_range.second)
                              ("cf",msg.cashtrxs_table_seq_num_range.first)("ct",msg.cashtrxs_table_seq_num_range.second)
                              ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num)("v",msg.lwcls.valid));
@@ -4411,7 +4411,7 @@ namespace eosio { namespace ibc {
          }
       }
       else if(allowed_connections & Specified) {
-         fc_dlog( "Peer sent a handshake with blank signature and token, but this node accepts only authenticated connections.");
+         fc_dlog(logger, "Peer sent a handshake with blank signature and token, but this node accepts only authenticated connections.");
          return false;
       }
       return true;
