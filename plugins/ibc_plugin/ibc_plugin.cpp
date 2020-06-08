@@ -1244,8 +1244,8 @@ namespace eosio { namespace ibc {
       par.scope = account.to_string();
       par.table = N(peerchains);
       par.table_key = "peerchain_name";
-      par.lower_bound = to_string(peerchain_name.value);
-      par.upper_bound = to_string(peerchain_name.value + 1);
+      par.lower_bound = to_string(peerchain_name.to_uint64_t());
+      par.upper_bound = to_string(peerchain_name.to_uint64_t() + 1);
       par.limit = 1;
       par.key_type = "i64";
       par.index_position = "1";
@@ -1272,8 +1272,8 @@ namespace eosio { namespace ibc {
       par.scope = account.to_string();
       par.table = N(peerchainm);
       par.table_key = "peerchain_name";
-      par.lower_bound = to_string(peerchain_name.value);
-      par.upper_bound = to_string(peerchain_name.value + 1);
+      par.lower_bound = to_string(peerchain_name.to_uint64_t());
+      par.upper_bound = to_string(peerchain_name.to_uint64_t() + 1);
       par.limit = 1;
       par.key_type = "i64";
       par.index_position = "1";
