@@ -4004,6 +4004,7 @@ namespace eosio { namespace ibc {
       if ( range.first == 0 ){   // range.first == 0 means cashtrxs is empty, range.second shoule also be 0
          for( const auto& t : local_origtrxs.get<by_id>( ) ) {
             if ( t.block_num <= last_anchor_block_num && t.anchor_block_num != 0 ){
+               if ( t.trx_id == token_contract->last_origtrx_pushed ){ orig_trxs_to_push.clear(); }
                orig_trxs_to_push.push_back( t );
             } else { break; }
          }
@@ -4017,6 +4018,7 @@ namespace eosio { namespace ibc {
                ++it;
                while ( it != local_origtrxs.end() ){
                   if ( it->block_num <= last_anchor_block_num && it->anchor_block_num != 0 ){
+                     if ( it->trx_id == token_contract->last_origtrx_pushed ){ orig_trxs_to_push.clear(); }
                      orig_trxs_to_push.push_back( *it );
                   } else { break; }
                   ++it;
@@ -4027,6 +4029,7 @@ namespace eosio { namespace ibc {
                it = local_origtrxs.project<0>(it_blk_num);
                while ( it != local_origtrxs.end() ){
                   if ( it->block_num <= last_anchor_block_num && it->anchor_block_num != 0 ){
+                     if ( it->trx_id == token_contract->last_origtrx_pushed ){ orig_trxs_to_push.clear(); }
                      orig_trxs_to_push.push_back( *it );
                   } else { break; }
                   ++it;
@@ -4061,6 +4064,7 @@ namespace eosio { namespace ibc {
             } FC_LOG_AND_DROP()
          } else {
             force_forward = true;
+            token_contract->last_origtrx_pushed = to_push.back().trx_id;
          }
       }
 
