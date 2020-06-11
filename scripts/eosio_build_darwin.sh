@@ -182,13 +182,13 @@
 	printf "\\n\\tChecking clang in CommandLineTools for MacOS.\\n"
 	which clang | grep CommandLineTools 1> /dev/null
 	ISCMDCLANG=$?
-	if [ ${ISCMDCLANG} -ne 0 ]; then
+# 	if [ ${ISCMDCLANG} -ne 0 ]; then
 # 		printf "\\tPlease use the Apple clang version 11.0.0 at least.\\n"
 # 		printf "\\tIf installed, please change the PATH to use it\\n"
 # 		printf "\\tOr download v11.3.1 from: https://developer.apple.com/download/more/. \\n"
 # 		printf "\\tExiting now.\\n\\n"
 # 		exit 1;
-	fi
+# 	fi
 	
 	printf "\\n\\tChecking boost library installation.\\n"
 	BVERSION=$( grep "#define BOOST_VERSION" "/usr/local/include/boost/version.hpp" 2>/dev/null | tail -1 | tr -s ' ' | cut -d\  -f3 )

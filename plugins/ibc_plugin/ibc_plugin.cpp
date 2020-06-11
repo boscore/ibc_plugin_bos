@@ -1508,6 +1508,7 @@ namespace eosio { namespace ibc {
             par.memo = "memo";
             actions.push_back(par);
          } else {
+            continue;
             elog("internal error, failed to get transfer action infomation from packed_trx_receipt");
             break;
          }
@@ -4034,6 +4035,8 @@ namespace eosio { namespace ibc {
          } else { ilog("internal error, failed to get cash transaction information of seq_num ${n}",("n",range.second)); }
       }
 
+      bool force_forward = false;
+
       if ( ! orig_trxs_to_push.empty() ){
          std::vector<ibc_trx_rich_info> to_push;
          if ( orig_trxs_to_push.size() > max_push_orig_trxs_per_time ){
@@ -4056,6 +4059,8 @@ namespace eosio { namespace ibc {
             try {
                token_contract->push_cash_trxs( to_push, range.second + 1 );
             } FC_LOG_AND_DROP()
+         } else {
+            force_forward = true;
          }
       }
 
@@ -4105,7 +4110,7 @@ namespace eosio { namespace ibc {
       bool orig_b = false, cash_b = false;
 
       // --- check local_origtrxs ---
-      if ( orig_trxs_to_push.empty() || orig_trxs_to_push.back().trx_id == token_contract->last_origtrx_pushed ){
+      if ( orig_trxs_to_push.empty() || orig_trxs_to_push.back().trx_id == token_contract->last_origtrx_pushed || force_forward ){
          orig_b = true;
       }
 
@@ -4125,7 +4130,7 @@ namespace eosio { namespace ibc {
 
       // --- summary ---
       if ( ! (reached_min_length && orig_b && cash_b ) ){
-         idump((reached_min_length)(orig_b)(cash_b));
+         idump((reached_min_length)(orig_b)(cash_b)(force_forward));
          return;
       }
 
