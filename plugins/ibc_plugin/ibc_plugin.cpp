@@ -4250,7 +4250,7 @@ namespace eosio { namespace ibc {
          hub_transfer_params par;
          par.from          = hgs.hub_account;
          par.to            = token_contract->get_account();
-         par.quantity      = hub_trx.mini_to_quantity;
+         par.quantity      = hub_trx.from_quantity;
          par.orig_trx_id   = hub_trx.orig_trx_id;
          par.worker        = relay;
          par.memo          = hub_trx.orig_pure_memo;
