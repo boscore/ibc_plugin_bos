@@ -1317,7 +1317,7 @@ namespace eosio { namespace ibc {
       par.table = N(hubtrxs);
       par.table_key = "id";
       par.lower_bound = to_string(id);
-      par.upper_bound = "";
+      par.upper_bound = ""; // to last
       par.limit = 1;
       par.key_type = "i64";
       par.index_position = "1";
@@ -4217,9 +4217,9 @@ namespace eosio { namespace ibc {
       }
 
       auto range = token_contract->get_table_hubtrxs_id_range();
-      if ( range == range_type() ){
+      /*if ( range == range_type() ){
          return;
-      }
+      }*/
 
       //ilog("hub step 2");
       /// --- hub_trx_table ---
@@ -4228,11 +4228,11 @@ namespace eosio { namespace ibc {
 
 
       while(1) {
-         /// idump((next_index));
          auto hub_trx_opt = token_contract->get_table_hubtrxs_info_by_lower_id( next_index );
          if ( hub_trx_opt.valid() ){
-            hub_trx_table.emplace_back( *hub_trx_opt );
-           next_index = hub_trx_opt->cash_seq_num + 1;
+            idump((next_index));
+            hub_trx_table.push_back( *hub_trx_opt );
+            next_index = hub_trx_opt->id + 1;
          } else {
             break;
          }
@@ -4243,7 +4243,8 @@ namespace eosio { namespace ibc {
       std::vector<hub_transfer_params>  need_transfers;
 
       for( const auto& hub_trx : hub_trx_table ){
-         if ( hub_trx.hub_trx_id != transaction_id_type() ){
+         //if ( hub_trx.hub_trx_id != transaction_id_type() ){
+         if ( hub_trx.hub_trx_time_slot != 0 ){
             continue;
          }
 
@@ -4265,7 +4266,7 @@ namespace eosio { namespace ibc {
             continue;
          }
 
-         need_transfers.emplace_back( par );
+         need_transfers.push_back( par );
       }
 
       //ilog("hub step 4");

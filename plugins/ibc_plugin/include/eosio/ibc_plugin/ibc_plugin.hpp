@@ -189,7 +189,7 @@ namespace eosio { namespace ibc {
     };
 
    struct  hub_trx_info {
-      uint64_t              cash_seq_num;
+      uint64_t              id;
       uint64_t              cash_time_slot;
       name                  from_chain;
       name                  from_account;
@@ -247,7 +247,7 @@ FC_REFLECT( eosio::ibc::cashconfirm_action_params, (from_chain)(cash_trx_id)(cas
 FC_REFLECT( eosio::ibc::memo_info_type, (receiver)(chain)(notes) )
 
 FC_REFLECT( eosio::ibc::hub_globals, (is_open)(hub_account)(unfinished_trxs) )
-FC_REFLECT( eosio::ibc::hub_trx_info, (cash_seq_num)(cash_time_slot)(from_chain)(from_account)(from_quantity)
+FC_REFLECT( eosio::ibc::hub_trx_info, (id)(cash_time_slot)(from_chain)(from_account)(from_quantity)
             (mini_to_quantity)(orig_trx_id)(to_chain)(to_account)(orig_pure_memo)(to_quantity)(fee_receiver)(hub_trx_id)
             (hub_trx_time_slot)(forward_times)(backward_times) )
 FC_REFLECT( eosio::ibc::hub_transfer_params, (from)(to)(quantity)(account)(chain)(orig_trx_id)(worker)(memo) )
