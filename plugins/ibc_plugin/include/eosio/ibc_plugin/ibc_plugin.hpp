@@ -218,7 +218,23 @@ namespace eosio { namespace ibc {
       string                  memo;
    };
 
-}}
+   // ---- proxy related ----
+   struct proxy_trx_info {
+      uint64_t             id;
+      transaction_id_type  orig_trx_id;
+      uint64_t             block_time_slot;
+      name                 token_contract;
+      name                 orig_from;
+      name                 to;
+      asset                quantity;
+      string               orig_memo;
+   };
+
+   struct proxy_struct {
+      name proxy;
+   };
+
+   }}
 
 FC_REFLECT( eosio::ibc::connection_status, (peer)(connecting)(syncing)(last_handshake) )
 
@@ -251,3 +267,5 @@ FC_REFLECT( eosio::ibc::hub_trx_info, (id)(cash_time_slot)(from_chain)(from_acco
             (mini_to_quantity)(orig_trx_id)(to_chain)(to_account)(orig_pure_memo)(to_quantity)(fee_receiver)(hub_trx_id)
             (hub_trx_time_slot)(forward_times)(backward_times) )
 FC_REFLECT( eosio::ibc::hub_transfer_params, (from)(to)(quantity)(account)(chain)(orig_trx_id)(worker)(memo) )
+FC_REFLECT( eosio::ibc::proxy_trx_info, (id)(orig_trx_id)(block_time_slot)(token_contract)(orig_from)(to)(quantity)(orig_memo) )
+FC_REFLECT( eosio::ibc::proxy_struct, (proxy))

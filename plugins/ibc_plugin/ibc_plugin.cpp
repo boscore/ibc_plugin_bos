@@ -164,6 +164,7 @@ namespace eosio { namespace ibc {
       fc::sha256                    node_id;
 
       bool                          hub_process_enabled = false;
+      bool                          proxy_process_enabled = false;
 
       ibc_transaction_index         local_origtrxs;
       ibc_transaction_index         local_cashtrxs;
@@ -240,6 +241,7 @@ namespace eosio { namespace ibc {
 
       void ibc_core_checker( );
       void ibc_hub_checker( );
+      void ibc_proxy_checker( );
       void start_ibc_core_timer( );
 
       void connection_monitor(std::weak_ptr<connection> from_connection);
@@ -960,16 +962,23 @@ namespace eosio { namespace ibc {
       range_type                             get_table_cashtrxs_seq_num_range( bool raw = false );
       optional<cash_trx_info>                get_table_cashtrxs_trx_info_by_seq_num( uint64_t seq_num );
       optional<global_state_ibc_token>       get_global_state_singleton();
+      name                                   get_proxy_account();
       optional<peer_chain_state_ibc_token>   get_peer_chain_state();
       optional<peer_chain_mutable_ibc_token> get_peer_chain_mutable();
 
       // hub related
       optional<hub_globals>                  get_hub_global_singleton();
       range_type                             get_table_hubtrxs_id_range();
+      range_type                             get_table_proxytrxs_id_range( name proxy_contract );
       optional<hub_trx_info>                 get_table_hubtrxs_info_by_lower_id( uint64_t id );
+      optional<proxy_trx_info>               get_table_proxytrxs_info_by_lower_id( name proxy_contract, uint64_t id );
       void push_hub_trxs_recurse( int index, const std::shared_ptr<std::vector<hub_transfer_params>>& params );
       void push_hub_trxs( const std::vector<hub_transfer_params>& params );
 
+      void push_proxy_trxs_recurse(int index, const std::shared_ptr<std::vector<transfer_action_type>>& params, name proxy_account);
+      void push_proxy_trxs( const std::vector<transfer_action_type>& params, name proxy_account );
+      void push_proxy_mv2trash_trxs_recurse(int index, const std::shared_ptr<std::vector<transaction_id_type>>& params, name proxy_account);
+      void push_proxy_mv2trash_trxs( const std::vector<transaction_id_type>& trx_ids, name proxy_account );
       // other
       optional<transaction>            get_transaction( std::vector<char> packed_trx_receipt );
       optional<transfer_action_type>   get_original_action_params( std::vector<char> packed_trx_receipt, transaction_id_type* trx_id_ptr = nullptr );
@@ -1002,6 +1011,30 @@ namespace eosio { namespace ibc {
    name ibc_token_contract::get_account(){
       return account;
    }
+
+   string get_value_str_by_key_str(const string& src, const string& key_str ){
+      string src_str = src;
+      string value_str;
+      auto pos = src_str.find( key_str );
+      if ( pos == std::string::npos ){ return string(); }
+
+      src_str = src_str.substr(pos + key_str.length());
+      src_str = trim( src_str );
+      pos = src_str.find("=");
+      if ( pos == std::string::npos ){ return string(); }
+
+      src_str = src_str.substr(1);
+      src_str = trim( src_str );
+      pos = src_str.find(' ');
+      if ( pos == std::string::npos ){
+         value_str = src_str;
+      } else {
+         value_str = src_str.substr(0,pos);
+      }
+
+      return value_str;
+   }
+
 
    optional<memo_info_type> ibc_token_contract::get_memo_info( const string& memo_str ){
 
@@ -1233,6 +1266,21 @@ namespace eosio { namespace ibc {
       return optional<global_state_ibc_token>();
    }
 
+   name ibc_token_contract::get_proxy_account(){
+      auto p = get_singleton_kvo( account, account, N(proxy) );
+      if ( p.valid() ){
+         auto obj = *p;
+         fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
+
+         proxy_struct result;
+         try {
+            fc::raw::unpack( ds, result );
+            return result.proxy;
+         } FC_LOG_AND_DROP()
+      }
+      return name();
+   }
+
    optional<peer_chain_state_ibc_token> ibc_token_contract::get_peer_chain_state() {
       auto peerchain_name = peer_chain_name();
       if ( peerchain_name == name() ){
@@ -1309,6 +1357,10 @@ namespace eosio { namespace ibc {
       return get_table_primary_key_range( account, account, N(hubtrxs) );
    }
 
+   range_type ibc_token_contract::get_table_proxytrxs_id_range( name proxy_contract ){
+      return get_table_primary_key_range( proxy_contract, proxy_contract, N(proxytrxs) );
+   }
+
    optional<hub_trx_info> ibc_token_contract::get_table_hubtrxs_info_by_lower_id( uint64_t id ){
       chain_apis::read_only::get_table_rows_params par;
       par.json = true;  // must be true
@@ -1329,6 +1381,28 @@ namespace eosio { namespace ibc {
          }
       } FC_LOG_AND_DROP()
       return optional<hub_trx_info>();
+   }
+
+   optional<proxy_trx_info> ibc_token_contract::get_table_proxytrxs_info_by_lower_id( name proxy_contract, uint64_t id ){
+      chain_apis::read_only::get_table_rows_params par;
+      par.json = true;  // must be true
+      par.code = proxy_contract;
+      par.scope = proxy_contract.to_string();
+      par.table = N(proxytrxs);
+      par.table_key = "id";
+      par.lower_bound = to_string(id);
+      par.upper_bound = ""; // to last
+      par.limit = 1;
+      par.key_type = "i64";
+      par.index_position = "1";
+
+      try {
+         auto result = my_impl->chain_plug->get_read_only_api().get_table_rows( par );
+         if ( result.rows.size() != 0 ){
+            return result.rows.front().as<proxy_trx_info>();
+         }
+      } FC_LOG_AND_DROP()
+      return optional<proxy_trx_info>();
    }
 
    void ibc_token_contract::push_hub_trxs_recurse( int index, const std::shared_ptr<std::vector<hub_transfer_params>>& params ){
@@ -1385,6 +1459,68 @@ namespace eosio { namespace ibc {
          auto params_copy = std::make_shared<std::vector<hub_transfer_params>>(actions.begin(), actions.end());
          push_hub_trxs_recurse( 0, params_copy );
       } FC_LOG_AND_DROP()
+   }
+
+
+   void ibc_token_contract::push_proxy_trxs_recurse(int index, const std::shared_ptr<std::vector<transfer_action_type>>& params, name proxy_account){
+      auto next = [=](const fc::static_variant<fc::exception_ptr, chain_apis::read_write::push_transaction_results>& result) {
+         if (result.contains<fc::exception_ptr>()) {
+            try {
+               result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
+            } FC_LOG_AND_DROP()
+            transaction_id_type orig_trxid {get_value_str_by_key_str(params->at(index).memo, "orig_trxid")};
+            elog("push proxy transaction failed, orig_trx_id ${id}, index ${i}",("id", orig_trxid.str())("i",index));
+         } else {
+            auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
+            fc_dlog(logger,"pushed proxy transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+         }
+
+         int next_index = index + 1;
+         if (next_index < params->size()) {
+            push_proxy_trxs_recurse( next_index, params, proxy_account );
+         } else {
+            fc_dlog(logger,"all ${sum} proxy transactions have tried to push",("sum",params->size()));
+         }
+      };
+
+      auto par = params->at(index);
+
+      auto actn = get_action( proxy_account, N(transfer), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+            ("from",       par.from)
+            ("to",         par.to)
+            ("quantity",   par.quantity)
+            ("memo",       par.memo));
+
+      if ( ! actn.valid() ){
+         elog("get cash action failed");
+         return;
+      }
+
+      auto trx_opt = generate_signed_transaction_from_action( *actn );
+      if ( ! trx_opt.valid() ){
+         elog("generate_signed_transaction_from_action failed");
+         return;
+      }
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
+   }
+
+   void ibc_token_contract::push_proxy_trxs( const std::vector<transfer_action_type>& params, name proxy_account ){
+      std::vector<transfer_action_type> actions = params;
+      if ( actions.empty() ){return;}
+
+      try {
+         EOS_ASSERT( actions.size() <= 1000, too_many_tx_at_once, "Attempt to push too many transactions at once" );
+         auto params_copy = std::make_shared<std::vector<transfer_action_type>>(actions.begin(), actions.end());
+         push_proxy_trxs_recurse( 0, params_copy , proxy_account);
+      } FC_LOG_AND_DROP()
+   }
+
+   void ibc_token_contract::push_proxy_mv2trash_trxs_recurse(int index, const std::shared_ptr<std::vector<transaction_id_type>>& params, name proxy_account){
+
+   }
+
+   void ibc_token_contract::push_proxy_mv2trash_trxs( const std::vector<transaction_id_type>& trx_ids, name proxy_account ){
+
    }
 
    optional<transaction> ibc_token_contract::get_transaction( std::vector<char> packed_trx_receipt ){
@@ -4276,6 +4412,80 @@ namespace eosio { namespace ibc {
       }
    }
 
+   void ibc_plugin_impl::ibc_proxy_checker( ){
+      //ilog("prxy step 1");
+      auto head_tslot = get_head_tslot();
+
+      static name proxy_account;
+      if ( proxy_account == name() ){
+         proxy_account = token_contract->get_proxy_account();
+         return;
+      }
+
+      auto range = token_contract->get_table_proxytrxs_id_range( proxy_account );
+      if ( range == range_type() ){
+         return;
+      }
+
+      //ilog("proxy step 2");
+      /// --- proxy_trx_table ---
+      std::vector<proxy_trx_info> proxy_trx_table;
+      uint64_t next_index = range.first;
+
+      while(1) {
+         auto proxy_trx_opt = token_contract->get_table_proxytrxs_info_by_lower_id( proxy_account, next_index );
+         if ( proxy_trx_opt.valid() ){
+            idump((next_index));
+            proxy_trx_table.push_back( *proxy_trx_opt );
+            next_index = proxy_trx_opt->id + 1;
+         } else {
+            break;
+         }
+      }
+
+      //ilog("proxy step 3");
+      /// --- need_transfers ---
+      std::vector<transfer_action_type>   need_transfers;
+      std::vector<transaction_id_type>    need_mvtotrash;
+
+      static const string     key_orig_trxid = "orig_trxid";
+      static const string     key_orig_from = "orig_from";
+      static const uint32_t   three_minutes =  3 * 60 * 2;
+      static const uint32_t   half_day =  2 * 3600 * 12;
+
+      for( const auto& proxy_trx : proxy_trx_table ){
+
+         transfer_action_type par;
+         par.from = proxy_account;
+
+         if ( head_tslot - proxy_trx.block_time_slot < three_minutes ){ // forward transfer
+            par.to            = token_contract->get_account();
+            par.quantity      = proxy_trx.quantity;
+            par.memo          = proxy_trx.orig_memo + " " +
+                                key_orig_trxid + "=" + proxy_trx.orig_trx_id.str() + " " +
+                                key_orig_from + "=" + proxy_trx.orig_from.to_string();
+         } else if ( head_tslot - proxy_trx.block_time_slot > half_day ){ // backward rollback
+            need_mvtotrash.push_back(proxy_trx.orig_trx_id);
+            continue;
+         } else {
+            par.to            = proxy_trx.orig_from;
+            par.quantity      = proxy_trx.quantity;
+            par.memo          = "rollback transaction: " + proxy_trx.orig_trx_id.str();
+         }
+
+         need_transfers.push_back( par );
+      }
+
+      //ilog("proxy step 4");
+      /// --- push trxs ---
+      if ( need_transfers.size() ){
+         token_contract->push_proxy_trxs( need_transfers, proxy_account);
+      }
+
+//      if ( need_mvtotrash.size() ){
+//         token_contract->push_proxy_mv2trash_trxs( need_transfers, proxy_account );
+//      }
+   }
 
    void ibc_plugin_impl::start_ibc_core_timer( ){
 
@@ -4289,6 +4499,9 @@ namespace eosio { namespace ibc {
                ibc_core_checker();
                if ( hub_process_enabled ){
                   ibc_hub_checker();
+               }
+               if ( proxy_process_enabled ){
+                  ibc_proxy_checker();
                }
             }
          } FC_LOG_AND_DROP()
@@ -4516,6 +4729,7 @@ namespace eosio { namespace ibc {
          ( "ibc-listen-endpoint", bpo::value<string>()->default_value( "0.0.0.0:5678" ), "The actual host:port used to listen for incoming ibc connections.")
          ( "ibc-server-address", bpo::value<string>(), "An externally accessible host:port for identifying this node. Defaults to ibc-listen-endpoint.")
          ( "ibc-hub-process-enable", bpo::value<bool>()->default_value(true), "True to make the ibc_plugin pushing hub transactios automatically.")
+         ( "ibc-proxy-process-enable", bpo::value<bool>()->default_value(true), "True to make the ibc_plugin pushing proxy transactios automatically.")
          ( "ibc-agent-name", bpo::value<string>()->default_value("\"EOSIO IBC Agent\""), "The name supplied to identify this node amongst the peers.")
          ( "ibc-peer-chain-id", bpo::value<string>()->default_value(""), "The peer chain's chain id")
          ( "ibc-peer-address", bpo::value<vector<string>>()->composing(), "The public endpoint of a peer node to connect to. Use multiple ibc-peer-address options as needed to compose a network.")
@@ -4670,6 +4884,7 @@ namespace eosio { namespace ibc {
          peer_log_format = options.at( "ibc-log-format" ).as<string>();
 
          my->hub_process_enabled = options.at( "ibc-hub-process-enable" ).as<bool>();
+         my->proxy_process_enabled = options.at( "ibc-proxy-process-enable" ).as<bool>();
 
          my->chain_plug = app().find_plugin<chain_plugin>();
          EOS_ASSERT( my->chain_plug, chain::missing_chain_plugin_exception, "missing chain plugin");
